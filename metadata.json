@@ -1,0 +1,6 @@
+{
+  "name": "Nemuri",
+  "description": "Next-generation Material 3 Jetpack Compose manga reader with GitHub extensions, universal backups, and AI library tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

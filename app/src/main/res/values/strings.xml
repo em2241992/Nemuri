@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Nemuri</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_extensions">Extensions</string>
+    <string name="nav_ai_studio">Enhance</string>
+    <string name="nav_backups">Backups</string>
+    <string name="nav_settings">Engine &amp; Settings</string>
+    <string name="search_library_hint">Fast FTS4 search titles, alt titles, authors, tags…</string>
+    <string name="customize_library">Customize View</string>
+    <string name="add_manga">Add / Check &amp; Swap</string>
+    <string name="ai_fix_it">AI Fix-It</string>
+    <string name="duplicate_manager">Duplicate Manager</string>
+    <string name="ai_upscaler">AI Image Upscaler</string>
+    <string name="backup_restore_title">Universal Backup &amp; Restore</string>
+    <string name="extensions_zero_builtin">DMCA-Compliant External Extension Mode: Zero built-in sources shipped by default.</string>
+</resources>

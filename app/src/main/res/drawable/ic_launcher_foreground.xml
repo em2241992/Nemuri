@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Open Manga Book Silhouette with Crimson Ink Page Accent -->
+    <path
+        android:fillColor="#FFFF3366"
+        android:pathData="M30,32 C39,30 47,33 54,38 C61,33 69,30 78,32 L78,74 C69,72 61,75 54,80 C47,75 39,72 30,74 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M34,36 C41,34.5 47.5,37 52.5,41 L52.5,73 C47.5,69 41,66.5 34,68 Z" />
+    <path
+        android:fillColor="#FFE2E8F0"
+        android:pathData="M74,36 C67,34.5 60.5,37 55.5,41 L55.5,73 C60.5,69 67,66.5 74,68 Z" />
+    <path
+        android:fillColor="#FF6366F1"
+        android:pathData="M67,26 L70,33 L77,36 L70,39 L67,46 L64,39 L57,36 L64,33 Z" />
+</vector>

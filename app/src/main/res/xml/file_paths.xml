@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path
+        name="extensions_cache"
+        path="extensions/" />
+    <files-path
+        name="extension_descriptors"
+        path="extension_descriptors/" />
+    <files-path
+        name="cbz_vault"
+        path="cbz_vault/" />
+    <external-files-path
+        name="offline_downloads"
+        path="downloads/" />
+</paths>
