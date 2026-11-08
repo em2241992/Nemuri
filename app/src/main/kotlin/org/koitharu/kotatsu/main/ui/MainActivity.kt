@@ -12,6 +12,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -85,6 +91,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -222,6 +229,7 @@ fun KotatsuNeoRootApp(
 	val showAiEngineSettingsSheet by viewModel.showAiEngineSettingsSheet.collectAsStateWithLifecycle()
 	val mergedSourcesByMangaId by viewModel.mergedSourcesByMangaId.collectAsStateWithLifecycle()
 	val repairAuditLog by viewModel.repairAuditLog.collectAsStateWithLifecycle()
+	val debugSandboxEnabled by viewModel.debugSandboxEnabled.collectAsStateWithLifecycle()
 	val aiCoreStatus by viewModel.nemuriAiCoreEngine.status.collectAsStateWithLifecycle()
 	val latestGitHubUpdate by GitHubUpdateChecker.latestUpdate.collectAsStateWithLifecycle()
 	val isUpdateDismissed by GitHubUpdateChecker.dismissedForSession.collectAsStateWithLifecycle()
@@ -558,40 +566,6 @@ fun KotatsuNeoRootApp(
 					}
 
 					Column(modifier = Modifier.weight(1f)) {
-						// Floating Status Notification Banner
-						AnimatedVisibility(visible = statusBanner != null) {
-							Surface(
-								color = MaterialTheme.colorScheme.primaryContainer,
-								shape = RoundedCornerShape(10.dp),
-								modifier = Modifier
-									.fillMaxWidth()
-									.padding(horizontal = 16.dp, vertical = 6.dp)
-									.testTag("status_notification_banner"),
-							) {
-								Row(
-									modifier = Modifier
-										.fillMaxWidth()
-										.padding(horizontal = 12.dp, vertical = 6.dp),
-									verticalAlignment = Alignment.CenterVertically,
-								) {
-									Text(
-										text = statusBanner.orEmpty(),
-										style = MaterialTheme.typography.bodySmall,
-										fontWeight = FontWeight.Medium,
-										color = MaterialTheme.colorScheme.onPrimaryContainer,
-										modifier = Modifier.weight(1f),
-									)
-									IconButton(onClick = viewModel::clearStatusBanner) {
-										Icon(
-											imageVector = Icons.Default.Close,
-											contentDescription = "Dismiss notification",
-											tint = MaterialTheme.colorScheme.onPrimaryContainer,
-										)
-									}
-								}
-							}
-						}
-
 						Box(modifier = Modifier.fillMaxSize()) {
 							if (isSettingsDirectOpen || currentTab == AppNavTab.BACKUPS_DB) {
 								BackupsAndSettingsScreen(
@@ -664,6 +638,10 @@ fun KotatsuNeoRootApp(
 									libraryItems = allItems,
 									onMigrateSingleSource = viewModel::migrateSingleMangaSource,
 									onMigrateBatchSources = viewModel::migrateBatchMangaSources,
+									debugSandboxEnabled = debugSandboxEnabled,
+									onSetDebugSandboxEnabled = viewModel::setDebugSandboxEnabled,
+									onPurgeLegacyMockData = viewModel::purgeLegacyCacheAndResetMockState,
+									onTestBottomCapsuleToast = viewModel::triggerTestBottomCapsuleToast,
 									onBackToLibrary = {
 										isSettingsDirectOpen = false
 										currentTab = AppNavTab.LIBRARY
@@ -821,40 +799,70 @@ fun KotatsuNeoRootApp(
 					}
 				}
 
-				// Bottom Toast Notification for GitHub Commit Sync
+				// Floating Bottom-Center Capsule Toast Overlay (replaces top-of-screen banner)
 				val installToastMessage by GitHubUpdateChecker.installToastMessage.collectAsStateWithLifecycle()
+				val activeBottomToastMessage = statusBanner ?: installToastMessage
+				val bottomToastEasing = remember { CubicBezierEasing(0.22f, 1f, 0.36f, 1f) }
+				LaunchedEffect(statusBanner) {
+					if (statusBanner != null) {
+						kotlinx.coroutines.delay(2600L)
+						viewModel.clearStatusBanner()
+					}
+				}
 				LaunchedEffect(installToastMessage) {
 					if (installToastMessage != null) {
-						kotlinx.coroutines.delay(3800L)
+						kotlinx.coroutines.delay(2600L)
 						GitHubUpdateChecker.clearInstallToast()
 					}
 				}
 				AnimatedVisibility(
-					visible = installToastMessage != null,
+					visible = activeBottomToastMessage != null,
+					enter = fadeIn(tween(240, easing = bottomToastEasing)) +
+						slideInVertically(
+							animationSpec = tween(240, easing = bottomToastEasing),
+							initialOffsetY = { it / 2 },
+						),
+					exit = fadeOut(tween(200, easing = bottomToastEasing)) +
+						slideOutVertically(
+							animationSpec = tween(200, easing = bottomToastEasing),
+							targetOffsetY = { it / 2 },
+						),
 					modifier = Modifier
 						.align(Alignment.BottomCenter)
 						.navigationBarsPadding()
-						.padding(bottom = 86.dp, start = 16.dp, end = 16.dp),
+						.padding(bottom = 92.dp, start = 16.dp, end = 16.dp)
+						.zIndex(9999f),
 				) {
 					Surface(
-						color = Color(0xFF133840),
-						shape = RoundedCornerShape(12.dp),
-						shadowElevation = 10.dp,
+						color = Color(0xFF232830),
+						shape = RoundedCornerShape(999.dp),
+						shadowElevation = 16.dp,
 						modifier = Modifier
-							.clickable { GitHubUpdateChecker.clearInstallToast() }
-							.testTag("github_update_toast_pill"),
+							.widthIn(max = 360.dp)
+							.clickable {
+								viewModel.clearStatusBanner()
+								GitHubUpdateChecker.clearInstallToast()
+							}
+							.testTag("bottom_capsule_toast_pill"),
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+							modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
 							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(8.dp),
+							horizontalArrangement = Arrangement.spacedBy(10.dp),
 						) {
+							NemuriBrandLogo(
+								modifier = Modifier
+									.size(20.dp)
+									.clip(RoundedCornerShape(6.dp)),
+							)
 							Text(
-								text = installToastMessage.orEmpty(),
+								text = activeBottomToastMessage.orEmpty(),
 								style = MaterialTheme.typography.labelLarge,
-								fontFamily = JetBrainsMonoFamily,
-								fontWeight = FontWeight.Bold,
-								color = Color(0xFF5CE1E6),
+								fontWeight = FontWeight.Medium,
+								color = Color(0xFFF1F5F9),
+								maxLines = 1,
+								softWrap = false,
+								overflow = TextOverflow.Ellipsis,
 							)
 						}
 					}

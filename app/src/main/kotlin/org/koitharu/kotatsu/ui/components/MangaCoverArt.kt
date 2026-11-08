@@ -163,6 +163,7 @@ fun MangaReaderPageCanvas(
 	blueBalance: Float = 1f,
 	decodedBitmap: android.graphics.Bitmap? = null,
 	seamlessVerticalStitch: Boolean = false,
+	isDebugMock: Boolean = true,
 	modifier: Modifier = Modifier,
 ) {
 	val effectiveInvert = invertColors || colorFilterPreset == ReaderColorFilterPreset.INVERTED_NIGHT
@@ -214,9 +215,32 @@ fun MangaReaderPageCanvas(
 						image = decodedBitmap.asImageBitmap(),
 						dstOffset = IntOffset.Zero,
 						dstSize = IntSize(w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1)),
-						alpha = if (effectiveInvert) 0.18f else 0.24f,
+						alpha = if (!isDebugMock) {
+							1f
+						} else if (effectiveInvert) {
+							0.18f
+						} else {
+							0.24f
+						},
 					)
 				}
+			}
+			if (!isDebugMock && decodedBitmap != null && !decodedBitmap.isRecycled) {
+				if (showBeforeAfterSplit) {
+					val splitX = w * splitRatio.coerceIn(0.08f, 0.92f)
+					drawRect(
+						color = paperBg.copy(alpha = 0.36f),
+						topLeft = Offset(0f, 0f),
+						size = Size(splitX, h),
+					)
+					drawLine(
+						color = Color(0xFF5CE1E6),
+						start = Offset(splitX, 0f),
+						end = Offset(splitX, h),
+						strokeWidth = 5f,
+					)
+				}
+				return@Canvas
 			}
 			val pad = if (seamlessVerticalStitch) w * 0.035f else w * 0.05f
 			val verticalEdgePad = if (seamlessVerticalStitch) 0f else pad

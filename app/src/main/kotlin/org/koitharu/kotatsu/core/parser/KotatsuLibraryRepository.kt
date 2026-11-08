@@ -38,9 +38,74 @@ data class SqliteEngineDiagnostics(
 	val coveringIndexesCount: Int = 8,
 )
 
+data class DebugMockSeedSpec(
+	val id: Long,
+	val title: String,
+	val altTitle: String?,
+	val author: String,
+	val source: String,
+	val coverSeed: String,
+	val description: String,
+	val tags: List<String>,
+	val categoryId: Long,
+	val totalChapters: Int,
+	val readChapters: Int,
+	val downloadedChapters: Int,
+	val rating: Float,
+	val isBroken: Boolean = false,
+	val healthError: String? = null,
+	val updatedAgoMinutes: Long = 15L,
+	val isDebugMock: Boolean = true,
+)
+
 class KotatsuLibraryRepository(
 	private val db: MangaDatabase,
 ) {
+
+	companion object {
+		val DEBUG_MOCK_MANGA_IDS: Set<Long> = setOf(
+			1001L,
+			1002L,
+			1003L,
+			1004L,
+			1005L,
+			1006L,
+			1007L,
+			1008L,
+			1009L,
+		)
+
+		val DEBUG_MOCK_NORMALIZED_TITLES: Set<String> = setOf(
+			"sousou no frieren",
+			"frieren beyond journeys end",
+			"dungeon meshi",
+			"delicious in dungeon",
+			"chainsaw man",
+			"berserk",
+			"solo leveling",
+			"omniscient readers viewpoint",
+			"jujutsu kaisen",
+			"vagabond",
+			"dandadan",
+			"sakamoto days",
+			"monster",
+			"vinland saga",
+			"akira 35th anniversary box set cbz",
+		)
+
+		fun isDebugMockTitle(rawTitle: String): Boolean {
+			val norm = TitleNormalizer.normalize(rawTitle).lowercase()
+			if (norm in DEBUG_MOCK_NORMALIZED_TITLES) return true
+			return DEBUG_MOCK_NORMALIZED_TITLES.any { mock -> norm.contains(mock) }
+		}
+
+		fun isDebugMockEntity(manga: MangaEntity): Boolean {
+			if (manga.id in DEBUG_MOCK_MANGA_IDS) return true
+			if (manga.url.startsWith("https://ext.kotatsuneo.app/manga/")) return true
+			if (manga.coverUrl.startsWith("studio_cover://") && isDebugMockTitle(manga.title)) return true
+			return false
+		}
+	}
 
 	fun observeLibraryItems(): Flow<List<LibraryMangaItem>> = combine(
 		db.getMangaDao().observeAllMangaWithTags(),
@@ -87,6 +152,7 @@ class KotatsuLibraryRepository(
 				addedAt = favs.minOfOrNull { it.createdAt } ?: 0L,
 				newChaptersCount = track?.newChapters ?: unread,
 				languageCode = lang,
+				isDebugMock = isDebugMockEntity(m),
 			)
 		}
 	}.conflate().distinctUntilChanged()
@@ -589,17 +655,179 @@ class KotatsuLibraryRepository(
 	}
 
 	/**
-	 * Seeds the Kotatsu v28 database on first launch with external extension repositories,
-	 * categories, healthy external manga, cross-source duplicates (for testing 1-by-1 & En Masse deduplication),
-	 * and broken legacy entries (for testing DropSauce AI Fix-It).
+	 * Dedicated Debug Sandbox dataset function encapsulating all sample/test manga series.
+	 * Strictly isolated behind Debug Sandbox Mode (Default: OFF in production UI).
 	 */
-	suspend fun ensureSeeded() = withContext(Dispatchers.IO) {
-		if (db.getMangaDao().getAllWithTags().isNotEmpty()) return@withContext
+	fun getDebugMockDataset(): List<DebugMockSeedSpec> = listOf(
+		DebugMockSeedSpec(
+			id = 1001L,
+			title = "Sousou no Frieren",
+			altTitle = "Frieren: Beyond Journey's End",
+			author = "Kanehito Yamada, Tsukasa Abe",
+			source = "EXT:MangaDex (Mihon EN)",
+			coverSeed = "frieren",
+			description = "The adventure is over but life goes on for an elf mage just beginning to learn what living is all about.",
+			tags = listOf("Fantasy", "Adventure", "Slice of Life", "Drama"),
+			categoryId = 1L,
+			totalChapters = 30,
+			readChapters = 28,
+			downloadedChapters = 6,
+			rating = 0.98f,
+			updatedAgoMinutes = 12L,
+			isDebugMock = true,
+		),
+		// Intentional Cross-Source Duplicate #1 (Frieren on Bato.to with fewer chapters)
+		DebugMockSeedSpec(
+			id = 1002L,
+			title = "Frieren: Beyond Journey's End",
+			altTitle = "Sousou no Frieren",
+			author = "Kanehito Yamada, Tsukasa Abe",
+			source = "EXT:Bato.to (Mihon EN)",
+			coverSeed = "frieren_alt",
+			description = "After a ten-year quest to defeat the Demon King alongside the hero Himmel, the elven mage Frieren embarks on a new journey across the continent to understand human mortality and the fleeting bonds of time.",
+			tags = listOf("Fantasy", "Adventure", "Magic"),
+			categoryId = 2L,
+			totalChapters = 24,
+			readChapters = 30.coerceAtMost(24),
+			downloadedChapters = 0,
+			rating = 0.95f,
+			updatedAgoMinutes = 240L,
+			isDebugMock = true,
+		),
+		DebugMockSeedSpec(
+			id = 1003L,
+			title = "Dungeon Meshi (Delicious in Dungeon)",
+			altTitle = "ダンジョン飯",
+			author = "Ryoko Kui",
+			source = "EXT:ComicK (Mihon Multi)",
+			coverSeed = "dungeon_meshi",
+			description = "After the Golden Kingdom is sunk underground by an insane magician, Laios and his party cook monsters to survive the labyrinth.",
+			tags = listOf("Fantasy", "Comedy", "Gourmet", "Seinen"),
+			categoryId = 1L,
+			totalChapters = 28,
+			readChapters = 28,
+			downloadedChapters = 10,
+			rating = 0.97f,
+			updatedAgoMinutes = 45L,
+			isDebugMock = true,
+		),
+		// Intentional Duplicate #2 (Dungeon Meshi on Kotatsu IPC Provider)
+		DebugMockSeedSpec(
+			id = 1004L,
+			title = "Delicious in Dungeon [Dungeon Meshi]",
+			altTitle = "Dungeon Meshi",
+			author = "Ryoko Kui",
+			source = "EXT:Kotatsu IPC Provider",
+			coverSeed = "dungeon_meshi",
+			description = "After the Golden Kingdom is sunk underground by an insane magician, adventurer Laios and his party descend into the dungeon labyrinth—cooking and eating monsters to survive and rescue his sister Falin.",
+			tags = listOf("Fantasy", "Gourmet", "Dungeon"),
+			categoryId = 2L,
+			totalChapters = 19,
+			readChapters = 12,
+			downloadedChapters = 2,
+			rating = 0.94f,
+			updatedAgoMinutes = 520L,
+			isDebugMock = true,
+		),
+		// Broken Series #1 -> Ready for Source Fix-It!
+		DebugMockSeedSpec(
+			id = 1005L,
+			title = "Berserk [Legacy Source Broken]",
+			altTitle = "ベルセルク",
+			author = "Kentaro Miura",
+			source = "DEAD:BuiltInKotatsuParser",
+			coverSeed = "berserk",
+			description = "A lone mercenary named Guts, branded for sacrifice and wielding the colossal Dragon Slayer greatsword, battles apostles across a dark medieval world.",
+			tags = listOf("Dark Fantasy", "Seinen", "Action"),
+			categoryId = 2L,
+			totalChapters = 20,
+			readChapters = 18,
+			downloadedChapters = 0,
+			rating = 0.99f,
+			isBroken = true,
+			healthError = "Built-in Kotatsu parser deprecated & removed — Tap Fix-It to migrate to EXT:MangaDex",
+			updatedAgoMinutes = 90L,
+			isDebugMock = true,
+		),
+		// Broken Series #2 -> Ready for Source Fix-It!
+		DebugMockSeedSpec(
+			id = 1006L,
+			title = "Omniscient Reader's Viewpoint",
+			altTitle = "ORV / 전지적 독자 시점",
+			author = "Sing N Song, Sleepy-C",
+			source = "DEAD:AsuraLegacyMirror",
+			coverSeed = "orv",
+			description = "Kim Dokja is the sole reader of the web novel 'Three Ways to Survive in a Ruined World'. When the real world suddenly merges with the novel's apocalyptic scenarios, only he knows how the story unfolds.",
+			tags = listOf("Webtoon", "Action", "Fantasy", "Apocalyptic"),
+			categoryId = 3L,
+			totalChapters = 16,
+			readChapters = 11,
+			downloadedChapters = 3,
+			rating = 0.98f,
+			isBroken = true,
+			healthError = "HTTP 403 Cloudflare / Domain Moved — Tap Fix-It to migrate to healthy extension",
+			updatedAgoMinutes = 30L,
+			isDebugMock = true,
+		),
+		DebugMockSeedSpec(
+			id = 1007L,
+			title = "Chainsaw Man (Part 2)",
+			altTitle = "チェンソーマン",
+			author = "Tatsuki Fujimoto",
+			source = "EXT:MangaDex (Mihon EN)",
+			coverSeed = "chainsaw",
+			description = "Denji and Asa Mitaka navigate devils, prophecies, and high school chaos in Tokyo.",
+			tags = listOf("Action", "Supernatural", "Dark Comedy", "Shounen"),
+			categoryId = 1L,
+			totalChapters = 26,
+			readChapters = 21,
+			downloadedChapters = 5,
+			rating = 0.96f,
+			updatedAgoMinutes = 5L,
+			isDebugMock = true,
+		),
+		DebugMockSeedSpec(
+			id = 1008L,
+			title = "Solo Leveling: Ragnarok (Webtoon Strip)",
+			altTitle = "나 혼자만 레벨업",
+			author = "Chugong, REDICE Studio",
+			source = "EXT:ComicK (Mihon Multi)",
+			coverSeed = "solo",
+			description = "Full-color vertical webtoon strip ideal for testing Continuous Webtoon Mode, custom scrollbar placement, and 2x AI Super-Resolution.",
+			tags = listOf("Webtoon", "Action", "System", "Fantasy"),
+			categoryId = 3L,
+			totalChapters = 22,
+			readChapters = 15,
+			downloadedChapters = 8,
+			rating = 0.95f,
+			updatedAgoMinutes = 25L,
+			isDebugMock = true,
+		),
+		DebugMockSeedSpec(
+			id = 1009L,
+			title = "Akira — 35th Anniversary Box Set.cbz",
+			altTitle = "アキラ (Local CBZ)",
+			author = "Katsuhiro Otomo",
+			source = "LOCAL:CBZ & ZIP Archive Loader",
+			coverSeed = "akira_cbz",
+			description = "High-resolution local CBZ archive stored in the device vault. Demonstrates zero-latency offline reading and Ink+ AI upscaling.",
+			tags = listOf("Cyberpunk", "Sci-Fi", "Seinen", "Local CBZ"),
+			categoryId = 4L,
+			totalChapters = 12,
+			readChapters = 9,
+			downloadedChapters = 12,
+			rating = 0.99f,
+			updatedAgoMinutes = 180L,
+			isDebugMock = true,
+		),
+	)
 
+	/**
+	 * Ensures default shelf categories and external extension repositories exist without seeding mock manga.
+	 */
+	suspend fun ensureBaseCategoriesAndReposSeeded() = withContext(Dispatchers.IO) {
 		db.withTransaction {
 			val now = System.currentTimeMillis()
-
-			// 1. Categories
 			val categories = listOf(
 				FavouriteCategoryEntity(
 					categoryId = 1,
@@ -640,7 +868,6 @@ class KotatsuLibraryRepository(
 			)
 			db.getFavouritesDao().upsertCategories(categories)
 
-			// 2. Default External Extension Repositories (DMCA-compliant: 0 built-in scrapers)
 			db.getAuxiliaryDao().upsertExtensionRepo(
 				ExtensionRepoEntity(
 					repoId = 1L,
@@ -674,182 +901,17 @@ class KotatsuLibraryRepository(
 					lastSyncedAt = now,
 				),
 			)
+		}
+	}
 
-			// 3. Seed Library Entries
-			data class SeedSpec(
-				val id: Long,
-				val title: String,
-				val altTitle: String?,
-				val author: String,
-				val source: String,
-				val coverSeed: String,
-				val description: String,
-				val tags: List<String>,
-				val categoryId: Long,
-				val totalChapters: Int,
-				val readChapters: Int,
-				val downloadedChapters: Int,
-				val rating: Float,
-				val isBroken: Boolean = false,
-				val healthError: String? = null,
-				val updatedAgoMinutes: Long = 15L,
-			)
-
-			val seeds = listOf(
-				SeedSpec(
-					id = 1001L,
-					title = "Sousou no Frieren",
-					altTitle = "Frieren: Beyond Journey's End",
-					author = "Kanehito Yamada, Tsukasa Abe",
-					source = "EXT:MangaDex (Mihon EN)",
-					coverSeed = "frieren",
-					description = "The adventure is over but life goes on for an elf mage just beginning to learn what living is all about.",
-					tags = listOf("Fantasy", "Adventure", "Slice of Life", "Drama"),
-					categoryId = 1L,
-					totalChapters = 30,
-					readChapters = 28,
-					downloadedChapters = 6,
-					rating = 0.98f,
-					updatedAgoMinutes = 12L,
-				),
-				// Intentional Cross-Source Duplicate #1 (Frieren on Bato.to with fewer chapters)
-				SeedSpec(
-					id = 1002L,
-					title = "Frieren: Beyond Journey's End",
-					altTitle = "Sousou no Frieren",
-					author = "Kanehito Yamada, Tsukasa Abe",
-					source = "EXT:Bato.to (Mihon EN)",
-					coverSeed = "frieren_alt",
-					description = "After a ten-year quest to defeat the Demon King alongside the hero Himmel, the elven mage Frieren embarks on a new journey across the continent to understand human mortality and the fleeting bonds of time.",
-					tags = listOf("Fantasy", "Adventure", "Magic"),
-					categoryId = 2L,
-					totalChapters = 24,
-					readChapters = 30.coerceAtMost(24),
-					downloadedChapters = 0,
-					rating = 0.95f,
-					updatedAgoMinutes = 240L,
-				),
-				SeedSpec(
-					id = 1003L,
-					title = "Dungeon Meshi (Delicious in Dungeon)",
-					altTitle = "ダンジョン飯",
-					author = "Ryoko Kui",
-					source = "EXT:ComicK (Mihon Multi)",
-					coverSeed = "dungeon_meshi",
-					description = "After the Golden Kingdom is sunk underground by an insane magician, Laios and his party cook monsters to survive the labyrinth.",
-					tags = listOf("Fantasy", "Comedy", "Gourmet", "Seinen"),
-					categoryId = 1L,
-					totalChapters = 28,
-					readChapters = 28,
-					downloadedChapters = 10,
-					rating = 0.97f,
-					updatedAgoMinutes = 45L,
-				),
-				// Intentional Duplicate #2 (Dungeon Meshi on Kotatsu IPC Provider)
-				SeedSpec(
-					id = 1004L,
-					title = "Delicious in Dungeon [Dungeon Meshi]",
-					altTitle = "Dungeon Meshi",
-					author = "Ryoko Kui",
-					source = "EXT:Kotatsu IPC Provider",
-					coverSeed = "dungeon_meshi",
-					description = "After the Golden Kingdom is sunk underground by an insane magician, adventurer Laios and his party descend into the dungeon labyrinth—cooking and eating monsters to survive and rescue his sister Falin.",
-					tags = listOf("Fantasy", "Gourmet", "Dungeon"),
-					categoryId = 2L,
-					totalChapters = 19,
-					readChapters = 12,
-					downloadedChapters = 2,
-					rating = 0.94f,
-					updatedAgoMinutes = 520L,
-				),
-				// Broken Series #1 -> Ready for Source Fix-It!
-				SeedSpec(
-					id = 1005L,
-					title = "Berserk [Legacy Source Broken]",
-					altTitle = "ベルセルク",
-					author = "Kentaro Miura",
-					source = "DEAD:BuiltInKotatsuParser",
-					coverSeed = "berserk",
-					description = "A lone mercenary named Guts, branded for sacrifice and wielding the colossal Dragon Slayer greatsword, battles apostles across a dark medieval world.",
-					tags = listOf("Dark Fantasy", "Seinen", "Action"),
-					categoryId = 2L,
-					totalChapters = 20,
-					readChapters = 18,
-					downloadedChapters = 0,
-					rating = 0.99f,
-					isBroken = true,
-					healthError = "Built-in Kotatsu parser deprecated & removed — Tap Fix-It to migrate to EXT:MangaDex",
-					updatedAgoMinutes = 90L,
-				),
-				// Broken Series #2 -> Ready for Source Fix-It!
-				SeedSpec(
-					id = 1006L,
-					title = "Omniscient Reader's Viewpoint",
-					altTitle = "ORV / 전지적 독자 시점",
-					author = "Sing N Song, Sleepy-C",
-					source = "DEAD:AsuraLegacyMirror",
-					coverSeed = "orv",
-					description = "Kim Dokja is the sole reader of the web novel 'Three Ways to Survive in a Ruined World'. When the real world suddenly merges with the novel's apocalyptic scenarios, only he knows how the story unfolds.",
-					tags = listOf("Webtoon", "Action", "Fantasy", "Apocalyptic"),
-					categoryId = 3L,
-					totalChapters = 16,
-					readChapters = 11,
-					downloadedChapters = 3,
-					rating = 0.98f,
-					isBroken = true,
-					healthError = "HTTP 403 Cloudflare / Domain Moved — Tap Fix-It to migrate to healthy extension",
-					updatedAgoMinutes = 30L,
-				),
-				SeedSpec(
-					id = 1007L,
-					title = "Chainsaw Man (Part 2)",
-					altTitle = "チェンソーマン",
-					author = "Tatsuki Fujimoto",
-					source = "EXT:MangaDex (Mihon EN)",
-					coverSeed = "chainsaw",
-					description = "Denji and Asa Mitaka navigate devils, prophecies, and high school chaos in Tokyo.",
-					tags = listOf("Action", "Supernatural", "Dark Comedy", "Shounen"),
-					categoryId = 1L,
-					totalChapters = 26,
-					readChapters = 21,
-					downloadedChapters = 5,
-					rating = 0.96f,
-					updatedAgoMinutes = 5L,
-				),
-				SeedSpec(
-					id = 1008L,
-					title = "Solo Leveling: Ragnarok (Webtoon Strip)",
-					altTitle = "나 혼자만 레벨업",
-					author = "Chugong, REDICE Studio",
-					source = "EXT:ComicK (Mihon Multi)",
-					coverSeed = "solo",
-					description = "Full-color vertical webtoon strip ideal for testing Continuous Webtoon Mode, custom scrollbar placement, and 2x AI Super-Resolution.",
-					tags = listOf("Webtoon", "Action", "System", "Fantasy"),
-					categoryId = 3L,
-					totalChapters = 22,
-					readChapters = 15,
-					downloadedChapters = 8,
-					rating = 0.95f,
-					updatedAgoMinutes = 25L,
-				),
-				SeedSpec(
-					id = 1009L,
-					title = "Akira — 35th Anniversary Box Set.cbz",
-					altTitle = "アキラ (Local CBZ)",
-					author = "Katsuhiro Otomo",
-					source = "LOCAL:CBZ & ZIP Archive Loader",
-					coverSeed = "akira_cbz",
-					description = "High-resolution local CBZ archive stored in the device vault. Demonstrates zero-latency offline reading and Ink+ AI upscaling.",
-					tags = listOf("Cyberpunk", "Sci-Fi", "Seinen", "Local CBZ"),
-					categoryId = 4L,
-					totalChapters = 12,
-					readChapters = 9,
-					downloadedChapters = 12,
-					rating = 0.99f,
-					updatedAgoMinutes = 180L,
-				),
-			)
-
+	/**
+	 * Injects the Debug Sandbox dataset into Room when Debug Sandbox Mode is toggled ON.
+	 */
+	suspend fun seedDebugSandboxDataset() = withContext(Dispatchers.IO) {
+		ensureBaseCategoriesAndReposSeeded()
+		db.withTransaction {
+			val now = System.currentTimeMillis()
+			val seeds = getDebugMockDataset()
 			for ((idx, s) in seeds.withIndex()) {
 				val entity = MangaEntity(
 					id = s.id,
@@ -937,7 +999,6 @@ class KotatsuLibraryRepository(
 					),
 				)
 
-				// Populate chapters_history for already-read chapters
 				for (ch in chapters) {
 					if (ch.isRead) {
 						db.getChaptersHistoryDao().upsert(
@@ -950,7 +1011,6 @@ class KotatsuLibraryRepository(
 					}
 				}
 
-				// Populate manga_aliases for cross-source canonical matching
 				if (!s.altTitle.isNullOrBlank()) {
 					val aliasSlug = TitleNormalizer.toNormalizedSlug(s.altTitle)
 					if (aliasSlug.isNotBlank()) {
@@ -966,7 +1026,6 @@ class KotatsuLibraryRepository(
 					}
 				}
 
-				// Populate library_fast_view for O(1) Library grid reads
 				db.getAuxiliaryDao().upsertFastView(
 					LibraryFastViewEntity(
 						mangaId = s.id,
@@ -979,7 +1038,6 @@ class KotatsuLibraryRepository(
 				)
 			}
 
-			// Seed Neko-style Sidecar Merge Links for Frieren (1001 -> 1002) and Dungeon Meshi (1003 -> 1004)
 			db.getAuxiliaryDao().upsertMergeLink(
 				MangaMergeLinkEntity(
 					parentMangaId = 1001L,
@@ -1002,6 +1060,35 @@ class KotatsuLibraryRepository(
 			)
 
 			db.openHelper.writableDatabase.execSQL("INSERT INTO manga_fts(manga_fts) VALUES('rebuild')")
+		}
+	}
+
+	/**
+	 * Scrubs all debug/mock manga entries cached in Room without deleting real user manga.
+	 */
+	suspend fun purgeDebugMockDataset(): Int = withContext(Dispatchers.IO) {
+		val allExisting = db.getMangaDao().getAllWithTags()
+		val mockIds = allExisting
+			.map { it.manga }
+			.filter { isDebugMockEntity(it) }
+			.map { it.id }
+			.toSet() + DEBUG_MOCK_MANGA_IDS
+		removeMangaFromLibrary(mockIds)
+		mockIds.size
+	}
+
+	/**
+	 * Seeds the Kotatsu v28 database. In production UI, `seedDebugMockData` is controlled by
+	 * `debugSandboxEnabled` (strictly defaulting to `false`).
+	 */
+	suspend fun ensureSeeded(seedDebugMockData: Boolean = true) = withContext(Dispatchers.IO) {
+		ensureBaseCategoriesAndReposSeeded()
+		if (seedDebugMockData) {
+			if (db.getMangaDao().getAllWithTags().none { it.manga.id in DEBUG_MOCK_MANGA_IDS }) {
+				seedDebugSandboxDataset()
+			}
+		} else {
+			purgeDebugMockDataset()
 		}
 	}
 

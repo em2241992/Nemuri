@@ -218,6 +218,12 @@ enum class SettingsCategorySection(
 		defaultSubtitle = "Gemini Nano, Google Gemini API, Ollama / OpenAI, Local LiteRT",
 		keywords = listOf("ai", "engine", "llm", "router", "gemini", "nano", "aicore", "ollama", "llama", "openai", "litert", "npu"),
 	),
+	ADVANCED_AND_DEBUG(
+		id = "advanced_debug",
+		title = "Advanced & Debug",
+		defaultSubtitle = "Sandbox mock data, cache purge, reader & toast diagnostics",
+		keywords = listOf("advanced", "debug", "sandbox", "mock", "purge", "cache", "toast", "diagnostics", "test", "placeholder"),
+	),
 	ABOUT(
 		id = "about",
 		title = "About",
@@ -236,6 +242,7 @@ private fun SettingsCategorySection.icon(): ImageVector = when (this) {
 	SettingsCategorySection.CHECK_FOR_NEW_CHAPTERS -> Icons.Outlined.Notifications
 	SettingsCategorySection.SERVICES -> Icons.Outlined.AutoAwesome
 	SettingsCategorySection.AI_ENGINE_ROUTER -> Icons.Default.AutoAwesome
+	SettingsCategorySection.ADVANCED_AND_DEBUG -> Icons.Default.Speed
 	SettingsCategorySection.ABOUT -> Icons.Outlined.Info
 }
 
@@ -302,6 +309,10 @@ fun BackupsAndSettingsScreen(
 	libraryItems: List<LibraryMangaItem> = emptyList(),
 	onMigrateSingleSource: (Long, String, Int) -> Unit = { _, _, _ -> },
 	onMigrateBatchSources: (List<Triple<Long, String, Int>>) -> Unit = {},
+	debugSandboxEnabled: Boolean = false,
+	onSetDebugSandboxEnabled: (Boolean) -> Unit = {},
+	onPurgeLegacyMockData: () -> Unit = {},
+	onTestBottomCapsuleToast: () -> Unit = {},
 	onBackToLibrary: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
@@ -770,11 +781,23 @@ fun BackupsAndSettingsScreen(
 				)
 			}
 
+			SettingsCategorySection.ADVANCED_AND_DEBUG -> {
+				AdvancedAndDebugSettingsSubScreen(
+					debugSandboxEnabled = debugSandboxEnabled,
+					onSetDebugSandboxEnabled = onSetDebugSandboxEnabled,
+					onPurgeLegacyMockData = onPurgeLegacyMockData,
+					onTestBottomCapsuleToast = onTestBottomCapsuleToast,
+				)
+			}
+
 			SettingsCategorySection.ABOUT -> {
 				AboutSettingsSubScreen(
 					sqliteDiagnostics = sqliteDiagnostics,
 					extensionReposCount = extensionRepos.size.coerceAtLeast(1),
 					discoveredExtensionsCount = discoveredExtensions.size.coerceAtLeast(4),
+					onOpenAdvancedAndDebug = {
+						activeSection = SettingsCategorySection.ADVANCED_AND_DEBUG
+					},
 				)
 			}
 		}
@@ -4357,6 +4380,7 @@ private fun AboutSettingsSubScreen(
 	sqliteDiagnostics: SqliteEngineDiagnostics,
 	extensionReposCount: Int,
 	discoveredExtensionsCount: Int,
+	onOpenAdvancedAndDebug: () -> Unit = {},
 ) {
 	val context = LocalContext.current
 	val coroutineScope = rememberCoroutineScope()
@@ -4537,6 +4561,22 @@ private fun AboutSettingsSubScreen(
 								fontSize = 12.sp,
 							)
 						}
+
+						OutlinedButton(
+							onClick = onOpenAdvancedAndDebug,
+							modifier = Modifier.testTag("about_open_advanced_debug_button"),
+						) {
+							Icon(
+								imageVector = Icons.Default.Speed,
+								contentDescription = null,
+								modifier = Modifier.size(16.dp),
+							)
+							Spacer(modifier = Modifier.width(6.dp))
+							Text(
+								text = "Advanced & Debug",
+								fontSize = 12.sp,
+							)
+						}
 					}
 
 					if (isUpToDateWithMain || hasCheckedManually) {
@@ -4568,4 +4608,138 @@ private fun AboutSettingsSubScreen(
 		}
 	}
 }
+
+/**
+ * Settings -> Advanced & Debug Sub-Screen:
+ * - Toggle 1: Enable Debug Sandbox Data (Mock Library & Reader) (Default: OFF)
+ * - Button 2: Purge Legacy Cache & Reset Mock State
+ * - Button 3: Test Bottom Capsule Toast
+ */
+@Composable
+private fun AdvancedAndDebugSettingsSubScreen(
+	debugSandboxEnabled: Boolean,
+	onSetDebugSandboxEnabled: (Boolean) -> Unit,
+	onPurgeLegacyMockData: () -> Unit,
+	onTestBottomCapsuleToast: () -> Unit,
+) {
+	LazyColumn(
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
+		verticalArrangement = Arrangement.spacedBy(14.dp),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
+	) {
+		item {
+			Card(
+				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+				shape = RoundedCornerShape(20.dp),
+			) {
+				Column(
+					modifier = Modifier.padding(18.dp),
+					verticalArrangement = Arrangement.spacedBy(14.dp),
+				) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+							Text(
+								text = "Enable Debug Sandbox Data (Mock Library & Reader)",
+								style = MaterialTheme.typography.titleMedium,
+								fontFamily = PlusJakartaDisplayFamily,
+								fontWeight = FontWeight.Bold,
+							)
+							Spacer(modifier = Modifier.height(4.dp))
+							Text(
+								text = if (debugSandboxEnabled) {
+									"ON: Injects sample manga (Dungeon Meshi, Frieren, Berserk), duplicate pairs, broken source proposals, and geometric test pages for UI testing."
+								} else {
+									"OFF (Default): Library, History, Feed, and Reader reflect only real user-imported series and live extension data."
+								},
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = debugSandboxEnabled,
+							onCheckedChange = onSetDebugSandboxEnabled,
+							modifier = Modifier.testTag("toggle_debug_sandbox_mode_switch"),
+						)
+					}
+
+					Surface(
+						color = if (debugSandboxEnabled) {
+							Color(0xFFF59E0B).copy(alpha = 0.14f)
+						} else {
+							Color(0xFF10B981).copy(alpha = 0.14f)
+						},
+						shape = RoundedCornerShape(999.dp),
+					) {
+						Text(
+							text = if (debugSandboxEnabled) {
+								"Sandbox Mode: ACTIVE (Sample Data Injected)"
+							} else {
+								"Sandbox Mode: OFF (Clean Production State)"
+							},
+							style = MaterialTheme.typography.labelMedium,
+							fontFamily = JetBrainsMonoFamily,
+							fontWeight = FontWeight.Bold,
+							color = if (debugSandboxEnabled) Color(0xFFF59E0B) else Color(0xFF10B981),
+							modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+						)
+					}
+
+					HorizontalDivider()
+
+					Text(
+						text = "Cache & Toast Diagnostics",
+						style = MaterialTheme.typography.titleSmall,
+						fontFamily = PlusJakartaDisplayFamily,
+						fontWeight = FontWeight.Bold,
+					)
+
+					FilledTonalButton(
+						onClick = onPurgeLegacyMockData,
+						modifier = Modifier
+							.fillMaxWidth()
+							.testTag("button_purge_legacy_mock_cache"),
+					) {
+						Icon(
+							imageVector = Icons.Default.Delete,
+							contentDescription = null,
+							modifier = Modifier.size(18.dp),
+						)
+						Spacer(modifier = Modifier.width(8.dp))
+						Text(
+							text = "🧹 Purge Legacy Cache & Reset Mock State",
+							maxLines = 1,
+							softWrap = false,
+						)
+					}
+
+					OutlinedButton(
+						onClick = onTestBottomCapsuleToast,
+						modifier = Modifier
+							.fillMaxWidth()
+							.testTag("button_test_bottom_capsule_toast"),
+					) {
+						Icon(
+							imageVector = Icons.Default.Notifications,
+							contentDescription = null,
+							modifier = Modifier.size(18.dp),
+						)
+						Spacer(modifier = Modifier.width(8.dp))
+						Text(
+							text = "🔔 Test Bottom Capsule Toast",
+							maxLines = 1,
+							softWrap = false,
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
 

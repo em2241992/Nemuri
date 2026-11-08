@@ -788,6 +788,7 @@ fun ReaderScreen(
 							blueBalance = readerConfig.blueBalance,
 							decodedBitmap = if (idx == pageIndex) decodedPageBitmap else null,
 							seamlessVerticalStitch = stitchFlush,
+							isDebugMock = mangaItem.isDebugMock,
 							modifier = Modifier
 								.fillMaxSize()
 								.padding(if (stitchFlush || effectiveAutoCrop) 0.dp else 6.dp),
@@ -989,6 +990,7 @@ fun ReaderScreen(
 							blueBalance = readerConfig.blueBalance,
 							decodedBitmap = if (pageIdx == pageIndex) decodedPageBitmap else null,
 							seamlessVerticalStitch = stitchVerticalPage,
+							isDebugMock = mangaItem.isDebugMock,
 							modifier = Modifier
 								.fillMaxSize()
 								.padding(if (stitchVerticalPage || effectiveAutoCrop) 0.dp else 6.dp),

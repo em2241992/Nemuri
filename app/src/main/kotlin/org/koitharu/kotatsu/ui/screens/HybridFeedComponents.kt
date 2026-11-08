@@ -181,6 +181,12 @@ data class ChapterDiscussionComment(
 private fun getExpandedDiscoveryCatalogPool(
 	extensionCatalog: List<ExtensionCatalogManga>,
 ): List<ExtensionCatalogManga> {
+	if (extensionCatalog.isEmpty()) return emptyList()
+	val hasDebugSandboxItems = extensionCatalog.any {
+		it.title.contains("Frieren", ignoreCase = true) ||
+			it.title.contains("Berserk", ignoreCase = true)
+	}
+	if (!hasDebugSandboxItems) return extensionCatalog
 	val extraSeries = listOf(
 		ExtensionCatalogManga(
 			title = "Witch Hat Atelier (Tongari Boushi no Atelier)",

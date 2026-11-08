@@ -126,41 +126,44 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	private val _showAiEngineSettingsSheet = MutableStateFlow(false)
 	val showAiEngineSettingsSheet: StateFlow<Boolean> = _showAiEngineSettingsSheet.asStateFlow()
 
-	private val _mergedSourcesByMangaId = MutableStateFlow<Map<Long, List<String>>>(
-		mapOf(
-			1001L to listOf("Kotatsu Native"),
-			1002L to listOf("Kotatsu Native"),
-			1003L to listOf("Kotatsu Native"),
-			1007L to listOf("Kotatsu Native"),
-			1008L to listOf("Kotatsu Native"),
+	private val _debugSandboxEnabled = MutableStateFlow(false)
+	val debugSandboxEnabled: StateFlow<Boolean> = _debugSandboxEnabled.asStateFlow()
+
+	private fun getDebugMockMergedSources(): Map<Long, List<String>> = mapOf(
+		1001L to listOf("Kotatsu Native"),
+		1002L to listOf("Kotatsu Native"),
+		1003L to listOf("Kotatsu Native"),
+		1007L to listOf("Kotatsu Native"),
+		1008L to listOf("Kotatsu Native"),
+	)
+
+	private fun getDebugMockRepairAuditLog(): List<RepairAuditLogEntry> = listOf(
+		RepairAuditLogEntry(
+			id = "audit_berserk_1005",
+			mangaId = 1005L,
+			mangaTitle = "Berserk",
+			coverUrl = "https://picsum.photos/seed/berserk/400/600",
+			previousSource = "Legacy Broken Source",
+			newSource = "Kotatsu Native",
+			chaptersPreserved = 20,
+			timestampLabel = "This Session",
+		),
+		RepairAuditLogEntry(
+			id = "audit_orv_1006",
+			mangaId = 1006L,
+			mangaTitle = "Omniscient Reader's Viewpoint",
+			coverUrl = "https://picsum.photos/seed/orv/400/600",
+			previousSource = "Dead Mirror",
+			newSource = "Asura Scans (Mirror)",
+			chaptersPreserved = 16,
+			timestampLabel = "This Session",
 		),
 	)
+
+	private val _mergedSourcesByMangaId = MutableStateFlow<Map<Long, List<String>>>(emptyMap())
 	val mergedSourcesByMangaId: StateFlow<Map<Long, List<String>>> = _mergedSourcesByMangaId.asStateFlow()
 
-	private val _repairAuditLog = MutableStateFlow(
-		listOf(
-			RepairAuditLogEntry(
-				id = "audit_berserk_1005",
-				mangaId = 1005L,
-				mangaTitle = "Berserk",
-				coverUrl = "https://picsum.photos/seed/berserk/400/600",
-				previousSource = "Legacy Broken Source",
-				newSource = "Kotatsu Native",
-				chaptersPreserved = 20,
-				timestampLabel = "This Session",
-			),
-			RepairAuditLogEntry(
-				id = "audit_orv_1006",
-				mangaId = 1006L,
-				mangaTitle = "Omniscient Reader's Viewpoint",
-				coverUrl = "https://picsum.photos/seed/orv/400/600",
-				previousSource = "Dead Mirror",
-				newSource = "Asura Scans (Mirror)",
-				chaptersPreserved = 16,
-				timestampLabel = "This Session",
-			),
-		),
-	)
+	private val _repairAuditLog = MutableStateFlow<List<RepairAuditLogEntry>>(emptyList())
 	val repairAuditLog: StateFlow<List<RepairAuditLogEntry>> = _repairAuditLog.asStateFlow()
 
 	private val _selectedCategoryId = MutableStateFlow<Long?>(null)
@@ -238,9 +241,22 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	val downloadQueue: StateFlow<List<ChapterDownloadTask>> = KotatsuSyncAndDownloadCoordinator.downloadQueue
 
 	private val _extensionCatalog = MutableStateFlow(extensionManager.getExtensionCatalogItems())
-	val extensionCatalogFlow: StateFlow<List<ExtensionCatalogManga>> = _extensionCatalog.asStateFlow()
+	val extensionCatalogFlow: StateFlow<List<ExtensionCatalogManga>> = combine(
+		_extensionCatalog,
+		_debugSandboxEnabled,
+	) { catalog, sandboxEnabled ->
+		if (sandboxEnabled) {
+			catalog
+		} else {
+			catalog.filterNot { KotatsuLibraryRepository.isDebugMockTitle(it.title) }
+		}
+	}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 	val extensionCatalog: List<ExtensionCatalogManga>
-		get() = _extensionCatalog.value
+		get() = if (_debugSandboxEnabled.value) {
+			_extensionCatalog.value
+		} else {
+			_extensionCatalog.value.filterNot { KotatsuLibraryRepository.isDebugMockTitle(it.title) }
+		}
 
 	val categories: StateFlow<List<FavouriteCategoryEntity>> = db.getFavouritesDao().observeCategories()
 		.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -248,8 +264,20 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	val extensionRepos: StateFlow<List<ExtensionRepoEntity>> = db.getAuxiliaryDao().observeExtensionRepos()
 		.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-	private val rawLibraryItems: StateFlow<List<LibraryMangaItem>> = libraryRepo.observeLibraryItems()
-		.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+	private val rawLibraryItems: StateFlow<List<LibraryMangaItem>> = combine(
+		libraryRepo.observeLibraryItems(),
+		_debugSandboxEnabled,
+	) { items, sandboxEnabled ->
+		if (sandboxEnabled) {
+			items
+		} else {
+			items.filterNot {
+				it.isDebugMock ||
+					KotatsuLibraryRepository.isDebugMockEntity(it.manga) ||
+					KotatsuLibraryRepository.isDebugMockTitle(it.manga.title)
+			}
+		}
+	}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 	val availableTags: StateFlow<List<String>> = rawLibraryItems.map { items ->
 		items.flatMap { item -> item.tags.map { it.title } }
@@ -446,13 +474,34 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 					checkAndSwapOnAdd = savedCheckSwap,
 				)
 			}
+			val savedSandbox = prefs.getBoolean("debug_sandbox_enabled", false)
+			_debugSandboxEnabled.value = savedSandbox
+			if (savedSandbox) {
+				_mergedSourcesByMangaId.value = getDebugMockMergedSources()
+				_repairAuditLog.value = getDebugMockRepairAuditLog()
+			} else {
+				_mergedSourcesByMangaId.value = emptyMap()
+				_repairAuditLog.value = emptyList()
+			}
 			val savedBookmarks = prefs.getStringSet("bookmarked_page_keys", null)
 			if (savedBookmarks != null) {
-				_bookmarkedPageKeys.value = savedBookmarks.toSet()
+				val filteredBookmarks = if (savedSandbox) {
+					savedBookmarks.toSet()
+				} else {
+					savedBookmarks.filterNot { key ->
+						val mId = key.substringBefore('_').toLongOrNull()
+						mId != null && mId in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS
+					}.toSet()
+				}
+				_bookmarkedPageKeys.value = filteredBookmarks
+			} else if (savedSandbox) {
+				_bookmarkedPageKeys.value = setOf("1001_0_0", "1002_0_2")
+			} else {
+				_bookmarkedPageKeys.value = emptySet()
 			}
 		}
 		viewModelScope.launch {
-			libraryRepo.ensureSeeded()
+			libraryRepo.ensureSeeded(seedDebugMockData = _debugSandboxEnabled.value)
 			org.koitharu.kotatsu.core.os.pruneOrphanedShortcutIcons(application)
 			refreshDiagnostics()
 		}
@@ -1208,9 +1257,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-	private val _bookmarkedPageKeys = MutableStateFlow<Set<String>>(
-		setOf("1001_0_0", "1002_0_2"),
-	)
+	private val _bookmarkedPageKeys = MutableStateFlow<Set<String>>(emptySet())
 	val bookmarkedPageKeys: StateFlow<Set<String>> = _bookmarkedPageKeys.asStateFlow()
 
 	private val _seriesReaderProfiles = MutableStateFlow<Map<Long, ReaderCustomizationConfig>>(emptyMap())
@@ -1466,6 +1513,79 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			_sqliteDiagnostics.value = libraryRepo.runSqliteDiagnostics()
 		}
+	}
+
+	fun setDebugSandboxEnabled(enabled: Boolean) {
+		_debugSandboxEnabled.value = enabled
+		prefs.edit().putBoolean("debug_sandbox_enabled", enabled).apply()
+		viewModelScope.launch {
+			if (enabled) {
+				libraryRepo.seedDebugSandboxDataset()
+				_mergedSourcesByMangaId.update { existing -> getDebugMockMergedSources() + existing }
+				_repairAuditLog.update { existing ->
+					(getDebugMockRepairAuditLog() + existing).distinctBy { it.id }
+				}
+				_bookmarkedPageKeys.update { existing -> existing + setOf("1001_0_0", "1002_0_2") }
+				refreshDiagnostics()
+				postBanner("Debug Sandbox enabled • Loaded ${libraryRepo.getDebugMockDataset().size} mock series")
+			} else {
+				if (_selectedMangaDetailId.value in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS) {
+					_selectedMangaDetailId.value = null
+				}
+				if (_activeReaderMangaId.value in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS) {
+					_activeReaderMangaId.value = null
+				}
+				libraryRepo.purgeDebugMockDataset()
+				_mergedSourcesByMangaId.update { existing ->
+					existing.filterKeys { it !in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS }
+				}
+				_repairAuditLog.update { existing ->
+					existing.filterNot { it.mangaId in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS }
+				}
+				_bookmarkedPageKeys.update { existing ->
+					existing.filterNot { key ->
+						val mId = key.substringBefore('_').toLongOrNull()
+						mId != null && mId in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS
+					}.toSet()
+				}
+				refreshDiagnostics()
+				postBanner("Debug Sandbox disabled • Showing real library data only")
+			}
+		}
+	}
+
+	fun purgeLegacyCacheAndResetMockState() {
+		_debugSandboxEnabled.value = false
+		val cleanedBookmarks = _bookmarkedPageKeys.value.filterNot { key ->
+			val mId = key.substringBefore('_').toLongOrNull()
+			mId != null && mId in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS
+		}.toSet()
+		_bookmarkedPageKeys.value = cleanedBookmarks
+		prefs.edit()
+			.putBoolean("debug_sandbox_enabled", false)
+			.putStringSet("bookmarked_page_keys", cleanedBookmarks)
+			.apply()
+		if (_selectedMangaDetailId.value in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS) {
+			_selectedMangaDetailId.value = null
+		}
+		if (_activeReaderMangaId.value in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS) {
+			_activeReaderMangaId.value = null
+		}
+		_mergedSourcesByMangaId.update { existing ->
+			existing.filterKeys { it !in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS }
+		}
+		_repairAuditLog.update { existing ->
+			existing.filterNot { it.mangaId in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS }
+		}
+		viewModelScope.launch {
+			libraryRepo.purgeDebugMockDataset()
+			refreshDiagnostics()
+			postBanner("Purged legacy cached mock data")
+		}
+	}
+
+	fun triggerTestBottomCapsuleToast() {
+		postBanner("Bottom toast active • Zero top banner shift")
 	}
 
 	fun clearStatusBanner() {

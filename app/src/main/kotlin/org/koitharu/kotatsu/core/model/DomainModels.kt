@@ -383,6 +383,7 @@ data class LibraryMangaItem(
 	val addedAt: Long,
 	val newChaptersCount: Int,
 	val languageCode: String,
+	val isDebugMock: Boolean = false,
 ) {
 	val totalChapters: Int get() = chapters.size
 
