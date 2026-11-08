@@ -15,7 +15,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.ai.AiLibraryEngine
 import org.koitharu.kotatsu.backups.BackupFormat
 import org.koitharu.kotatsu.backups.BackupRestoreSummary
@@ -526,6 +528,12 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			extensionRepos.collect { repos ->
 				_discoveredExtensions.value = extensionManager.discoverExtensions(repos)
 			}
+		}
+		viewModelScope.launch {
+			withContext(Dispatchers.IO) {
+				extensionManager.fetchLiveCatalogForInstalledSources()
+			}
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 		}
 		viewModelScope.launch {
 			db.getAuxiliaryDao().observePreferences().collect { prefsList ->
@@ -1100,6 +1108,9 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			val repos = extensionRepos.value
 			_discoveredExtensions.value = extensionManager.discoverExtensions(repos)
+			withContext(Dispatchers.IO) {
+				extensionManager.fetchLiveCatalogForInstalledSources()
+			}
 			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			val updatesCount = _discoveredExtensions.value.count { it.hasUpdate }
 			postBanner(

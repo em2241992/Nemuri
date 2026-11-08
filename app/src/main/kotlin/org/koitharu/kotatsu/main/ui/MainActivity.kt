@@ -759,6 +759,7 @@ fun KotatsuNeoRootApp(
 											onInstallOrUpdateExtension = viewModel::installOrUpdateExtension,
 											onUninstallExtension = viewModel::uninstallExtension,
 											debugSandboxEnabled = debugSandboxEnabled,
+											extensionInstallTasks = extensionInstallTasks,
 										)
 									}
 

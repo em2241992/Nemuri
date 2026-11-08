@@ -57,15 +57,18 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.ViewCarousel
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -73,6 +76,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import org.koitharu.kotatsu.core.model.ExtensionInstallStatus
+import org.koitharu.kotatsu.core.model.ExtensionInstallTask
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -178,6 +183,7 @@ fun ExploreScreen(
 	onInstallOrUpdateExtension: (ExternalExtensionInfo) -> Unit = {},
 	onUninstallExtension: (ExternalExtensionInfo) -> Unit = {},
 	debugSandboxEnabled: Boolean = false,
+	extensionInstallTasks: Map<String, ExtensionInstallTask> = emptyMap(),
 	modifier: Modifier = Modifier,
 ) {
 	var currentSubView by remember { mutableStateOf(ExploreSubView.HOME) }
@@ -1199,6 +1205,17 @@ fun ExploreScreen(
 					}
 
 					items(discoveredExtensions, key = { it.id }) { ext ->
+						val task = extensionInstallTasks[ext.pkgName]
+						val isDownloading = task?.status == ExtensionInstallStatus.DOWNLOADING || task?.status == ExtensionInstallStatus.VERIFYING
+						val isInstalled = ext.isInstalled || task?.status == ExtensionInstallStatus.INSTALLED
+						val isCoreSeeded = ext.pkgName in setOf(
+							"eu.kanade.tachiyomi.extension.all.mangadex",
+							"eu.kanade.tachiyomi.extension.en.aquamanga",
+							"eu.kanade.tachiyomi.extension.all.comick",
+							"eu.kanade.tachiyomi.extension.all.batoto",
+							"org.koitharu.kotatsu.local.cbz",
+							"org.koitharu.kotatsu.extension.bridge",
+						)
 						Card(
 							colors = CardDefaults.cardColors(
 								containerColor = MaterialTheme.colorScheme.surface,
@@ -1242,47 +1259,101 @@ fun ExploreScreen(
 										)
 									}
 								}
-								if (!ext.isInstalled) {
-									Button(
-										onClick = { onInstallOrUpdateExtension(ext) },
-										contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-										modifier = Modifier.testTag("explore_install_ext_${ext.id}"),
-									) {
-										Icon(
-											imageVector = Icons.Default.Download,
-											contentDescription = "Install Extension",
-											modifier = Modifier.size(14.dp),
-										)
-										Spacer(modifier = Modifier.width(4.dp))
-										Text("Install", fontSize = 11.sp)
+								when {
+									isDownloading -> {
+										Column(
+											horizontalAlignment = Alignment.End,
+											verticalArrangement = Arrangement.spacedBy(4.dp),
+										) {
+											Row(
+												verticalAlignment = Alignment.CenterVertically,
+												horizontalArrangement = Arrangement.spacedBy(6.dp),
+											) {
+												CircularProgressIndicator(
+													modifier = Modifier.size(14.dp),
+													strokeWidth = 2.dp,
+													color = MaterialTheme.colorScheme.primary,
+												)
+												Text(
+													text = if (task?.status == ExtensionInstallStatus.VERIFYING) "Verifying..." else "${((task?.progressFraction ?: 0.5f) * 100).toInt()}%",
+													fontFamily = JetBrainsMonoFamily,
+													fontSize = 10.sp,
+													color = MaterialTheme.colorScheme.primary,
+												)
+											}
+											LinearProgressIndicator(
+												progress = { task?.progressFraction ?: 0.5f },
+												modifier = Modifier
+													.width(72.dp)
+													.height(3.dp)
+													.clip(RoundedCornerShape(2.dp)),
+											)
+										}
 									}
-								} else if (ext.hasUpdate) {
-									FilledTonalButton(
-										onClick = { onInstallOrUpdateExtension(ext) },
-										contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-										modifier = Modifier.testTag("explore_update_ext_${ext.id}"),
-									) {
-										Icon(
-											imageVector = Icons.Default.CloudDownload,
-											contentDescription = "Update Extension",
-											modifier = Modifier.size(14.dp),
-										)
-										Spacer(modifier = Modifier.width(4.dp))
-										Text("Update", fontSize = 11.sp)
+									!isInstalled -> {
+										Button(
+											onClick = { onInstallOrUpdateExtension(ext) },
+											contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+											modifier = Modifier.testTag("explore_install_ext_${ext.id}"),
+										) {
+											Icon(
+												imageVector = Icons.Default.Download,
+												contentDescription = "Install Extension",
+												modifier = Modifier.size(14.dp),
+											)
+											Spacer(modifier = Modifier.width(4.dp))
+											Text("Install", fontSize = 11.sp)
+										}
 									}
-								} else {
-									Surface(
-										color = Color(0xFF10B981).copy(alpha = 0.16f),
-										shape = RoundedCornerShape(6.dp),
-									) {
-										Text(
-											text = "INSTALLED",
-											fontFamily = JetBrainsMonoFamily,
-											fontWeight = FontWeight.Bold,
-											fontSize = 10.sp,
-											color = Color(0xFF10B981),
-											modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-										)
+									ext.hasUpdate -> {
+										FilledTonalButton(
+											onClick = { onInstallOrUpdateExtension(ext) },
+											contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+											modifier = Modifier.testTag("explore_update_ext_${ext.id}"),
+										) {
+											Icon(
+												imageVector = Icons.Default.CloudDownload,
+												contentDescription = "Update Extension",
+												modifier = Modifier.size(14.dp),
+											)
+											Spacer(modifier = Modifier.width(4.dp))
+											Text("Update", fontSize = 11.sp)
+										}
+									}
+									else -> {
+										Row(
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.spacedBy(4.dp),
+										) {
+											Surface(
+												color = Color(0xFF10B981).copy(alpha = 0.16f),
+												shape = RoundedCornerShape(6.dp),
+											) {
+												Text(
+													text = "INSTALLED",
+													fontFamily = JetBrainsMonoFamily,
+													fontWeight = FontWeight.Bold,
+													fontSize = 10.sp,
+													color = Color(0xFF10B981),
+													modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+												)
+											}
+											if (!isCoreSeeded) {
+												IconButton(
+													onClick = { onUninstallExtension(ext) },
+													modifier = Modifier
+														.size(28.dp)
+														.testTag("explore_uninstall_ext_${ext.id}"),
+												) {
+													Icon(
+														imageVector = Icons.Default.DeleteOutline,
+														contentDescription = "Uninstall Extension",
+														tint = MaterialTheme.colorScheme.error,
+														modifier = Modifier.size(16.dp),
+													)
+												}
+											}
+										}
 									}
 								}
 							}
@@ -1295,7 +1366,7 @@ fun ExploreScreen(
 
 	if (showAddRepoDialog) {
 		var repoName by remember { mutableStateOf("Keiyoushi Mihon Community Repo") }
-		var repoUrl by remember { mutableStateOf("https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json") }
+		var repoUrl by remember { mutableStateOf("https://raw.githubusercontent.com/keiyoushi/extensions/repo") }
 		var repoType by remember { mutableStateOf("MIHON_JSON") }
 
 		AlertDialog(
@@ -1313,7 +1384,7 @@ fun ExploreScreen(
 					OutlinedTextField(
 						value = repoUrl,
 						onValueChange = { repoUrl = it },
-						label = { Text("index.min.json URL or ContentProvider Authority") },
+						label = { Text("Repo URL (Mihon repo or Kotatsu Provider)") },
 						singleLine = true,
 						modifier = Modifier.testTag("repo_url_input"),
 					)
@@ -1321,7 +1392,7 @@ fun ExploreScreen(
 						FilterChip(
 							selected = repoType == "MIHON_JSON",
 							onClick = { repoType = "MIHON_JSON" },
-							label = { Text("Mihon index.min.json") },
+							label = { Text("Mihon Repo (index.pb / JSON)") },
 						)
 						FilterChip(
 							selected = repoType == "KOTATSU_PLUGIN",

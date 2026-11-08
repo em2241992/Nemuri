@@ -309,7 +309,10 @@ class KotatsuStressAndCujTest {
 		val vm = KotatsuNeoViewModel(app)
 		// Default end-user mode (debugSandboxEnabled = false) must have zero dummy catalog data
 		assertFalse(vm.debugSandboxEnabled.value)
-		assertTrue("Default end-user catalogue must contain zero dummy items", vm.extensionCatalog.isEmpty())
+		assertTrue(
+			"Default end-user catalogue must contain zero dummy items",
+			vm.extensionCatalog.none { KotatsuLibraryRepository.isDebugMockTitle(it.title) || it.url.contains(".ext/") },
+		)
 
 		// Enable Debug Sandbox Mode to test hybrid feed & catalog discovery
 		vm.setDebugSandboxEnabled(true)

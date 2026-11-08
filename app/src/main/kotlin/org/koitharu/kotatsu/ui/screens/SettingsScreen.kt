@@ -247,7 +247,7 @@ private fun SettingsCategorySection.icon(): ImageVector = when (this) {
 }
 
 private const val KEIYOUSHI_OFFICIAL_REPO_URL =
-	"https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json"
+	"https://raw.githubusercontent.com/keiyoushi/extensions/repo"
 
 /**
  * Material 3 Settings Screen:
