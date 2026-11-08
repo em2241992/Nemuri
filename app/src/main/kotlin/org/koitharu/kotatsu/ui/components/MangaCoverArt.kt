@@ -155,6 +155,8 @@ fun MangaReaderPageCanvas(
 	colorFilterPreset: ReaderColorFilterPreset = ReaderColorFilterPreset.NONE,
 	brightnessDelta: Float = 0f,
 	contrastDelta: Float = 0f,
+	warmthDelta: Float = 0f,
+	bedtimeDimmerAlpha: Float = 0f,
 	saturation: Float = 1f,
 	redBalance: Float = 1f,
 	greenBalance: Float = 1f,
@@ -163,28 +165,41 @@ fun MangaReaderPageCanvas(
 	modifier: Modifier = Modifier,
 ) {
 	val effectiveInvert = invertColors || colorFilterPreset == ReaderColorFilterPreset.INVERTED_NIGHT
+	val effectiveNemuriBedtime = colorFilterPreset == ReaderColorFilterPreset.NEMURI_BEDTIME
+	val effectiveAiAutoInk = colorFilterPreset == ReaderColorFilterPreset.AI_AUTO_INK_RESTORE
 	val effectiveWarm = warmPaperTint || colorFilterPreset == ReaderColorFilterPreset.WARM_SEPIA
 	val effectiveGray = grayscale || colorFilterPreset == ReaderColorFilterPreset.MONOCHROME_INK || saturation <= 0.15f
 
 	val rawPaperBg = when {
 		effectiveInvert -> Color(0xFF0E1015)
+		effectiveNemuriBedtime -> Color(0xFFE8DEC8) // Warm parchment (#E8DEC8) keeping black ink (#000000) crisp
+		effectiveAiAutoInk -> Color(0xFFFFFFFF) // De-noised clean white paper for AI Auto-Ink Restore
 		colorFilterPreset == ReaderColorFilterPreset.NIGHT_BLUE_LIGHT -> Color(0xFFE6EDF5)
 		effectiveWarm -> Color(0xFFF5EBDC)
 		colorFilterPreset == ReaderColorFilterPreset.CRISP_HIGH_CONTRAST -> Color(0xFFFFFFFF)
 		else -> Color(0xFFFAFAFC)
 	}
 
+	val warmClamp = warmthDelta.coerceIn(-0.4f, 0.6f)
+	val effectiveRed = (redBalance.coerceIn(0.5f, 1.5f) + warmClamp * 0.08f).coerceIn(0.4f, 1.5f)
+	val effectiveGreen = (greenBalance.coerceIn(0.5f, 1.5f) + warmClamp * 0.03f).coerceIn(0.4f, 1.5f)
+	val effectiveBlue = (blueBalance.coerceIn(0.5f, 1.5f) - warmClamp * 0.16f).coerceIn(0.35f, 1.5f)
+
 	val paperBg = Color(
-		red = (rawPaperBg.red * redBalance.coerceIn(0.5f, 1.5f)).coerceIn(0f, 1f),
-		green = (rawPaperBg.green * greenBalance.coerceIn(0.5f, 1.5f)).coerceIn(0f, 1f),
-		blue = (rawPaperBg.blue * blueBalance.coerceIn(0.5f, 1.5f)).coerceIn(0f, 1f),
+		red = (rawPaperBg.red * effectiveRed).coerceIn(0f, 1f),
+		green = (rawPaperBg.green * effectiveGreen).coerceIn(0f, 1f),
+		blue = (rawPaperBg.blue * effectiveBlue).coerceIn(0f, 1f),
 		alpha = 1f,
 	)
 
-	val inkColor = if (effectiveInvert) Color(0xFFF1F5F9) else Color(0xFF111318)
+	val inkColor = when {
+		effectiveInvert -> Color(0xFFF1F5F9)
+		effectiveNemuriBedtime || effectiveAiAutoInk -> Color(0xFF000000)
+		else -> Color(0xFF111318)
+	}
 	val enhancedInkColor = if (effectiveInvert) Color(0xFFFFFFFF) else Color(0xFF000000)
-	val isAiEnhanced = upscaleMode != AiUpscaleMode.OFF
-	val contrastBoost = (1f + contrastDelta.coerceIn(-0.3f, 0.8f)).coerceIn(0.6f, 1.8f)
+	val isAiEnhanced = upscaleMode != AiUpscaleMode.OFF || effectiveAiAutoInk
+	val contrastBoost = (1f + contrastDelta.coerceIn(-0.3f, 0.8f) + if (effectiveAiAutoInk) 0.28f else 0f).coerceIn(0.6f, 1.85f)
 
 	Box(
 		modifier = modifier.background(paperBg),
@@ -204,8 +219,18 @@ fun MangaReaderPageCanvas(
 			}
 			val pad = w * 0.05f
 			val strokeBase = (if (isAiEnhanced) 4.2f else 2.4f) * (0.85f + 0.15f * contrastBoost)
-			val baseAlpha = (if (isAiEnhanced || colorFilterPreset == ReaderColorFilterPreset.CRISP_HIGH_CONTRAST) 0.96f else 0.72f * contrastBoost).coerceIn(0.35f, 1f)
-			val activeInk = (if (isAiEnhanced) enhancedInkColor else inkColor).copy(alpha = baseAlpha)
+			val baseAlpha = (
+				if (
+					isAiEnhanced ||
+					effectiveNemuriBedtime ||
+					colorFilterPreset == ReaderColorFilterPreset.CRISP_HIGH_CONTRAST
+				) {
+					0.98f
+				} else {
+					0.72f * contrastBoost
+				}
+			).coerceIn(0.35f, 1f)
+			val activeInk = (if (isAiEnhanced || effectiveNemuriBedtime) enhancedInkColor else inkColor).copy(alpha = baseAlpha)
 
 			// Panel 1: Top Wide Cinematic Manga Panel
 			val p1Top = pad
@@ -313,24 +338,19 @@ fun MangaReaderPageCanvas(
 			)
 
 			// Before / After AI Upscaler Split Divider Line
-			if (showBeforeAfterSplit && isAiEnhanced) {
-				val splitX = w * splitRatio.coerceIn(0.15f, 0.85f)
-				// Soften left "Before (Raw 1x)" half to visually demonstrate the 1x vs AI Upscaled difference
+			if (showBeforeAfterSplit) {
+				val splitX = w * splitRatio.coerceIn(0.08f, 0.92f)
+				// Soften left "Original (1x)" half to visually demonstrate the Original vs Upscaled difference
 				drawRect(
-					color = paperBg.copy(alpha = 0.32f),
+					color = paperBg.copy(alpha = 0.36f),
 					topLeft = Offset(0f, 0f),
 					size = Size(splitX, h),
 				)
 				drawLine(
-					color = Color(0xFF6366F1),
+					color = Color(0xFF5CE1E6),
 					start = Offset(splitX, 0f),
 					end = Offset(splitX, h),
 					strokeWidth = 5f,
-				)
-				drawCircle(
-					color = Color(0xFF6366F1),
-					radius = 18f,
-					center = Offset(splitX, h * 0.5f),
 				)
 			}
 		}
@@ -348,6 +368,16 @@ fun MangaReaderPageCanvas(
 				modifier = Modifier
 					.fillMaxSize()
 					.background(scrimColor),
+			)
+		}
+
+		// Sub-Zero Bedtime Dimmer Scrim (0% .. 60%) for reading in dark bedrooms
+		val effectiveDimmer = bedtimeDimmerAlpha.coerceIn(0f, 0.60f)
+		if (effectiveDimmer > 0.005f) {
+			Box(
+				modifier = Modifier
+					.fillMaxSize()
+					.background(Color(0xFF0A0907).copy(alpha = effectiveDimmer)),
 			)
 		}
 	}

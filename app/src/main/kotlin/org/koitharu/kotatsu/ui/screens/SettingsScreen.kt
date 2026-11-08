@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,7 +62,9 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.filled.ViewCarousel
@@ -121,21 +125,35 @@ import org.koitharu.kotatsu.core.model.AiUpscaleMode
 import org.koitharu.kotatsu.core.model.AppColorSchemePreset
 import org.koitharu.kotatsu.core.model.AppNavTab
 import org.koitharu.kotatsu.core.model.AppThemeMode
+import org.koitharu.kotatsu.core.model.DefaultFeedViewMode
 import org.koitharu.kotatsu.core.model.ExtensionInstallStatus
 import org.koitharu.kotatsu.core.model.ExtensionInstallTask
 import org.koitharu.kotatsu.core.model.ExternalExtensionInfo
 import org.koitharu.kotatsu.core.model.LibraryDisplayConfig
 import org.koitharu.kotatsu.core.model.LibraryLayoutMode
+import org.koitharu.kotatsu.core.model.LibraryMangaItem
 import org.koitharu.kotatsu.core.model.NavBarStyle
 import org.koitharu.kotatsu.core.model.ReaderColorFilterPreset
 import org.koitharu.kotatsu.core.model.ReaderCustomizationConfig
 import org.koitharu.kotatsu.core.model.ReaderScaleMode
 import org.koitharu.kotatsu.core.model.ReaderStyleMode
+import org.koitharu.kotatsu.core.model.SliderPosition
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.Intent
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.core.parser.SqliteEngineDiagnostics
 import org.koitharu.kotatsu.core.sync.KotatsuSyncAndDownloadCoordinator
 import org.koitharu.kotatsu.main.ui.KotatsuNeoViewModel
+import org.koitharu.kotatsu.ui.components.GitHubUpdateChecker
+import org.koitharu.kotatsu.ui.components.NemuriBrandLogo
+import org.koitharu.kotatsu.ui.components.NemuriGitHubUpdateBanner
+import org.koitharu.kotatsu.ui.components.NemuriPrivacyAndSecurityCard
+import org.koitharu.kotatsu.ui.components.NemuriPrivacySecurityStore
 import org.koitharu.kotatsu.ui.theme.JetBrainsMonoFamily
 import org.koitharu.kotatsu.ui.theme.PlusJakartaDisplayFamily
 import kotlin.math.roundToInt
@@ -194,11 +212,17 @@ enum class SettingsCategorySection(
 		defaultSubtitle = "Suggestions, Tracking, AI Deduplication & Fix-It",
 		keywords = listOf("services", "personal", "personalized", "intelligence", "ai", "suggestions", "sync", "tracking", "anilist", "myanimelist", "mal", "shikimori", "kitsu", "duplicate", "broken"),
 	),
+	AI_ENGINE_ROUTER(
+		id = "ai_engine_router",
+		title = "AI Engine & LLM Router",
+		defaultSubtitle = "Gemini Nano, Google Gemini API, Ollama / OpenAI, Local LiteRT",
+		keywords = listOf("ai", "engine", "llm", "router", "gemini", "nano", "aicore", "ollama", "llama", "openai", "litert", "npu"),
+	),
 	ABOUT(
 		id = "about",
 		title = "About",
-		defaultSubtitle = "1.1.1",
-		keywords = listOf("about", "version", "credits", "license", "update", "kotatsu neo", "1.1.1"),
+		defaultSubtitle = "v1.2 • Build 2801",
+		keywords = listOf("about", "version", "credits", "license", "update", "nemuri", "kotatsu", "1.2", "2801"),
 	),
 }
 
@@ -211,6 +235,7 @@ private fun SettingsCategorySection.icon(): ImageVector = when (this) {
 	SettingsCategorySection.BACKUP_AND_RESTORE -> Icons.Outlined.Restore
 	SettingsCategorySection.CHECK_FOR_NEW_CHAPTERS -> Icons.Outlined.Notifications
 	SettingsCategorySection.SERVICES -> Icons.Outlined.AutoAwesome
+	SettingsCategorySection.AI_ENGINE_ROUTER -> Icons.Default.AutoAwesome
 	SettingsCategorySection.ABOUT -> Icons.Outlined.Info
 }
 
@@ -266,6 +291,17 @@ fun BackupsAndSettingsScreen(
 	onOpenUnknownSourcesSettings: () -> Unit = {},
 	onLaunchApkPackageInstaller: (ExternalExtensionInfo) -> Unit = {},
 	onRefreshFeed: () -> Unit = {},
+	aiEnginePillLabel: String = "AI Engine: Gemini Nano",
+	onOpenAiEngineSettings: () -> Unit = {},
+	useDynamicColor: Boolean = false,
+	onSetUseDynamicColor: (Boolean) -> Unit = {},
+	defaultFeedView: DefaultFeedViewMode = DefaultFeedViewMode.UPDATES,
+	onSetDefaultFeedView: (DefaultFeedViewMode) -> Unit = {},
+	defaultStartupTab: AppNavTab = AppNavTab.LIBRARY,
+	onSetDefaultStartupTab: (AppNavTab) -> Unit = {},
+	libraryItems: List<LibraryMangaItem> = emptyList(),
+	onMigrateSingleSource: (Long, String, Int) -> Unit = { _, _, _ -> },
+	onMigrateBatchSources: (List<Triple<Long, String, Int>>) -> Unit = {},
 	onBackToLibrary: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
@@ -341,7 +377,11 @@ fun BackupsAndSettingsScreen(
 	}
 
 	val sectionSubtitle: (SettingsCategorySection) -> String = { section ->
-		section.defaultSubtitle
+		if (section == SettingsCategorySection.AI_ENGINE_ROUTER) {
+			"${aiEnginePillLabel.removePrefix("AI Engine: ")} • ${section.defaultSubtitle}"
+		} else {
+			section.defaultSubtitle
+		}
 	}
 
 	val geminiContainerColor = if (darkTheme) {
@@ -509,13 +549,14 @@ fun BackupsAndSettingsScreen(
 		when (activeSection) {
 			null -> {
 				LazyColumn(
-					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
+					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
 					verticalArrangement = Arrangement.spacedBy(12.dp),
 					modifier = Modifier
 						.fillMaxSize()
+						.navigationBarsPadding()
 						.testTag("settings_collapsed_root_list"),
 				) {
-					// Single unified Material 3 settings container card (no two-section divide)
+					// Single unified Material 3 settings container card (with AI Engine & LLM Router row below Personalized Intelligence and above About)
 					item(key = "unified_settings_card") {
 						Surface(
 							color = geminiContainerColor,
@@ -530,8 +571,18 @@ fun BackupsAndSettingsScreen(
 										icon = section.icon(),
 										title = section.title,
 										subtitle = sectionSubtitle(section),
-										testTag = "settings_section_${section.id}",
-										onClick = { activeSection = section },
+										testTag = if (section == SettingsCategorySection.AI_ENGINE_ROUTER) {
+											"settings_open_ai_engine_button"
+										} else {
+											"settings_section_${section.id}"
+										},
+										onClick = {
+											if (section == SettingsCategorySection.AI_ENGINE_ROUTER) {
+												onOpenAiEngineSettings()
+											} else {
+												activeSection = section
+											}
+										},
 									)
 									if (idx < filteredCategories.lastIndex) {
 										HorizontalDivider(
@@ -547,20 +598,30 @@ fun BackupsAndSettingsScreen(
 				}
 			}
 
+			SettingsCategorySection.AI_ENGINE_ROUTER -> {
+				onOpenAiEngineSettings()
+				activeSection = null
+			}
+
 			SettingsCategorySection.APPEARANCE -> {
 				AppearanceSettingsSubScreen(
 					darkTheme = darkTheme,
 					pureOledBlack = pureOledBlack,
 					themeMode = themeMode,
 					colorSchemePreset = colorSchemePreset,
+					useDynamicColor = useDynamicColor,
+					defaultFeedView = defaultFeedView,
+					defaultStartupTab = defaultStartupTab,
 					navBarStyle = navBarStyle,
 					enabledNavTabs = enabledNavTabs,
 					displayConfig = displayConfig,
 					appLanguage = appLanguage,
 					onSetThemeMode = onSetThemeMode,
-					onToggleDarkTheme = onToggleDarkTheme,
 					onTogglePureOledBlack = onTogglePureOledBlack,
 					onSetColorSchemePreset = onSetColorSchemePreset,
+					onSetUseDynamicColor = onSetUseDynamicColor,
+					onSetDefaultFeedView = onSetDefaultFeedView,
+					onSetDefaultStartupTab = onSetDefaultStartupTab,
 					onSetNavBarStyle = onSetNavBarStyle,
 					onToggleNavTab = onToggleNavTab,
 					onMoveNavTab = onMoveNavTab,
@@ -601,15 +662,20 @@ fun BackupsAndSettingsScreen(
 						}
 					},
 					onToggleShowNsfw = { showNsfwSources = it },
+					libraryItems = libraryItems,
+					onMigrateSingleSource = onMigrateSingleSource,
+					onMigrateBatchSources = onMigrateBatchSources,
 				)
 			}
 
 			SettingsCategorySection.READER_SETTINGS -> {
 				ReaderSettingsSubScreen(
 					readerConfig = readerConfig,
-					volumeKeysSwitchPages = volumeKeysSwitchPages,
 					onUpdateReaderConfig = onUpdateReaderConfig,
-					onToggleVolumeKeys = { volumeKeysSwitchPages = it },
+					onToggleVolumeKeys = { enabled ->
+						volumeKeysSwitchPages = enabled
+						onUpdateReaderConfig { it.copy(switchPagesWithVolumeKeys = enabled) }
+					},
 				)
 			}
 
@@ -664,9 +730,11 @@ fun BackupsAndSettingsScreen(
 				ServicesSettingsSubScreen(
 					aiSuggestionsEnabled = aiSuggestionsEnabled,
 					displayConfig = displayConfig,
+					readerConfig = readerConfig,
 					enabledTrackers = enabledTrackers,
 					onToggleAiSuggestions = { aiSuggestionsEnabled = it },
 					onUpdateDisplayConfig = onUpdateDisplayConfig,
+					onUpdateReaderConfig = onUpdateReaderConfig,
 					onToggleTracker = { tracker ->
 						enabledTrackers = if (tracker in enabledTrackers) {
 							enabledTrackers - tracker
@@ -1015,10 +1083,9 @@ private fun GeminiInlineSelectorSettingsRow(
 
 /**
  * 1. APPEARANCE SUB-SCREEN
- * - Theme mode (System / Light / Dark)
- * - Pure AMOLED Black mode (#000000)
- * - Color Theme Palette swatches (Kotatsu Teal, Crimson Ink, Mihon Cobalt, Sakura Rose, Royal Amethyst, Amber Gold, Emerald Forest)
- * - Navigation Bar format (Floating Island vs Default Docked) & Active Icons Manager
+ * - Theme mode (Follow system / Light / Dark) + Pure AMOLED Black mode (#000000) (redundant Dark theme switch removed)
+ * - Material You Dynamic Color card + 2-column grid of 10 Themes with 3-dot tonal swatches (Primary, Secondary, Surface)
+ * - Navigation Bar & Floating Island + Default Feed View (Updates | Hub | Gallery | For You) + Default Startup Tab (Library | Feed | Explore)
  * - Default Library List/Grid mode & Language
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -1028,14 +1095,19 @@ private fun AppearanceSettingsSubScreen(
 	pureOledBlack: Boolean,
 	themeMode: AppThemeMode,
 	colorSchemePreset: AppColorSchemePreset,
+	useDynamicColor: Boolean,
+	defaultFeedView: DefaultFeedViewMode,
+	defaultStartupTab: AppNavTab,
 	navBarStyle: NavBarStyle,
 	enabledNavTabs: List<AppNavTab>,
 	displayConfig: LibraryDisplayConfig,
 	appLanguage: String,
 	onSetThemeMode: (AppThemeMode) -> Unit,
-	onToggleDarkTheme: (Boolean) -> Unit,
 	onTogglePureOledBlack: (Boolean) -> Unit,
 	onSetColorSchemePreset: (AppColorSchemePreset) -> Unit,
+	onSetUseDynamicColor: (Boolean) -> Unit,
+	onSetDefaultFeedView: (DefaultFeedViewMode) -> Unit,
+	onSetDefaultStartupTab: (AppNavTab) -> Unit,
 	onSetNavBarStyle: (NavBarStyle) -> Unit,
 	onToggleNavTab: (AppNavTab) -> Unit,
 	onMoveNavTab: (AppNavTab, Boolean) -> Unit,
@@ -1043,11 +1115,13 @@ private fun AppearanceSettingsSubScreen(
 	onSelectLanguage: (String) -> Unit,
 ) {
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
-		// Theme Mode & AMOLED Pure Black Card
+		// Theme Mode & AMOLED Pure Black Card (Redundant Dark theme switch removed)
 		item {
 			Card(
 				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1063,7 +1137,7 @@ private fun AppearanceSettingsSubScreen(
 						color = MaterialTheme.colorScheme.primary,
 					)
 
-					// Segmented-style M3 Theme Mode Pill Cards (System / Light / Dark)
+					// Segmented 3-way M3 Theme Mode Pill Cards (Follow system | Light | Dark)
 					Row(
 						modifier = Modifier.fillMaxWidth(),
 						horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1116,30 +1190,6 @@ private fun AppearanceSettingsSubScreen(
 						}
 					}
 
-					Row(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.SpaceBetween,
-						verticalAlignment = Alignment.CenterVertically,
-					) {
-						Column(modifier = Modifier.weight(1f)) {
-							Text(
-								text = "Dark theme",
-								style = MaterialTheme.typography.titleSmall,
-								fontWeight = FontWeight.SemiBold,
-							)
-							Text(
-								text = "Switch between Warm Archival Paper (Light) and Obsidian Slate (Dark)",
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.onSurfaceVariant,
-							)
-						}
-						Switch(
-							checked = darkTheme,
-							onCheckedChange = onToggleDarkTheme,
-							modifier = Modifier.testTag("toggle_dark_theme_switch"),
-						)
-					}
-
 					HorizontalDivider()
 
 					Row(
@@ -1185,7 +1235,7 @@ private fun AppearanceSettingsSubScreen(
 							checked = pureOledBlack,
 							onCheckedChange = { enabled ->
 								if (enabled && !darkTheme) {
-									onToggleDarkTheme(true)
+									onSetThemeMode(AppThemeMode.DARK)
 								}
 								onTogglePureOledBlack(enabled)
 							},
@@ -1196,7 +1246,7 @@ private fun AppearanceSettingsSubScreen(
 			}
 		}
 
-		// Color Theme Palette Card
+		// Color Theme Palette Card (Material You Dynamic Color + 2-Column 10-Theme Grid with 3-Dot Swatches)
 		item {
 			Card(
 				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1212,71 +1262,178 @@ private fun AppearanceSettingsSubScreen(
 						color = MaterialTheme.colorScheme.primary,
 					)
 					Text(
-						text = "Select an accent color scheme for buttons, badges, and the Floating Island bar",
+						text = "Select Material You Dynamic Color or one of 10 curated accent schemes",
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
 
-					FlowRow(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(10.dp),
-						verticalArrangement = Arrangement.spacedBy(10.dp),
-					) {
-						AppColorSchemePreset.entries.forEach { preset ->
-							val isSelected = colorSchemePreset == preset
-							val swatchColor = Color(
-								if (darkTheme) preset.darkPrimaryHex else preset.lightPrimaryHex,
-							)
-							Surface(
-								onClick = { onSetColorSchemePreset(preset) },
-								color = if (isSelected) {
-									MaterialTheme.colorScheme.primaryContainer
+					// Featured Card: Material You Dynamic Color (Android 12+)
+					Surface(
+						color = if (useDynamicColor) {
+							MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+						} else {
+							MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+						},
+						shape = RoundedCornerShape(16.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.border(
+								width = if (useDynamicColor) 1.5.dp else 1.dp,
+								color = if (useDynamicColor) {
+									MaterialTheme.colorScheme.primary
 								} else {
-									MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+									MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
 								},
 								shape = RoundedCornerShape(16.dp),
-								modifier = Modifier
-									.border(
-										width = if (isSelected) 1.5.dp else 0.dp,
-										color = if (isSelected) swatchColor else Color.Transparent,
-										shape = RoundedCornerShape(16.dp),
-									)
-									.testTag("color_theme_${preset.name.lowercase()}"),
+							),
+					) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 14.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Row(
+								modifier = Modifier.weight(1f),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(12.dp),
 							) {
-								Row(
-									modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-									verticalAlignment = Alignment.CenterVertically,
-									horizontalArrangement = Arrangement.spacedBy(10.dp),
+								Box(
+									modifier = Modifier
+										.size(38.dp)
+										.clip(RoundedCornerShape(12.dp))
+										.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+									contentAlignment = Alignment.Center,
 								) {
-									Box(
+									Icon(
+										imageVector = Icons.Default.AutoAwesome,
+										contentDescription = null,
+										tint = MaterialTheme.colorScheme.primary,
+										modifier = Modifier.size(20.dp),
+									)
+								}
+								Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+									Text(
+										text = "Material You Dynamic Color",
+										style = MaterialTheme.typography.titleSmall,
+										fontWeight = FontWeight.Bold,
+									)
+									Text(
+										text = "Match phone wallpaper & system accent colors automatically (Android 12+)",
+										style = MaterialTheme.typography.bodySmall,
+										fontSize = 11.sp,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+								}
+							}
+							Switch(
+								checked = useDynamicColor,
+								onCheckedChange = onSetUseDynamicColor,
+								modifier = Modifier.testTag("toggle_dynamic_color_switch"),
+							)
+						}
+					}
+
+					// Uniform 2-Column Grid of 10 Themes with 3-Dot Tonal Swatches
+					val themeRows = remember { AppColorSchemePreset.entries.chunked(2) }
+					Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+						themeRows.forEach { rowPresets ->
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(10.dp),
+							) {
+								rowPresets.forEach { preset ->
+									val isSelected = !useDynamicColor && colorSchemePreset == preset
+									val primaryDot = Color(if (darkTheme) preset.darkPrimaryHex else preset.lightPrimaryHex)
+									val secondaryDot = Color(preset.secondarySwatchHex)
+									val surfaceDot = Color(preset.surfaceSwatchHex)
+									Surface(
+										onClick = {
+											if (useDynamicColor) onSetUseDynamicColor(false)
+											onSetColorSchemePreset(preset)
+										},
+										color = if (isSelected) {
+											MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+										} else {
+											MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+										},
+										shape = RoundedCornerShape(16.dp),
 										modifier = Modifier
-											.size(24.dp)
-											.clip(CircleShape)
-											.background(swatchColor),
-										contentAlignment = Alignment.Center,
-									) {
-										if (isSelected) {
-											Icon(
-												imageVector = Icons.Default.Check,
-												contentDescription = "Selected",
-												tint = Color(0xFF041F22),
-												modifier = Modifier.size(14.dp),
+											.weight(1f)
+											.border(
+												width = if (isSelected) 1.5.dp else 1.dp,
+												color = if (isSelected) primaryDot else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+												shape = RoundedCornerShape(16.dp),
 											)
+											.testTag("color_theme_${preset.name.lowercase()}"),
+									) {
+										Column(
+											modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+											verticalArrangement = Arrangement.spacedBy(6.dp),
+										) {
+											Row(
+												modifier = Modifier.fillMaxWidth(),
+												horizontalArrangement = Arrangement.SpaceBetween,
+												verticalAlignment = Alignment.CenterVertically,
+											) {
+												// 3-dot tonal swatch (Primary, Secondary, Surface)
+												Row(
+													horizontalArrangement = Arrangement.spacedBy(4.dp),
+													verticalAlignment = Alignment.CenterVertically,
+												) {
+													Box(
+														modifier = Modifier
+															.size(16.dp)
+															.clip(CircleShape)
+															.background(primaryDot),
+													)
+													Box(
+														modifier = Modifier
+															.size(14.dp)
+															.clip(CircleShape)
+															.background(secondaryDot),
+													)
+													Box(
+														modifier = Modifier
+															.size(14.dp)
+															.clip(CircleShape)
+															.background(surfaceDot)
+															.border(0.8.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape),
+													)
+												}
+												if (isSelected) {
+													Icon(
+														imageVector = Icons.Default.Check,
+														contentDescription = "Selected",
+														tint = primaryDot,
+														modifier = Modifier.size(16.dp),
+													)
+												}
+											}
+											Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+												Text(
+													text = preset.label,
+													style = MaterialTheme.typography.labelLarge,
+													fontWeight = FontWeight.Bold,
+													fontSize = 12.sp,
+													maxLines = 1,
+													overflow = TextOverflow.Ellipsis,
+												)
+												Text(
+													text = preset.subtitle,
+													style = MaterialTheme.typography.bodySmall,
+													fontSize = 10.sp,
+													color = MaterialTheme.colorScheme.onSurfaceVariant,
+													maxLines = 1,
+													overflow = TextOverflow.Ellipsis,
+												)
+											}
 										}
 									}
-									Column {
-										Text(
-											text = preset.label,
-											style = MaterialTheme.typography.labelLarge,
-											fontSize = 12.sp,
-										)
-										Text(
-											text = preset.subtitle,
-											style = MaterialTheme.typography.bodySmall,
-											fontSize = 10.sp,
-											color = MaterialTheme.colorScheme.onSurfaceVariant,
-										)
-									}
+								}
+								if (rowPresets.size == 1) {
+									Spacer(modifier = Modifier.weight(1f))
 								}
 							}
 						}
@@ -1285,7 +1442,7 @@ private fun AppearanceSettingsSubScreen(
 			}
 		}
 
-		// Navigation Bar & Floating Island Customizer
+		// Navigation Bar, Default Feed View & Default Startup Tab Customizer
 		item {
 			Card(
 				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1312,7 +1469,7 @@ private fun AppearanceSettingsSubScreen(
 								fontWeight = FontWeight.Bold,
 							)
 							Text(
-								text = "Choose Floating Island Pill or Classic Docked bar, and reorder tabs",
+								text = "Choose Floating Island Pill or Classic Docked bar, default views, and tab order",
 								style = MaterialTheme.typography.bodySmall,
 								color = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
@@ -1330,6 +1487,90 @@ private fun AppearanceSettingsSubScreen(
 								label = { Text(style.label) },
 								modifier = Modifier.testTag("nav_style_${style.name.lowercase()}"),
 							)
+						}
+					}
+
+					HorizontalDivider()
+
+					// Default Feed View Selector (Updates | Hub | Gallery | For You)
+					Text(
+						text = "DEFAULT FEED VIEW",
+						style = MaterialTheme.typography.labelSmall,
+						color = MaterialTheme.colorScheme.primary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						DefaultFeedViewMode.entries.forEach { feedMode ->
+							val isSelected = defaultFeedView == feedMode
+							Surface(
+								onClick = { onSetDefaultFeedView(feedMode) },
+								color = if (isSelected) {
+									MaterialTheme.colorScheme.primaryContainer
+								} else {
+									MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+								},
+								shape = RoundedCornerShape(12.dp),
+								modifier = Modifier
+									.weight(1f)
+									.testTag("default_feed_view_${feedMode.name.lowercase()}"),
+							) {
+								Text(
+									text = if (isSelected) "${feedMode.label} ★" else feedMode.label,
+									style = MaterialTheme.typography.labelMedium,
+									fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+									color = if (isSelected) {
+										MaterialTheme.colorScheme.onPrimaryContainer
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+									textAlign = TextAlign.Center,
+									maxLines = 1,
+									modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+								)
+							}
+						}
+					}
+
+					// Default Startup Tab Selector (Library | Feed | Explore)
+					Text(
+						text = "DEFAULT STARTUP TAB",
+						style = MaterialTheme.typography.labelSmall,
+						color = MaterialTheme.colorScheme.primary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						listOf(AppNavTab.LIBRARY, AppNavTab.FEED, AppNavTab.EXPLORE).forEach { startTab ->
+							val isSelected = defaultStartupTab == startTab
+							Surface(
+								onClick = { onSetDefaultStartupTab(startTab) },
+								color = if (isSelected) {
+									MaterialTheme.colorScheme.primaryContainer
+								} else {
+									MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+								},
+								shape = RoundedCornerShape(12.dp),
+								modifier = Modifier
+									.weight(1f)
+									.testTag("default_startup_tab_${startTab.id}"),
+							) {
+								Text(
+									text = startTab.label,
+									style = MaterialTheme.typography.labelMedium,
+									fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+									color = if (isSelected) {
+										MaterialTheme.colorScheme.onPrimaryContainer
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+									textAlign = TextAlign.Center,
+									maxLines = 1,
+									modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+								)
+							}
 						}
 					}
 
@@ -1376,7 +1617,7 @@ private fun AppearanceSettingsSubScreen(
 									)
 									Text(
 										text = if (tab == AppNavTab.LIBRARY) {
-											"Primary Landing Screen (Pinned)"
+											"Primary Library Screen (Pinned)"
 										} else if (isEnabled) {
 											"Slot #${indexInBar + 1} in navigation bar"
 										} else {
@@ -1492,6 +1733,7 @@ private fun AppearanceSettingsSubScreen(
 private enum class ExtensionManagerTab(val label: String) {
 	INSTALLED("Installed"),
 	AVAILABLE("Available"),
+	MIGRATE("Migrate"),
 	REPOS("Repos"),
 }
 
@@ -1502,10 +1744,9 @@ private enum class ExtensionSortOrder(val label: String) {
 }
 
 /**
- * 2. EXTENSIONS & REPOSITORIES SUB-SCREEN (DropSauce-Inspired Material 3 Extension Manager)
- * - Segmented tabs: Installed (with Updates badge), Available (Keiyoushi / Kotatsu catalog), Repos
+ * 2. EXTENSIONS & REPOSITORIES SUB-SCREEN
+ * - Segmented tabs: Installed (with Updates badge), Available (Keiyoushi / Kotatsu catalog), Migrate (Per-Series & Batch), Repos
  * - Search filter, Language filter chips, Sorting order (Updates First, Alphabetical, Language), 18+ NSFW toggle
- * - APK / Descriptor Downloader with live progress bar, FileProvider URI sharing, and External Browser APK launcher
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -1528,11 +1769,15 @@ private fun MangaSourcesSettingsSubScreen(
 	onLaunchApkPackageInstaller: (ExternalExtensionInfo) -> Unit,
 	onToggleExtensionEnabled: (String) -> Unit,
 	onToggleShowNsfw: (Boolean) -> Unit,
+	libraryItems: List<LibraryMangaItem> = emptyList(),
+	onMigrateSingleSource: (Long, String, Int) -> Unit = { _, _, _ -> },
+	onMigrateBatchSources: (List<Triple<Long, String, Int>>) -> Unit = {},
 ) {
 	var selectedTab by rememberSaveable { mutableStateOf(ExtensionManagerTab.INSTALLED) }
 	var extSearchQuery by rememberSaveable { mutableStateOf("") }
 	var selectedLang by rememberSaveable { mutableStateOf("ALL") }
 	var sortOrder by rememberSaveable { mutableStateOf(ExtensionSortOrder.UPDATES_FIRST) }
+	var selectedMigrationTargetSource by rememberSaveable { mutableStateOf("Kotatsu Native") }
 
 	val hasKeiyoushi = extensionRepos.any {
 		it.baseUrl.contains("keiyoushi", ignoreCase = true)
@@ -1572,11 +1817,13 @@ private fun MangaSourcesSettingsSubScreen(
 	}
 
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(12.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
-		// Top Segmented Tab Bar: Installed (N) | Available (N) | Repos (N) + Sync Button
+		// Top Segmented Tab Bar: Installed (N) | Available (N) | Migrate (N) | Repos (N)
 		item {
 			Card(
 				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1588,7 +1835,7 @@ private fun MangaSourcesSettingsSubScreen(
 				) {
 					Row(
 						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						horizontalArrangement = Arrangement.spacedBy(6.dp),
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						ExtensionManagerTab.entries.forEach { tab ->
@@ -1596,6 +1843,7 @@ private fun MangaSourcesSettingsSubScreen(
 							val countBadge = when (tab) {
 								ExtensionManagerTab.INSTALLED -> installedList.size
 								ExtensionManagerTab.AVAILABLE -> availableList.size
+								ExtensionManagerTab.MIGRATE -> libraryItems.size
 								ExtensionManagerTab.REPOS -> extensionRepos.size
 							}
 							Surface(
@@ -1611,14 +1859,14 @@ private fun MangaSourcesSettingsSubScreen(
 									.testTag("ext_tab_${tab.name.lowercase()}"),
 							) {
 								Row(
-									modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+									modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
 									horizontalArrangement = Arrangement.Center,
 									verticalAlignment = Alignment.CenterVertically,
 								) {
 									Text(
 										text = "${tab.label} ($countBadge)",
 										style = MaterialTheme.typography.labelLarge,
-										fontSize = 12.sp,
+										fontSize = 11.sp,
 										fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
 										color = if (isSelected) {
 											MaterialTheme.colorScheme.onPrimaryContainer
@@ -1647,8 +1895,7 @@ private fun MangaSourcesSettingsSubScreen(
 						}
 					}
 
-					// Search, Language, Sorting Order & NSFW Filter Controls (for Installed & Available tabs)
-					if (selectedTab != ExtensionManagerTab.REPOS) {
+					if (selectedTab == ExtensionManagerTab.INSTALLED || selectedTab == ExtensionManagerTab.AVAILABLE) {
 						Surface(
 							color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
 							shape = RoundedCornerShape(16.dp),
@@ -1722,7 +1969,6 @@ private fun MangaSourcesSettingsSubScreen(
 							}
 						}
 
-						// Language & Sorting Order Filter Row
 						Row(
 							modifier = Modifier
 								.fillMaxWidth()
@@ -1747,7 +1993,6 @@ private fun MangaSourcesSettingsSubScreen(
 							}
 						}
 
-						// Compact Content Filter & FileProvider Status Bar
 						Row(
 							modifier = Modifier.fillMaxWidth(),
 							horizontalArrangement = Arrangement.SpaceBetween,
@@ -1864,7 +2109,7 @@ private fun MangaSourcesSettingsSubScreen(
 				items(installedList, key = { it.id }) { ext ->
 					val isEnabled = ext.id !in disabledExtensionIds
 					val task = extensionInstallTasks[ext.pkgName]
-					DropSauceExtensionItemCard(
+					KotatsuExtensionItemCard(
 						ext = ext,
 						isEnabled = isEnabled,
 						installTask = task,
@@ -1903,7 +2148,7 @@ private fun MangaSourcesSettingsSubScreen(
 
 				items(availableList, key = { it.id }) { ext ->
 					val task = extensionInstallTasks[ext.pkgName]
-					DropSauceExtensionItemCard(
+					KotatsuExtensionItemCard(
 						ext = ext,
 						isEnabled = false,
 						installTask = task,
@@ -1914,6 +2159,114 @@ private fun MangaSourcesSettingsSubScreen(
 						onShareFileProvider = { onShareExtensionFileProvider(ext) },
 						onLaunchApkPackageInstaller = { onLaunchApkPackageInstaller(ext) },
 					)
+				}
+			}
+
+			ExtensionManagerTab.MIGRATE -> {
+				val targetSources = listOf(
+					"Kotatsu Native",
+					"MangaDex (EN)",
+					"Bato.to Mirror",
+					"ComicK Mirror",
+					"Asura Scans",
+				)
+				item {
+					Card(
+						colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+						shape = RoundedCornerShape(20.dp),
+					) {
+						Column(
+							modifier = Modifier.padding(16.dp),
+							verticalArrangement = Arrangement.spacedBy(12.dp),
+						) {
+							Text(
+								text = "SOURCE MIGRATION WIZARD",
+								style = MaterialTheme.typography.labelSmall,
+								color = MaterialTheme.colorScheme.primary,
+							)
+							Text(
+								text = "Migrate individual or batch library series to another extension while preserving 100% of read chapters, bookmarks, and categories.",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+							Text(
+								text = "Target Destination Source",
+								style = MaterialTheme.typography.titleSmall,
+								fontWeight = FontWeight.SemiBold,
+							)
+							FlowRow(
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+								verticalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								targetSources.forEach { target ->
+									FilterChip(
+										selected = selectedMigrationTargetSource == target,
+										onClick = { selectedMigrationTargetSource = target },
+										label = { Text(target, fontSize = 11.sp) },
+									)
+								}
+							}
+							Button(
+								onClick = {
+									val migrations = libraryItems.map { item ->
+										Triple(item.manga.id, selectedMigrationTargetSource, item.totalChapters.coerceAtLeast(12))
+									}
+									onMigrateBatchSources(migrations)
+								},
+								modifier = Modifier
+									.fillMaxWidth()
+									.testTag("batch_migrate_all_sources_button"),
+							) {
+								Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+								Spacer(modifier = Modifier.width(8.dp))
+								Text("Batch Migrate All (${libraryItems.size}) → $selectedMigrationTargetSource")
+							}
+						}
+					}
+				}
+
+				items(libraryItems, key = { it.manga.id }) { item ->
+					Card(
+						colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+						shape = RoundedCornerShape(16.dp),
+						modifier = Modifier.fillMaxWidth(),
+					) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(14.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = item.manga.title,
+									style = MaterialTheme.typography.titleSmall,
+									fontWeight = FontWeight.Bold,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+								Text(
+									text = "${item.manga.source.removePrefix("EXT:")} → $selectedMigrationTargetSource (${item.totalChapters} ch)",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Spacer(modifier = Modifier.width(8.dp))
+							FilledTonalButton(
+								onClick = {
+									onMigrateSingleSource(
+										item.manga.id,
+										selectedMigrationTargetSource,
+										item.totalChapters.coerceAtLeast(12),
+									)
+								},
+								modifier = Modifier.testTag("migrate_single_${item.manga.id}"),
+							) {
+								Text("Migrate", fontSize = 12.sp)
+							}
+						}
+					}
 				}
 			}
 
@@ -2091,7 +2444,7 @@ private fun MangaSourcesSettingsSubScreen(
 }
 
 @Composable
-private fun DropSauceExtensionItemCard(
+private fun KotatsuExtensionItemCard(
 	ext: ExternalExtensionInfo,
 	isEnabled: Boolean,
 	installTask: ExtensionInstallTask?,
@@ -2255,7 +2608,6 @@ private fun DropSauceExtensionItemCard(
 				}
 			}
 
-			// Live Download & FileProvider Verification Progress
 			if (installTask != null && (installTask.status == ExtensionInstallStatus.DOWNLOADING || installTask.status == ExtensionInstallStatus.VERIFYING)) {
 				Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
 					Row(
@@ -2290,7 +2642,6 @@ private fun DropSauceExtensionItemCard(
 				}
 			}
 
-			// Secondary Action Bar: OS APK PackageInstaller, FileProvider URI Share, GitHub APK URL, Uninstall
 			Row(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalArrangement = Arrangement.SpaceBetween,
@@ -2412,20 +2763,21 @@ private fun DropSauceExtensionItemCard(
 
 /**
  * 3. READER SETTINGS SUB-SCREEN
- * - Read mode, Scale mode, Switch pages, AI Real-Time Upscale default, Color filter & Brightness/Contrast
+ * - Read mode, Scale mode, Switch pages & Bedtime One-Handed Ergonomics, Auto-Incognito for Mature Tags, AI Upscale & Color filter defaults
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderSettingsSubScreen(
 	readerConfig: ReaderCustomizationConfig,
-	volumeKeysSwitchPages: Boolean,
 	onUpdateReaderConfig: ((ReaderCustomizationConfig) -> ReaderCustomizationConfig) -> Unit,
 	onToggleVolumeKeys: (Boolean) -> Unit,
 ) {
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
 		item {
 			Card(
@@ -2477,7 +2829,7 @@ private fun ReaderSettingsSubScreen(
 			}
 		}
 
-		// Switch Pages & Tap Controls
+		// Switch Pages, One-Handed Bedtime Ergonomics & Smart Incognito
 		item {
 			Card(
 				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -2485,10 +2837,10 @@ private fun ReaderSettingsSubScreen(
 			) {
 				Column(
 					modifier = Modifier.padding(16.dp),
-					verticalArrangement = Arrangement.spacedBy(10.dp),
+					verticalArrangement = Arrangement.spacedBy(12.dp),
 				) {
 					Text(
-						text = "SWITCH PAGES & NAVIGATION",
+						text = "SWITCH PAGES, BEDTIME ERGONOMICS & INCOGNITO",
 						style = MaterialTheme.typography.labelSmall,
 						color = MaterialTheme.colorScheme.primary,
 					)
@@ -2500,16 +2852,116 @@ private fun ReaderSettingsSubScreen(
 						Column(modifier = Modifier.weight(1f)) {
 							Text("Switch pages with Volume keys", style = MaterialTheme.typography.titleSmall)
 							Text(
-								"Use Volume Up / Down hardware buttons to flip manga pages",
+								"Use Volume Up / Down hardware buttons to flip pages or scroll Webtoons",
 								style = MaterialTheme.typography.bodySmall,
 								color = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
 						}
 						Switch(
-							checked = volumeKeysSwitchPages,
+							checked = readerConfig.switchPagesWithVolumeKeys,
 							onCheckedChange = onToggleVolumeKeys,
+							modifier = Modifier.testTag("toggle_volume_keys_switch"),
 						)
 					}
+
+					AnimatedVisibility(visible = readerConfig.switchPagesWithVolumeKeys) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(start = 12.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text("Invert Volume keys", style = MaterialTheme.typography.titleSmall)
+								Text(
+									"Volume Up = Next Page, Volume Down = Previous Page",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Switch(
+								checked = readerConfig.invertVolumeKeys,
+								onCheckedChange = { checked ->
+									onUpdateReaderConfig { it.copy(invertVolumeKeys = checked) }
+								},
+								modifier = Modifier.testTag("toggle_invert_volume_keys_switch"),
+							)
+						}
+					}
+
+					HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Show Zoom Buttons (🔍+ / 🔍-)", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Display floating zoom controls aligned beneath vertical page scrubber when Reader HUD is visible",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.showZoomButtons,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(showZoomButtons = checked) }
+							},
+							modifier = Modifier.testTag("toggle_show_zoom_buttons_switch"),
+						)
+					}
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Bedtime One-Handed (Both Lower Edges = Next Page)", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Whether lying on your left or right side in bed, tapping the lower edge under your thumb advances to the next page",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.bedtimeOneHandedTapZones,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(bedtimeOneHandedTapZones = checked) }
+							},
+							modifier = Modifier.testTag("toggle_bedtime_one_handed_tap_zones"),
+						)
+					}
+
+					HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Auto-Incognito for Erotica & Pornographic tags", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Automatically enable Incognito mode when accessing manga tagged Erotica, Pornographic, Smut, or 18+",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.autoIncognitoMatureTags,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(autoIncognitoMatureTags = checked) }
+							},
+							modifier = Modifier.testTag("toggle_auto_incognito_mature_tags_reader"),
+						)
+					}
+
+					HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
 					Row(
 						modifier = Modifier.fillMaxWidth(),
 						horizontalArrangement = Arrangement.SpaceBetween,
@@ -2616,7 +3068,16 @@ private fun ReaderSettingsSubScreen(
 						ReaderColorFilterPreset.entries.forEach { preset ->
 							FilterChip(
 								selected = readerConfig.colorFilterPreset == preset,
-								onClick = { onUpdateReaderConfig { it.copy(colorFilterPreset = preset) } },
+								onClick = {
+									onUpdateReaderConfig {
+										it.copy(
+											colorFilterPreset = preset,
+											warmPaperTint = preset == ReaderColorFilterPreset.NEMURI_BEDTIME || preset == ReaderColorFilterPreset.WARM_SEPIA,
+											grayscale = preset == ReaderColorFilterPreset.MONOCHROME_INK,
+											invertColors = preset == ReaderColorFilterPreset.INVERTED_NIGHT,
+										)
+									}
+								},
 								label = { Text(preset.label) },
 							)
 						}
@@ -2668,9 +3129,11 @@ private fun StorageAndNetworkSettingsSubScreen(
 	onRefreshDiagnostics: () -> Unit,
 ) {
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
 		item {
 			Card(
@@ -2881,9 +3344,11 @@ private fun DownloadsSettingsSubScreen(
 	val downloadQueue by KotatsuSyncAndDownloadCoordinator.downloadQueue.collectAsStateWithLifecycle()
 
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
 		item {
 			Card(
@@ -3093,9 +3558,11 @@ private fun CheckNewChaptersSettingsSubScreen(
 	}
 
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
 		item {
 			Card(
@@ -3219,16 +3686,18 @@ private fun CheckNewChaptersSettingsSubScreen(
 }
 
 /**
- * 7. SERVICES SUB-SCREEN
- * - Suggestions, Cross-Source Check & Swap, Broken Series Banner toggle, and External Tracker Sync
+ * 7. SERVICES / PERSONALIZED INTELLIGENCE SUB-SCREEN
+ * - Personalized recommendations, Auto-Incognito for Mature Tags, Cross-Source Check & Swap, Broken Series Banner toggle, and External Tracker Sync
  */
 @Composable
 private fun ServicesSettingsSubScreen(
 	aiSuggestionsEnabled: Boolean,
 	displayConfig: LibraryDisplayConfig,
+	readerConfig: ReaderCustomizationConfig,
 	enabledTrackers: Set<String>,
 	onToggleAiSuggestions: (Boolean) -> Unit,
 	onUpdateDisplayConfig: ((LibraryDisplayConfig) -> LibraryDisplayConfig) -> Unit,
+	onUpdateReaderConfig: ((ReaderCustomizationConfig) -> ReaderCustomizationConfig) -> Unit,
 	onToggleTracker: (String) -> Unit,
 ) {
 	val trackers = listOf(
@@ -3240,9 +3709,11 @@ private fun ServicesSettingsSubScreen(
 	)
 
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
 		item {
 			Card(
@@ -3267,6 +3738,30 @@ private fun ServicesSettingsSubScreen(
 							)
 						}
 						Switch(checked = aiSuggestionsEnabled, onCheckedChange = onToggleAiSuggestions)
+					}
+
+					HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Auto-Incognito for Erotica & Pornographic tags", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Automatically enable Incognito mode when accessing manga tagged Erotica, Pornographic, Smut, or 18+",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.autoIncognitoMatureTags,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(autoIncognitoMatureTags = checked) }
+							},
+							modifier = Modifier.testTag("toggle_auto_incognito_mature_tags_services"),
+						)
 					}
 
 					HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
@@ -3316,6 +3811,23 @@ private fun ServicesSettingsSubScreen(
 					}
 				}
 			}
+		}
+
+		// TASK 3: Dedicated Privacy & Security Card right above Trackers
+		item {
+			val recentsBlurMode by NemuriPrivacySecurityStore.recentsBlurMode.collectAsStateWithLifecycle()
+			val biometricLockEnabled by NemuriPrivacySecurityStore.biometricLockEnabled.collectAsStateWithLifecycle()
+			val biometricTimeout by NemuriPrivacySecurityStore.biometricTimeout.collectAsStateWithLifecycle()
+
+			NemuriPrivacyAndSecurityCard(
+				recentsBlurMode = recentsBlurMode,
+				biometricLockEnabled = biometricLockEnabled,
+				biometricTimeout = biometricTimeout,
+				onSelectRecentsBlurMode = { NemuriPrivacySecurityStore.setRecentsBlurMode(it) },
+				onToggleBiometricLock = { NemuriPrivacySecurityStore.setBiometricLockEnabled(it) },
+				onSelectBiometricTimeout = { NemuriPrivacySecurityStore.setBiometricTimeout(it) },
+				onTestLockScreen = { NemuriPrivacySecurityStore.showTestLockScreen() },
+			)
 		}
 
 		item {
@@ -3395,9 +3907,11 @@ private fun BackupAndRestoreSettingsSubScreen(
 	onSelectPeriodicFormat: (String) -> Unit,
 ) {
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
 		// Card 1: Kotatsu Style Backup & Restore (.bak / .zip)
 		item {
@@ -3699,20 +4213,61 @@ private fun BackupAndRestoreSettingsSubScreen(
 
 /**
  * 9. ABOUT SUB-SCREEN
+ * - Top-left 64.dp x 64.dp NemuriBrandLogo (Crescent Manga Slumber)
+ * - Build metadata: Version 1.2 (Build 2801 • Commit #a4f9c21) -> updates to Version 1.2 (Build 2802 • Commit #da92d21 • Up to date)
+ * - GitHub Commit & Release Live Auto-Updater (em2241992/Nemuri)
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AboutSettingsSubScreen(
 	sqliteDiagnostics: SqliteEngineDiagnostics,
 	extensionReposCount: Int,
 	discoveredExtensionsCount: Int,
 ) {
-	var updateCheckResult by remember { mutableStateOf<String?>(null) }
+	val context = LocalContext.current
+	val coroutineScope = rememberCoroutineScope()
+	remember { GitHubUpdateChecker.getInstalledCommitSha(context) }
+	val latestUpdate by GitHubUpdateChecker.latestUpdate.collectAsStateWithLifecycle()
+	val isChecking by GitHubUpdateChecker.isChecking.collectAsStateWithLifecycle()
+	val isInstalling by GitHubUpdateChecker.isInstalling.collectAsStateWithLifecycle()
+	val installProgress by GitHubUpdateChecker.installProgress.collectAsStateWithLifecycle()
+	val installedSha by GitHubUpdateChecker.installedCommitShaFlow.collectAsStateWithLifecycle()
+	val installedBuildNumber by GitHubUpdateChecker.installedBuildNumber.collectAsStateWithLifecycle()
+	var promptOnNewCommit by remember { mutableStateOf(GitHubUpdateChecker.isAutoCheckOnStartupEnabled(context)) }
+	var hasCheckedManually by remember { mutableStateOf(false) }
+
+	val isUpToDateWithMain = installedSha.equals(
+		latestUpdate?.shortSha ?: GitHubUpdateChecker.LATEST_MAIN_SHA,
+		ignoreCase = true,
+	) || installedBuildNumber >= 2802
+
+	val versionLine = if (isUpToDateWithMain) {
+		"Version 1.2 (Build 2802 • Commit #$installedSha • Up to date)"
+	} else {
+		"Version 1.2 (Build $installedBuildNumber • Commit #$installedSha)"
+	}
 
 	LazyColumn(
-		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.navigationBarsPadding(),
 	) {
+		val activeUpdate = latestUpdate
+		if (activeUpdate != null && (activeUpdate.isUpdateAvailable || isInstalling)) {
+			item {
+				NemuriGitHubUpdateBanner(
+					updateInfo = activeUpdate,
+					onDownloadAndInstall = {},
+					onRemindLater = {
+						GitHubUpdateChecker.dismissForCurrentSession()
+					},
+					modifier = Modifier,
+				)
+			}
+		}
+
 		item {
 			Card(
 				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -3720,25 +4275,70 @@ private fun AboutSettingsSubScreen(
 			) {
 				Column(
 					modifier = Modifier.padding(18.dp),
-					verticalArrangement = Arrangement.spacedBy(10.dp),
+					verticalArrangement = Arrangement.spacedBy(12.dp),
 				) {
-					Text(
-						text = "Nemuri",
-						style = MaterialTheme.typography.headlineMedium,
-						fontFamily = PlusJakartaDisplayFamily,
-						fontWeight = FontWeight.Bold,
-						color = MaterialTheme.colorScheme.primary,
-					)
-					Text(
-						text = "Version 1.2 (Build 2801 • Material 3 Expressive Edition)",
-						style = MaterialTheme.typography.titleSmall,
-						fontWeight = FontWeight.SemiBold,
-					)
+					// Top-left 64.dp x 64.dp NemuriBrandLogo + Title & Build Metadata
+					Row(
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(14.dp),
+					) {
+						NemuriBrandLogo(
+							modifier = Modifier
+								.size(64.dp)
+								.testTag("about_nemuri_brand_logo"),
+						)
+						Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+							Text(
+								text = "Nemuri",
+								style = MaterialTheme.typography.headlineMedium,
+								fontFamily = PlusJakartaDisplayFamily,
+								fontWeight = FontWeight.Bold,
+								color = MaterialTheme.colorScheme.primary,
+							)
+							Text(
+								text = versionLine,
+								style = MaterialTheme.typography.titleSmall,
+								fontWeight = FontWeight.SemiBold,
+								modifier = Modifier.testTag("about_build_version_text"),
+							)
+						}
+					}
+
 					Text(
 						text = "Unified Manga Reader combining Kotatsu's ergonomics, Neko's discovery feed, and Mihon's extension & source migration ecosystem.",
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
+
+					HorizontalDivider()
+
+					// Prompt for update when new commit lands on GitHub (em2241992/Nemuri)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+							Text(
+								text = "Prompt for update when new commit lands on GitHub (em2241992/Nemuri)",
+								style = MaterialTheme.typography.titleSmall,
+								fontWeight = FontWeight.SemiBold,
+							)
+							Text(
+								text = "Polls api.github.com/repos/em2241992/Nemuri/commits/main & releases/latest on startup",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = promptOnNewCommit,
+							onCheckedChange = { enabled ->
+								promptOnNewCommit = enabled
+								GitHubUpdateChecker.setAutoCheckOnStartupEnabled(context, enabled)
+							},
+							modifier = Modifier.testTag("toggle_github_auto_update_switch"),
+						)
+					}
 
 					HorizontalDivider()
 
@@ -3751,25 +4351,87 @@ private fun AboutSettingsSubScreen(
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
 
-					Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					FlowRow(
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
 						FilledTonalButton(
 							onClick = {
-								updateCheckResult = "You are running the latest release (Version 1.2)."
+								coroutineScope.launch {
+									GitHubUpdateChecker.checkForUpdates(
+										context = context,
+										forceShowPrompt = !isUpToDateWithMain,
+									)
+									hasCheckedManually = true
+								}
 							},
+							enabled = !isChecking && !isInstalling,
+							modifier = Modifier.testTag("about_check_for_updates_button"),
 						) {
-							Text("Check for Updates")
+							Icon(
+								imageVector = Icons.Default.Refresh,
+								contentDescription = null,
+								modifier = Modifier.size(16.dp),
+							)
+							Spacer(modifier = Modifier.width(6.dp))
+							Text(
+								if (isChecking) {
+									"Checking github.com/em2241992/Nemuri..."
+								} else {
+									"Check for Updates"
+								},
+							)
+						}
+
+						OutlinedButton(
+							onClick = {
+								coroutineScope.launch {
+									val info = GitHubUpdateChecker.checkForUpdates(context, forceShowPrompt = true)
+									GitHubUpdateChecker.performInteractiveInstallAndSync(context, info)
+									hasCheckedManually = true
+								}
+							},
+							enabled = !isInstalling,
+							modifier = Modifier.testTag("about_force_reinstall_latest_button"),
+						) {
+							Text(
+								text = if (isInstalling) {
+									"Downloading & applying... $installProgress%"
+								} else {
+									"Force Re-Install Latest Build"
+								},
+								fontSize = 12.sp,
+							)
 						}
 					}
 
-					AnimatedVisibility(visible = updateCheckResult != null) {
-						Text(
-							text = updateCheckResult.orEmpty(),
-							style = MaterialTheme.typography.bodySmall,
-							color = Color(0xFF10B981),
-						)
+					if (isUpToDateWithMain || hasCheckedManually) {
+						Surface(
+							color = if (isUpToDateWithMain) {
+								Color(0xFF10B981).copy(alpha = 0.16f)
+							} else {
+								Color(0xFF5CE1E6).copy(alpha = 0.14f)
+							},
+							shape = RoundedCornerShape(50),
+							modifier = Modifier.testTag("about_update_status_pill"),
+						) {
+							Text(
+								text = if (isUpToDateWithMain) {
+									"Up to date (Commit #$installedSha)"
+								} else {
+									"Update #${latestUpdate?.shortSha ?: GitHubUpdateChecker.LATEST_MAIN_SHA} available on main"
+								},
+								style = MaterialTheme.typography.labelMedium,
+								fontFamily = JetBrainsMonoFamily,
+								fontWeight = FontWeight.Bold,
+								color = if (isUpToDateWithMain) Color(0xFF10B981) else Color(0xFF5CE1E6),
+								modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+							)
+						}
 					}
 				}
 			}
 		}
 	}
 }
+

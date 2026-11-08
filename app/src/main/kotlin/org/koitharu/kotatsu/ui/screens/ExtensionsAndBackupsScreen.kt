@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Casino
@@ -109,6 +110,7 @@ import org.koitharu.kotatsu.core.parser.SqliteEngineDiagnostics
 import org.koitharu.kotatsu.extensions.ExtensionCatalogManga
 import org.koitharu.kotatsu.main.ui.KotatsuNeoViewModel
 import org.koitharu.kotatsu.ui.components.MangaCoverArtwork
+import org.koitharu.kotatsu.ui.components.SelfHostedLanMediaServersSectionCard
 import org.koitharu.kotatsu.ui.theme.JetBrainsMonoFamily
 import org.koitharu.kotatsu.ui.theme.PlusJakartaDisplayFamily
 
@@ -126,6 +128,7 @@ private enum class SourceCategoryFilter(val label: String) {
 	PINNED("Pinned ★"),
 	NATIVE_KT("Native (KT)"),
 	EXTENSIONS_EXT("Extensions (EXT)"),
+	LAN_SERVERS("🏠 LAN Servers"),
 }
 
 private data class KotatsuSourceTileModel(
@@ -170,6 +173,8 @@ fun ExploreScreen(
 	onOpenDetails: (Long) -> Unit,
 	onOpenReader: (Long, Int) -> Unit,
 	onOpenSettingsScreen: () -> Unit,
+	onOpenAiEngineSettings: () -> Unit = {},
+	isAiActive: Boolean = true,
 	onInstallOrUpdateExtension: (ExternalExtensionInfo) -> Unit = {},
 	onUninstallExtension: (ExternalExtensionInfo) -> Unit = {},
 	modifier: Modifier = Modifier,
@@ -278,6 +283,16 @@ fun ExploreScreen(
 				monogramText = "SJ",
 				brandColor = Color(0xFFEF4444),
 			),
+			KotatsuSourceTileModel(
+				id = "komga_lan",
+				displayName = "Komga LAN",
+				sourceMatchKey = "MangaDex",
+				subtitle = "192.168.1.50 • Zero-Copy",
+				tileType = SourceTileVisual.MONOGRAM_BADGE,
+				isNativeKotatsu = true,
+				monogramText = "KG",
+				brandColor = Color(0xFF10B981),
+			),
 		)
 	}
 
@@ -333,6 +348,7 @@ fun ExploreScreen(
 			SourceCategoryFilter.PINNED -> sourceTiles.filter { it.id in pinnedSourceIds }
 			SourceCategoryFilter.NATIVE_KT -> sourceTiles.filter { it.isNativeKotatsu }
 			SourceCategoryFilter.EXTENSIONS_EXT -> sourceTiles.filter { !it.isNativeKotatsu }
+			SourceCategoryFilter.LAN_SERVERS -> sourceTiles.filter { it.id == "komga_lan" }
 		}
 	}
 
@@ -358,23 +374,25 @@ fun ExploreScreen(
 			.fillMaxSize()
 			.background(MaterialTheme.colorScheme.background),
 	) {
-		// Top "Search across all sources..." pill bar
-		Box(
+		// Top "Search across all sources..." pill bar + Standardized [✦ AI] & [⚙ Settings] 40.dp Icon Cluster
+		Row(
 			modifier = Modifier
 				.fillMaxWidth()
-				.padding(horizontal = 16.dp, vertical = 10.dp),
+				.padding(horizontal = 12.dp, vertical = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(6.dp),
 		) {
 			Surface(
 				color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-				shape = RoundedCornerShape(28.dp),
+				shape = RoundedCornerShape(24.dp),
 				modifier = Modifier
-					.fillMaxWidth()
-					.height(52.dp),
+					.weight(1f)
+					.height(44.dp),
 			) {
 				Row(
 					modifier = Modifier
 						.fillMaxSize()
-						.padding(horizontal = 8.dp),
+						.padding(horizontal = 6.dp),
 					verticalAlignment = Alignment.CenterVertically,
 				) {
 					if (currentSubView != ExploreSubView.HOME) {
@@ -385,7 +403,7 @@ fun ExploreScreen(
 								selectedSourceDisplayName = null
 							},
 							modifier = Modifier
-								.size(40.dp)
+								.size(38.dp)
 								.testTag("explore_back_button"),
 						) {
 							Icon(
@@ -398,13 +416,14 @@ fun ExploreScreen(
 						IconButton(
 							onClick = { currentSubView = ExploreSubView.SOURCE_BROWSE },
 							modifier = Modifier
-								.size(40.dp)
+								.size(38.dp)
 								.testTag("explore_search_icon_button"),
 						) {
 							Icon(
 								imageVector = Icons.Default.Search,
 								contentDescription = "Search across all sources",
 								tint = MaterialTheme.colorScheme.onSurfaceVariant,
+								modifier = Modifier.size(20.dp),
 							)
 						}
 					}
@@ -412,13 +431,13 @@ fun ExploreScreen(
 					Box(
 						modifier = Modifier
 							.weight(1f)
-							.padding(horizontal = 6.dp),
+							.padding(horizontal = 4.dp),
 						contentAlignment = Alignment.CenterStart,
 					) {
 						if (catalogSearchQuery.isEmpty()) {
 							Text(
 								text = selectedSourceDisplayName?.let { "Search in $it" } ?: "Search across all sources...",
-								style = MaterialTheme.typography.bodyLarge,
+								style = MaterialTheme.typography.bodyMedium,
 								color = MaterialTheme.colorScheme.onSurfaceVariant,
 								maxLines = 1,
 								overflow = TextOverflow.Ellipsis,
@@ -433,7 +452,7 @@ fun ExploreScreen(
 								}
 							},
 							singleLine = true,
-							textStyle = MaterialTheme.typography.bodyLarge.copy(
+							textStyle = MaterialTheme.typography.bodyMedium.copy(
 								color = MaterialTheme.colorScheme.onSurface,
 							),
 							cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -447,7 +466,7 @@ fun ExploreScreen(
 					if (catalogSearchQuery.isNotEmpty()) {
 						IconButton(
 							onClick = { catalogSearchQuery = "" },
-							modifier = Modifier.size(36.dp),
+							modifier = Modifier.size(34.dp),
 						) {
 							Icon(
 								imageVector = Icons.Default.Close,
@@ -456,21 +475,18 @@ fun ExploreScreen(
 							)
 						}
 					}
-
-					IconButton(
-						onClick = onOpenSettingsScreen,
-						modifier = Modifier
-							.size(40.dp)
-							.testTag("explore_more_settings_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.MoreVert,
-							contentDescription = "Settings & More",
-							tint = MaterialTheme.colorScheme.onSurfaceVariant,
-						)
-					}
 				}
 			}
+
+			// Strict 2-Icon Header Rule on Explore via Shared UnifiedTopRightIconCluster: [✦ AI Engine] + [⚙ Settings]
+			org.koitharu.kotatsu.ui.components.UnifiedTopRightIconCluster(
+				activeTab = AppNavTab.EXPLORE,
+				onOpenAiEngineSettings = onOpenAiEngineSettings,
+				onOpenSettingsScreen = onOpenSettingsScreen,
+				isAiActive = isAiActive,
+				aiButtonTestTag = "explore_ai_engine_button",
+				settingsTestTag = "explore_more_settings_button",
+			)
 		}
 
 		when (currentSubView) {
@@ -909,10 +925,21 @@ fun ExploreScreen(
 					}
 				}
 				LazyColumn(
-					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 112.dp),
+					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
 					verticalArrangement = Arrangement.spacedBy(12.dp),
 					modifier = Modifier.fillMaxSize(),
 				) {
+					// TASK 4: Self-Hosted LAN Media Server Bridge (Komga / Kavita / Suwayomi / OPDS)
+					item {
+						SelfHostedLanMediaServersSectionCard(
+							onBrowseLanServer = { server ->
+								selectedSourceKey = null
+								selectedSourceDisplayName = "${server.name} (${server.baseUrl})"
+								currentSubView = ExploreSubView.SOURCE_BROWSE
+							},
+						)
+					}
+
 					item {
 						Card(
 							colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

@@ -124,9 +124,48 @@ class NemuriAiCoreEngine @Inject constructor() {
 	}
 
 	/**
-	 * Streams tokens from Gemini Nano for the "Where Was I?" card while holding the 1-permit NPU semaphore.
+	 * Streams tokens from the active Pluggable AI Backend (Gemini Nano AICore, Google Gemini REST API,
+	 * Ollama/Llama/OpenAI endpoint, or LiteRT Local) for the "Where Was I?" card while holding the 1-permit NPU semaphore.
 	 */
 	fun streamRecap(contextPayload: String): Flow<String> {
+		val config = PluggableAiRouter.currentConfig
+		if (Generation.customModelOverride == null) {
+			if (!config.masterAiEnabled || config.selectedTier == AiBackendTier.DETERMINISTIC_EXTRACTIVE) {
+				return emptyFlow()
+			}
+			if (config.selectedTier == AiBackendTier.CLOUD_OR_CUSTOM_ENDPOINT) {
+				return flow {
+					val remoteText = when (config.activeSubTab) {
+						CustomEndpointSubTab.GOOGLE_GEMINI_API -> {
+							PluggableAiRouter.callGoogleGeminiApi(
+								apiKey = config.geminiApiKey,
+								model = config.geminiModel,
+								systemInstruction = RECAP_PROMPT_PREFIX.text,
+								userPrompt = contextPayload,
+							)
+						}
+						CustomEndpointSubTab.OLLAMA_OPENAI_COMPATIBLE -> {
+							PluggableAiRouter.callOpenAiCompatibleApi(
+								baseUrl = config.openAiBaseUrl,
+								modelId = config.openAiModelId,
+								apiKey = config.openAiApiKey,
+								systemPrompt = RECAP_PROMPT_PREFIX.text,
+								userPrompt = contextPayload,
+							)
+						}
+					}
+					if (!remoteText.isNullOrBlank()) {
+						emit(remoteText)
+					}
+				}
+			}
+			if (config.selectedTier == AiBackendTier.LOCAL_LITERT_FILE) {
+				if (!config.liteRtModelDownloaded && config.liteRtModelFileName == null) {
+					return emptyFlow()
+				}
+			}
+		}
+
 		if (_status.value != NemuriAiStatus.Available && Generation.customModelOverride == null) return emptyFlow()
 		val request = generateContentRequest(TextPart(contextPayload)) {
 			promptPrefix = RECAP_PROMPT_PREFIX
@@ -145,9 +184,47 @@ class NemuriAiCoreEngine @Inject constructor() {
 	}
 
 	/**
-	 * Executes low-temperature structured generation for Natural Language Library Search.
+	 * Executes low-temperature structured generation for Natural Language Library Search
+	 * across the active Pluggable AI Backend.
 	 */
 	suspend fun generateSearchAstJson(userQuery: String): String? = withContext(Dispatchers.Default) {
+		val config = PluggableAiRouter.currentConfig
+		if (Generation.customModelOverride == null) {
+			if (!config.masterAiEnabled || config.selectedTier == AiBackendTier.DETERMINISTIC_EXTRACTIVE) {
+				return@withContext null
+			}
+			if (config.selectedTier == AiBackendTier.CLOUD_OR_CUSTOM_ENDPOINT) {
+				val sysPrompt = "${NL_SEARCH_PROMPT_PREFIX.text}\nOutput raw valid JSON only. Never wrap in markdown code blocks."
+				val prompt = "User Query: \"$userQuery\"\nJSON:"
+				val remoteJson = when (config.activeSubTab) {
+					CustomEndpointSubTab.GOOGLE_GEMINI_API -> {
+						PluggableAiRouter.callGoogleGeminiApi(
+							apiKey = config.geminiApiKey,
+							model = config.geminiModel,
+							systemInstruction = sysPrompt,
+							userPrompt = prompt,
+						)
+					}
+					CustomEndpointSubTab.OLLAMA_OPENAI_COMPATIBLE -> {
+						PluggableAiRouter.callOpenAiCompatibleApi(
+							baseUrl = config.openAiBaseUrl,
+							modelId = config.openAiModelId,
+							apiKey = config.openAiApiKey,
+							systemPrompt = sysPrompt,
+							userPrompt = prompt,
+						)
+					}
+				}
+				if (!remoteJson.isNullOrBlank()) {
+					return@withContext remoteJson
+						.removePrefix("```json")
+						.removePrefix("```")
+						.removeSuffix("```")
+						.trim()
+				}
+			}
+		}
+
 		if (!ensureModelReady()) return@withContext null
 		npuSemaphore.withPermit {
 			runCatching {

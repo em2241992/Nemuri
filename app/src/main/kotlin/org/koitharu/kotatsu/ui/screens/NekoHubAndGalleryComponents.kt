@@ -345,7 +345,7 @@ fun NekoBrowseHubView(
 								subtitle = "Vol.$volNum Ch.${entry.chapterNumber} - $cleanChTitle",
 								coverUrl = entry.coverUrl,
 								inLibrary = inLib,
-								onClick = { quickPeekEntry = entry },
+								onClick = { onOpenDetails(entry) },
 								onLongClick = {
 									haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 									onToggleBookmark(entry)
@@ -378,7 +378,7 @@ fun NekoBrowseHubView(
 								subtitle = "No. ${idx + 1}",
 								coverUrl = entry.coverUrl,
 								inLibrary = inLib,
-								onClick = { quickPeekEntry = entry },
+								onClick = { onOpenDetails(entry) },
 								onLongClick = {
 									haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 									onToggleBookmark(entry)
@@ -412,7 +412,7 @@ fun NekoBrowseHubView(
 								subtitle = "Vol.$volNum Ch.${entry.chapterNumber} • ${entry.releaseTimeLabel}",
 								coverUrl = entry.coverUrl,
 								inLibrary = inLib,
-								onClick = { quickPeekEntry = entry },
+								onClick = { onOpenDetails(entry) },
 								onLongClick = {
 									haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 									onToggleBookmark(entry)
@@ -748,7 +748,7 @@ fun NekoDenseGalleryGrid(
 						.clip(RoundedCornerShape(8.dp))
 						.border(0.75.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
 						.combinedClickable(
-							onClick = { quickPeekEntry = entry },
+							onClick = { onOpenDetails(entry) },
 							onLongClick = {
 								haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 								onToggleBookmark(entry)

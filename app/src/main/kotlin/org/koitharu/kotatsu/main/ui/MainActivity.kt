@@ -1,6 +1,11 @@
 package org.koitharu.kotatsu.main.ui
 
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -46,10 +51,13 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -57,7 +65,9 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,25 +79,38 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import org.koitharu.kotatsu.core.ai.NemuriAiStatus
 import org.koitharu.kotatsu.core.model.AppNavTab
+import org.koitharu.kotatsu.core.model.LibraryMangaItem
 import org.koitharu.kotatsu.core.model.NavBarStyle
+import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
+import org.koitharu.kotatsu.ui.components.GitHubUpdateChecker
 import org.koitharu.kotatsu.ui.components.MangaCoverArtwork
+import org.koitharu.kotatsu.ui.components.NemuriBiometricLockOverlay
+import org.koitharu.kotatsu.ui.components.NemuriBrandLogo
+import org.koitharu.kotatsu.ui.components.NemuriGitHubUpdateBanner
+import org.koitharu.kotatsu.ui.components.NemuriPrivacySecurityStore
+import org.koitharu.kotatsu.ui.components.RecentsBlurMode
+import org.koitharu.kotatsu.ui.screens.AiEngineSettingsModalSheet
 import org.koitharu.kotatsu.ui.screens.AiStudioScreen
 import org.koitharu.kotatsu.ui.screens.BackupsAndSettingsScreen
 import org.koitharu.kotatsu.ui.screens.ExploreScreen
 import org.koitharu.kotatsu.ui.screens.FeedScreen
 import org.koitharu.kotatsu.ui.screens.HistoryScreen
 import org.koitharu.kotatsu.ui.screens.LibraryScreen
+import org.koitharu.kotatsu.ui.screens.MangaDetailsScreen
 import org.koitharu.kotatsu.ui.screens.ReaderScreen
+import org.koitharu.kotatsu.ui.screens.SourceMigrationModalSheet
 import org.koitharu.kotatsu.ui.theme.JetBrainsMonoFamily
 import org.koitharu.kotatsu.ui.theme.KotatsuNeoTheme
 import org.koitharu.kotatsu.ui.theme.PlusJakartaDisplayFamily
@@ -104,6 +127,21 @@ fun AppNavTab.icon(): ImageVector = when (this) {
 class MainActivity : ComponentActivity() {
 
 	private val viewModel: KotatsuNeoViewModel by viewModels()
+	private val _volumeKeyEvents = MutableSharedFlow<Int>(extraBufferCapacity = 16)
+	val volumeKeyEvents: SharedFlow<Int> = _volumeKeyEvents.asSharedFlow()
+
+	override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+		val isVolumeKey = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+		if (
+			isVolumeKey &&
+			viewModel.activeReaderMangaId.value != null &&
+			viewModel.readerConfig.value.switchPagesWithVolumeKeys
+		) {
+			_volumeKeyEvents.tryEmit(keyCode)
+			return true
+		}
+		return super.onKeyDown(keyCode, event)
+	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -113,14 +151,19 @@ class MainActivity : ComponentActivity() {
 			val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
 			val colorSchemePreset by viewModel.colorSchemePreset.collectAsStateWithLifecycle()
 			val pureOledBlack by viewModel.pureOledBlack.collectAsStateWithLifecycle()
+			val useDynamicColor by viewModel.useDynamicColor.collectAsStateWithLifecycle()
 
 			KotatsuNeoTheme(
 				darkTheme = darkTheme,
 				themeMode = themeMode,
 				colorSchemePreset = colorSchemePreset,
 				pureOledBlack = pureOledBlack,
+				useDynamicColor = useDynamicColor,
 			) {
-				KotatsuNeoRootApp(viewModel = viewModel)
+				KotatsuNeoRootApp(
+					viewModel = viewModel,
+					volumeKeyEvents = volumeKeyEvents,
+				)
 			}
 		}
 	}
@@ -129,6 +172,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun KotatsuNeoRootApp(
 	viewModel: KotatsuNeoViewModel,
+	volumeKeyEvents: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
 	val filteredItems by viewModel.filteredLibraryItems.collectAsStateWithLifecycle()
 	val allItems by viewModel.allLibraryItems.collectAsStateWithLifecycle()
@@ -145,6 +189,9 @@ fun KotatsuNeoRootApp(
 	val readerConfig by viewModel.readerConfig.collectAsStateWithLifecycle()
 	val navBarStyle by viewModel.navBarStyle.collectAsStateWithLifecycle()
 	val enabledNavTabs by viewModel.enabledNavTabs.collectAsStateWithLifecycle()
+	val defaultFeedView by viewModel.defaultFeedView.collectAsStateWithLifecycle()
+	val defaultStartupTab by viewModel.defaultStartupTab.collectAsStateWithLifecycle()
+	val useDynamicColor by viewModel.useDynamicColor.collectAsStateWithLifecycle()
 	val duplicateCandidates by viewModel.duplicateCandidates.collectAsStateWithLifecycle()
 	val brokenProposals by viewModel.brokenMangaProposals.collectAsStateWithLifecycle()
 	val batchRule by viewModel.batchRule.collectAsStateWithLifecycle()
@@ -152,6 +199,8 @@ fun KotatsuNeoRootApp(
 	val activeReaderMangaId by viewModel.activeReaderMangaId.collectAsStateWithLifecycle()
 	val activeChapterIndex by viewModel.activeChapterIndex.collectAsStateWithLifecycle()
 	val activePageIndex by viewModel.activePageIndex.collectAsStateWithLifecycle()
+	val isIncognitoSessionActive by viewModel.isIncognitoSessionActive.collectAsStateWithLifecycle()
+	val alwaysIncognitoMangaIds by viewModel.alwaysIncognitoMangaIds.collectAsStateWithLifecycle()
 	val bookmarkedPageKeys by viewModel.bookmarkedPageKeys.collectAsStateWithLifecycle()
 	val seriesReaderProfiles by viewModel.seriesReaderProfiles.collectAsStateWithLifecycle()
 	val checkAndSwapPrompt by viewModel.checkAndSwapPrompt.collectAsStateWithLifecycle()
@@ -169,14 +218,61 @@ fun KotatsuNeoRootApp(
 	val statusBanner by viewModel.statusBanner.collectAsStateWithLifecycle()
 	val activeSmartQueryAst by viewModel.activeSmartQueryAst.collectAsStateWithLifecycle()
 	val activeMangaRecapState by viewModel.activeMangaRecapState.collectAsStateWithLifecycle()
+	val aiEngineConfig by viewModel.aiEngineConfig.collectAsStateWithLifecycle()
+	val showAiEngineSettingsSheet by viewModel.showAiEngineSettingsSheet.collectAsStateWithLifecycle()
+	val mergedSourcesByMangaId by viewModel.mergedSourcesByMangaId.collectAsStateWithLifecycle()
+	val repairAuditLog by viewModel.repairAuditLog.collectAsStateWithLifecycle()
+	val aiCoreStatus by viewModel.nemuriAiCoreEngine.status.collectAsStateWithLifecycle()
+	val latestGitHubUpdate by GitHubUpdateChecker.latestUpdate.collectAsStateWithLifecycle()
+	val isUpdateDismissed by GitHubUpdateChecker.dismissedForSession.collectAsStateWithLifecycle()
+	val recentsBlurMode by NemuriPrivacySecurityStore.recentsBlurMode.collectAsStateWithLifecycle()
+	val isLockScreenShowing by NemuriPrivacySecurityStore.isLockScreenShowing.collectAsStateWithLifecycle()
 	val context = LocalContext.current
 
-	var currentTab by rememberSaveable { mutableStateOf(AppNavTab.LIBRARY) }
+	var currentTab by rememberSaveable { mutableStateOf(defaultStartupTab) }
 	var isSettingsDirectOpen by rememberSaveable { mutableStateOf(false) }
 	var showContinuePeekCard by remember { mutableStateOf(false) }
+	var detailMigrationCandidate by remember { mutableStateOf<LibraryMangaItem?>(null) }
+
+	// Poll GitHub em2241992/Nemuri on startup if auto-check is enabled
+	LaunchedEffect(Unit) {
+		if (GitHubUpdateChecker.isAutoCheckOnStartupEnabled(context)) {
+			GitHubUpdateChecker.checkForUpdates(context, forceShowPrompt = false)
+		}
+	}
+
+	val activeReaderManga = allItems.find { it.manga.id == activeReaderMangaId }
+	val selectedDetailManga = allItems.find { it.manga.id == selectedMangaDetailId }
+
+	// Apply WindowManager.LayoutParams.FLAG_SECURE when Incognito / 18+ manga is active or Always Blur is enabled
+	val isMatureOrIncognitoContext = isIncognitoSessionActive ||
+		activeReaderManga?.hasMatureIncognitoTag == true ||
+		selectedDetailManga?.hasMatureIncognitoTag == true
+	val shouldApplyFlagSecure = when (recentsBlurMode) {
+		RecentsBlurMode.ALWAYS -> true
+		RecentsBlurMode.WHEN_INCOGNITO -> isMatureOrIncognitoContext
+		RecentsBlurMode.OFF -> false
+	}
+	LaunchedEffect(shouldApplyFlagSecure) {
+		val window = (context as? Activity)?.window ?: return@LaunchedEffect
+		if (shouldApplyFlagSecure) {
+			window.setFlags(
+				WindowManager.LayoutParams.FLAG_SECURE,
+				WindowManager.LayoutParams.FLAG_SECURE,
+			)
+		} else {
+			window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+		}
+	}
+
+	if (isLockScreenShowing) {
+		NemuriBiometricLockOverlay(
+			onUnlock = { NemuriPrivacySecurityStore.unlockApp() },
+		)
+		return
+	}
 
 	// If Reader is explicitly opened from a manga card, show full-screen Reader
-	val activeReaderManga = allItems.find { it.manga.id == activeReaderMangaId }
 	if (activeReaderManga != null) {
 		val isBookmarked = "${activeReaderManga.manga.id}_${activeChapterIndex}_${activePageIndex}" in bookmarkedPageKeys
 		ReaderScreen(
@@ -204,7 +300,128 @@ fun KotatsuNeoRootApp(
 				)
 			},
 			onCloseReader = viewModel::closeReader,
+			volumeKeyEvents = volumeKeyEvents,
+			isIncognitoSession = isIncognitoSessionActive,
 		)
+		return
+	}
+
+	// Dedicated Full-Screen Manga Details Page (covers 100% of viewport & hides floating bottom navigation dock)
+	if (selectedDetailManga != null) {
+		val brokenProposal = brokenProposals.find { it.brokenItem.manga.id == selectedDetailManga.manga.id }
+		val mergedSources = mergedSourcesByMangaId[selectedDetailManga.manga.id].orEmpty()
+		MangaDetailsScreen(
+			item = selectedDetailManga,
+			brokenProposal = brokenProposal,
+			mergedSecondarySources = mergedSources,
+			bookmarkedPageKeys = bookmarkedPageKeys,
+			categories = categories,
+			masterAiEnabled = aiEngineConfig.masterAiEnabled,
+			activeAiEngineBadge = aiEngineConfig.activeAttributionBadge(),
+			recapState = activeMangaRecapState,
+			onBack = { viewModel.openMangaDetails(null) },
+			onJumpToLibraryRoot = {
+				viewModel.openMangaDetails(null)
+				isSettingsDirectOpen = false
+				currentTab = AppNavTab.LIBRARY
+			},
+			onStartReading = { chIdx ->
+				viewModel.openReader(selectedDetailManga.manga.id, chIdx)
+			},
+			isAlwaysIncognitoForSeries = selectedDetailManga.manga.id in alwaysIncognitoMangaIds,
+			autoIncognitoMatureTags = readerConfig.autoIncognitoMatureTags,
+			onStartReadingWithIncognito = { chIdx, incognito ->
+				viewModel.openReader(selectedDetailManga.manga.id, chIdx, incognitoOverride = incognito)
+			},
+			onToggleAlwaysIncognito = {
+				viewModel.toggleAlwaysIncognitoForSeries(
+					selectedDetailManga.manga.id,
+					selectedDetailManga.manga.title,
+				)
+			},
+			onRemoveFromHistory = {
+				viewModel.removeHistoryItem(selectedDetailManga.manga.id)
+			},
+			onRequestRecap = { forceRegenerate ->
+				viewModel.requestWhereWasIRecap(
+					mangaId = selectedDetailManga.manga.id,
+					forceShow = true,
+					forceRegenerate = forceRegenerate,
+				)
+			},
+			onOpenMigrateSource = {
+				detailMigrationCandidate = selectedDetailManga
+			},
+			onRunAiFix = { proposal ->
+				viewModel.runSingleAiFixIt(proposal)
+			},
+			onFilterByAuthor = { author ->
+				viewModel.openMangaDetails(null)
+				isSettingsDirectOpen = false
+				currentTab = AppNavTab.LIBRARY
+				viewModel.updateSearchQuery(author)
+			},
+			onFilterByTag = { tag ->
+				viewModel.openMangaDetails(null)
+				isSettingsDirectOpen = false
+				currentTab = AppNavTab.LIBRARY
+				viewModel.updateAdvancedFilter { it.copy(includedTags = setOf(tag)) }
+			},
+			onToggleLibraryMembership = { categoryId ->
+				if (categoryId != null) {
+					viewModel.batchMoveToCategory(setOf(selectedDetailManga.manga.id), categoryId)
+				} else {
+					val targetId = selectedDetailManga.manga.id
+					viewModel.openMangaDetails(null)
+					viewModel.batchRemoveFromLibrary(setOf(targetId))
+				}
+			},
+			onSaveMetadataOverride = { newTitle, newAuthor, newSynopsis ->
+				viewModel.updateMangaMetadataOverride(
+					mangaId = selectedDetailManga.manga.id,
+					newTitle = newTitle,
+					newAuthor = newAuthor,
+					newSynopsis = newSynopsis,
+				)
+			},
+			onDownloadSingleChapter = { _ ->
+				viewModel.batchDownloadSeries(setOf(selectedDetailManga.manga.id))
+			},
+			onToggleChapterBookmark = { chIdx ->
+				viewModel.togglePageBookmark(
+					selectedDetailManga.manga.id,
+					chIdx,
+					0,
+					selectedDetailManga.manga.title,
+				)
+			},
+		)
+
+		val migTarget = detailMigrationCandidate
+		if (migTarget != null) {
+			val liveTarget = allItems.find { it.manga.id == migTarget.manga.id } ?: selectedDetailManga
+			org.koitharu.kotatsu.ui.components.UniversalSheet(
+				onClose = { detailMigrationCandidate = null },
+				containerColor = Color(0xFF121620),
+				sheetTestTag = "detail_source_manager_universal_sheet",
+			) {
+				SourceMigrationModalSheet(
+					itemsToMigrate = listOf(liveTarget),
+					onMigrateSingle = { mangaId, targetSource, targetChapters ->
+						viewModel.migrateSingleMangaSource(mangaId, targetSource, targetChapters)
+						detailMigrationCandidate = null
+					},
+					onMigrateAllSelected = { migrations ->
+						viewModel.migrateBatchMangaSources(migrations)
+						detailMigrationCandidate = null
+					},
+					onClose = { detailMigrationCandidate = null },
+					mergedSourcesByMangaId = mergedSourcesByMangaId,
+					onMergeSecondarySource = viewModel::mergeSecondarySource,
+					onUnlinkMergedSource = viewModel::unlinkMergedSource,
+				)
+			}
+		}
 		return
 	}
 
@@ -223,21 +440,35 @@ fun KotatsuNeoRootApp(
 	val unreadFeedCount = feedUpdates.count { it.isNewRelease }
 
 	// Resolve most recent manga/chapter for Kotatsu's "Continue" floating button
+	var isGlobalIncognitoModeEnabled by rememberSaveable { mutableStateOf(false) }
 	val continuableMangaItem = historyItems.firstOrNull() ?: allItems.firstOrNull()
-	val onContinueReading: () -> Unit = {
+	val quickJumpRecentReads = remember(historyItems, allItems) {
+		val combined = (historyItems + allItems).distinctBy { it.manga.id }
+		combined.take(2)
+	}
+	val launchContinueReading: (Boolean?) -> Unit = { incognitoOverride ->
 		showContinuePeekCard = false
+		val effectiveIncognito = incognitoOverride ?: if (isGlobalIncognitoModeEnabled) true else null
 		val lastHistory = historyItems.firstOrNull()
 		if (lastHistory != null) {
 			viewModel.openReader(
 				lastHistory.manga.id,
 				(lastHistory.lastReadChapterNumber.toInt() - 1).coerceAtLeast(0),
+				incognitoOverride = effectiveIncognito,
 			)
 		} else {
 			val fallbackManga = allItems.firstOrNull()
 			if (fallbackManga != null) {
-				viewModel.openReader(fallbackManga.manga.id, 0)
+				viewModel.openReader(
+					fallbackManga.manga.id,
+					0,
+					incognitoOverride = effectiveIncognito,
+				)
 			}
 		}
+	}
+	val onContinueReading: () -> Unit = {
+		launchContinueReading(null)
 	}
 	val hasContinuableManga = continuableMangaItem != null
 
@@ -422,6 +653,17 @@ fun KotatsuNeoRootApp(
 										}
 									},
 									onRefreshFeed = viewModel::refreshFeedFromExtensions,
+									aiEnginePillLabel = aiEngineConfig.compactHeaderPillLabel(),
+									onOpenAiEngineSettings = viewModel::openAiEngineSettings,
+									useDynamicColor = useDynamicColor,
+									onSetUseDynamicColor = viewModel::setUseDynamicColor,
+									defaultFeedView = defaultFeedView,
+									onSetDefaultFeedView = viewModel::setDefaultFeedView,
+									defaultStartupTab = defaultStartupTab,
+									onSetDefaultStartupTab = viewModel::setDefaultStartupTab,
+									libraryItems = allItems,
+									onMigrateSingleSource = viewModel::migrateSingleMangaSource,
+									onMigrateBatchSources = viewModel::migrateBatchMangaSources,
 									onBackToLibrary = {
 										isSettingsDirectOpen = false
 										currentTab = AppNavTab.LIBRARY
@@ -476,6 +718,7 @@ fun KotatsuNeoRootApp(
 													forceRegenerate = forceRegenerate,
 												)
 											},
+											activeAiEngineBadge = aiEngineConfig.activeAttributionBadge(),
 										)
 									}
 
@@ -485,7 +728,6 @@ fun KotatsuNeoRootApp(
 											onResumeReading = viewModel::openReader,
 											onOpenDetails = { id ->
 												viewModel.openMangaDetails(id)
-												currentTab = AppNavTab.LIBRARY
 											},
 											onRemoveHistoryItem = viewModel::removeHistoryItem,
 											onClearAllHistory = viewModel::clearAllHistory,
@@ -501,7 +743,6 @@ fun KotatsuNeoRootApp(
 											onOpenReader = viewModel::openReader,
 											onOpenDetails = { id ->
 												viewModel.openMangaDetails(id)
-												currentTab = AppNavTab.LIBRARY
 											},
 											onRequestAddCatalogManga = { candidate ->
 												viewModel.requestAddCatalogManga(candidate)
@@ -529,10 +770,11 @@ fun KotatsuNeoRootApp(
 											},
 											onOpenDetails = { id ->
 												viewModel.openMangaDetails(id)
-												currentTab = AppNavTab.LIBRARY
 											},
 											onOpenReader = viewModel::openReader,
 											onOpenSettingsScreen = { isSettingsDirectOpen = true },
+											onOpenAiEngineSettings = viewModel::openAiEngineSettings,
+											isAiActive = aiEngineConfig.masterAiEnabled,
 											onInstallOrUpdateExtension = viewModel::installOrUpdateExtension,
 											onUninstallExtension = viewModel::uninstallExtension,
 										)
@@ -558,6 +800,17 @@ fun KotatsuNeoRootApp(
 												viewModel.requestAddCatalogManga(candidate)
 												currentTab = AppNavTab.LIBRARY
 											},
+											aiEnginePillLabel = aiEngineConfig.compactHeaderPillLabel(),
+											onOpenAiEngineSettings = viewModel::openAiEngineSettings,
+											onOpenSettingsScreen = { isSettingsDirectOpen = true },
+											isAiActive = aiEngineConfig.masterAiEnabled,
+											libraryItems = allItems,
+											onMigrateSingleSource = viewModel::migrateSingleMangaSource,
+											onMigrateBatchSources = viewModel::migrateBatchMangaSources,
+											repairAuditLog = repairAuditLog,
+											onRunManualHealthScan = viewModel::runManualSourceHealthScan,
+											onOpenMangaDetails = { id -> viewModel.openMangaDetails(id) },
+											onRevertRepair = viewModel::revertRepairAuditEntry,
 										)
 									}
 
@@ -568,29 +821,131 @@ fun KotatsuNeoRootApp(
 					}
 				}
 
-				// Long-Press Peek Card above the Continue Button
+				// Bottom Toast Notification for GitHub Commit Sync
+				val installToastMessage by GitHubUpdateChecker.installToastMessage.collectAsStateWithLifecycle()
+				LaunchedEffect(installToastMessage) {
+					if (installToastMessage != null) {
+						kotlinx.coroutines.delay(3800L)
+						GitHubUpdateChecker.clearInstallToast()
+					}
+				}
+				AnimatedVisibility(
+					visible = installToastMessage != null,
+					modifier = Modifier
+						.align(Alignment.BottomCenter)
+						.navigationBarsPadding()
+						.padding(bottom = 86.dp, start = 16.dp, end = 16.dp),
+				) {
+					Surface(
+						color = Color(0xFF133840),
+						shape = RoundedCornerShape(12.dp),
+						shadowElevation = 10.dp,
+						modifier = Modifier
+							.clickable { GitHubUpdateChecker.clearInstallToast() }
+							.testTag("github_update_toast_pill"),
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Text(
+								text = installToastMessage.orEmpty(),
+								style = MaterialTheme.typography.labelLarge,
+								fontFamily = JetBrainsMonoFamily,
+								fontWeight = FontWeight.Bold,
+								color = Color(0xFF5CE1E6),
+							)
+						}
+					}
+				}
+
+				// Long-Press Incognito Switcher & Quick-Jump Popup Menu above the Continue FAB (📖)
 				if (showContinuePeekCard && continuableMangaItem != null && !isSettingsDirectOpen && selectedMangaDetailId == null) {
 					val resumeChapterNum = continuableMangaItem.lastReadChapterNumber.toInt().coerceAtLeast(1)
+					val accentCyan = Color(0xFF5CE1E6)
 					Card(
 						colors = CardDefaults.cardColors(
-							containerColor = Color(0xFF1C2224).copy(alpha = 0.98f),
+							containerColor = Color(0xFF161C22).copy(alpha = 0.98f),
 						),
 						shape = RoundedCornerShape(22.dp),
+						elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
 						modifier = Modifier
 							.align(Alignment.BottomEnd)
 							.navigationBarsPadding()
 							.padding(
 								end = 16.dp,
-								bottom = if (navBarStyle == NavBarStyle.FLOATING_ISLAND) 78.dp else 78.dp,
+								bottom = 78.dp,
 							)
-							.widthIn(max = 310.dp)
-							.border(1.dp, Color(0xFF4CCAD0).copy(alpha = 0.45f), RoundedCornerShape(22.dp))
+							.widthIn(min = 285.dp, max = 328.dp)
+							.border(
+								width = 1.dp,
+								color = if (isGlobalIncognitoModeEnabled) accentCyan else Color(0xFF4CCAD0).copy(alpha = 0.45f),
+								shape = RoundedCornerShape(22.dp),
+							)
 							.testTag("continue_peek_preview_card"),
 					) {
 						Column(
 							modifier = Modifier.padding(14.dp),
 							verticalArrangement = Arrangement.spacedBy(10.dp),
 						) {
+							// 1. Global Incognito Switcher Row: 🕵️ Incognito Mode with instant ON / OFF pill toggle
+							Surface(
+								color = if (isGlobalIncognitoModeEnabled) {
+									accentCyan.copy(alpha = 0.16f)
+								} else {
+									Color(0xFF212830)
+								},
+								shape = RoundedCornerShape(14.dp),
+								modifier = Modifier
+									.fillMaxWidth()
+									.clip(RoundedCornerShape(14.dp))
+									.clickable { isGlobalIncognitoModeEnabled = !isGlobalIncognitoModeEnabled }
+									.testTag("continue_fab_global_incognito_toggle_row"),
+							) {
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 12.dp, vertical = 10.dp),
+									horizontalArrangement = Arrangement.SpaceBetween,
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									Column(modifier = Modifier.weight(1f)) {
+										Text(
+											text = "🕵️ Incognito Mode: ${if (isGlobalIncognitoModeEnabled) "ON" else "OFF"}",
+											style = MaterialTheme.typography.titleSmall,
+											fontWeight = FontWeight.Bold,
+											color = if (isGlobalIncognitoModeEnabled) accentCyan else Color.White,
+										)
+										Text(
+											text = if (isGlobalIncognitoModeEnabled) {
+												"History, streaks & trackers paused"
+											} else {
+												"Standard reading telemetry active"
+											},
+											style = MaterialTheme.typography.labelSmall,
+											fontSize = 10.sp,
+											color = Color(0xFFA9B4BE),
+										)
+									}
+									Surface(
+										color = if (isGlobalIncognitoModeEnabled) accentCyan else Color(0xFF323C47),
+										shape = RoundedCornerShape(999.dp),
+										modifier = Modifier.testTag("continue_fab_incognito_pill_toggle"),
+									) {
+										Text(
+											text = if (isGlobalIncognitoModeEnabled) "ON" else "OFF",
+											fontFamily = JetBrainsMonoFamily,
+											fontWeight = FontWeight.Bold,
+											fontSize = 11.sp,
+											color = if (isGlobalIncognitoModeEnabled) Color(0xFF061518) else Color(0xFFD5DEE5),
+											modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+										)
+									}
+								}
+							}
+
+							// Current Manga Summary Header
 							Row(
 								verticalAlignment = Alignment.CenterVertically,
 								horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -599,18 +954,11 @@ fun KotatsuNeoRootApp(
 									title = continuableMangaItem.manga.title,
 									coverUrl = continuableMangaItem.manga.coverUrl,
 									modifier = Modifier
-										.width(48.dp)
+										.width(42.dp)
 										.aspectRatio(0.7f)
 										.clip(RoundedCornerShape(8.dp)),
 								)
 								Column(modifier = Modifier.weight(1f)) {
-									Text(
-										text = "CONTINUE READING",
-										fontFamily = JetBrainsMonoFamily,
-										fontWeight = FontWeight.Bold,
-										fontSize = 9.sp,
-										color = Color(0xFF4CCAD0),
-									)
 									Text(
 										text = UiSourceAndTitleFormatter.formatDisplayTitle(continuableMangaItem.manga.title),
 										style = MaterialTheme.typography.titleSmall,
@@ -629,36 +977,142 @@ fun KotatsuNeoRootApp(
 								}
 								IconButton(
 									onClick = { showContinuePeekCard = false },
-									modifier = Modifier.size(28.dp),
+									modifier = Modifier.size(26.dp),
 								) {
 									Icon(
 										imageVector = Icons.Default.Close,
 										contentDescription = "Close preview",
 										tint = Color(0xFFBDC7CA),
-										modifier = Modifier.size(16.dp),
+										modifier = Modifier.size(15.dp),
 									)
 								}
 							}
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
+
+							// 2. 🕵️ Continue in Incognito
+							Surface(
+								color = accentCyan.copy(alpha = 0.18f),
+								shape = RoundedCornerShape(12.dp),
+								modifier = Modifier
+									.fillMaxWidth()
+									.border(1.dp, accentCyan.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+									.clip(RoundedCornerShape(12.dp))
+									.clickable { launchContinueReading(true) }
+									.testTag("continue_fab_launch_incognito_button"),
 							) {
-								Button(
-									onClick = onContinueReading,
-									contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-									modifier = Modifier.weight(1f),
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 12.dp, vertical = 10.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.Center,
 								) {
-									Text("Resume Ch. $resumeChapterNum", fontSize = 11.sp)
+									Text(
+										text = "🕵️ Continue in Incognito",
+										style = MaterialTheme.typography.labelLarge,
+										fontWeight = FontWeight.Bold,
+										fontSize = 12.sp,
+										color = accentCyan,
+									)
 								}
-								FilledTonalButton(
-									onClick = {
-										showContinuePeekCard = false
-										viewModel.openMangaDetails(continuableMangaItem.manga.id)
-										currentTab = AppNavTab.LIBRARY
-									},
-									contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+							}
+
+							// 3. ▶ Continue Normally
+							Surface(
+								color = Color(0xFF232B34),
+								shape = RoundedCornerShape(12.dp),
+								modifier = Modifier
+									.fillMaxWidth()
+									.clip(RoundedCornerShape(12.dp))
+									.clickable { launchContinueReading(false) }
+									.testTag("continue_fab_launch_normal_button"),
+							) {
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 12.dp, vertical = 10.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.Center,
 								) {
-									Text("Details", fontSize = 11.sp)
+									Text(
+										text = "▶ Continue Normally",
+										style = MaterialTheme.typography.labelLarge,
+										fontWeight = FontWeight.SemiBold,
+										fontSize = 12.sp,
+										color = Color.White,
+									)
+								}
+							}
+
+							// 4. Quick Jump List: Compact 2-item list of the most recent reads to switch series with one thumb
+							if (quickJumpRecentReads.isNotEmpty()) {
+								HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+								Text(
+									text = "QUICK JUMP RECENT READS",
+									fontFamily = JetBrainsMonoFamily,
+									fontWeight = FontWeight.Bold,
+									fontSize = 9.sp,
+									color = Color(0xFF8CA0AB),
+								)
+								Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+									quickJumpRecentReads.forEach { recentItem ->
+										val chNum = recentItem.lastReadChapterNumber.toInt().coerceAtLeast(1)
+										Surface(
+											color = Color(0xFF1F262E),
+											shape = RoundedCornerShape(10.dp),
+											modifier = Modifier
+												.fillMaxWidth()
+												.clip(RoundedCornerShape(10.dp))
+												.clickable {
+													showContinuePeekCard = false
+													viewModel.openReader(
+														recentItem.manga.id,
+														(chNum - 1).coerceAtLeast(0),
+														incognitoOverride = if (isGlobalIncognitoModeEnabled) true else null,
+													)
+												}
+												.testTag("quick_jump_recent_${recentItem.manga.id}"),
+										) {
+											Row(
+												modifier = Modifier
+													.fillMaxWidth()
+													.padding(horizontal = 10.dp, vertical = 7.dp),
+												verticalAlignment = Alignment.CenterVertically,
+												horizontalArrangement = Arrangement.spacedBy(8.dp),
+											) {
+												MangaCoverArtwork(
+													title = recentItem.manga.title,
+													coverUrl = recentItem.manga.coverUrl,
+													modifier = Modifier
+														.width(24.dp)
+														.aspectRatio(0.72f)
+														.clip(RoundedCornerShape(4.dp)),
+												)
+												Column(modifier = Modifier.weight(1f)) {
+													Text(
+														text = UiSourceAndTitleFormatter.formatDisplayTitle(recentItem.manga.title),
+														style = MaterialTheme.typography.labelMedium,
+														fontWeight = FontWeight.SemiBold,
+														color = Color.White,
+														maxLines = 1,
+														overflow = TextOverflow.Ellipsis,
+													)
+													Text(
+														text = "Ch. $chNum • ${UiSourceAndTitleFormatter.formatSourceName(recentItem.manga.source)}",
+														fontFamily = JetBrainsMonoFamily,
+														fontSize = 9.sp,
+														color = Color(0xFF9FB0BA),
+													)
+												}
+												Text(
+													text = if (isGlobalIncognitoModeEnabled) "🕵️ Read" else "▶ Read",
+													fontFamily = JetBrainsMonoFamily,
+													fontWeight = FontWeight.Bold,
+													fontSize = 10.sp,
+													color = accentCyan,
+												)
+											}
+										}
+									}
 								}
 							}
 						}
@@ -677,6 +1131,7 @@ fun KotatsuNeoRootApp(
 						onClick = onContinueReading,
 						onLongClick = { showContinuePeekCard = !showContinuePeekCard },
 						iconOnly = false,
+						isIncognitoActive = isGlobalIncognitoModeEnabled,
 						modifier = Modifier
 							.align(Alignment.BottomEnd)
 							.padding(end = 16.dp, bottom = 14.dp),
@@ -726,12 +1181,24 @@ fun KotatsuNeoRootApp(
 								onClick = onContinueReading,
 								onLongClick = { showContinuePeekCard = !showContinuePeekCard },
 								iconOnly = true,
+								isIncognitoActive = isGlobalIncognitoModeEnabled,
 							)
 						}
 					}
 				}
 			}
 		}
+	}
+
+	if (showAiEngineSettingsSheet) {
+		AiEngineSettingsModalSheet(
+			config = aiEngineConfig,
+			isAiCoreHardwareAvailable = aiCoreStatus == NemuriAiStatus.Available,
+			onUpdateConfig = viewModel::updateAiEngineConfig,
+			onTestConnection = viewModel::testAiEndpointConnection,
+			onDownloadLiteRtModel = viewModel::downloadLiteRtModel,
+			onDismiss = viewModel::closeAiEngineSettings,
+		)
 	}
 }
 
@@ -741,7 +1208,7 @@ fun KotatsuNeoRootApp(
  *   renders a rounder 56.dp circular/capsule icon-only button without words using `RoundedCornerShape(32.dp)` (the exact same border radius and height as `FloatingIslandNavigationBar`) in bright aqua (#4CCAD0) with a dark teal (#07383B) open-book icon.
  * - When `iconOnly = false` (Classic Docked mode):
  *   renders the extended floating button with the reader icon + "Continue" label above the bottom navigation bar on the right.
- * - Supports Long-Press (`onLongClick`) to peek at the manga cover, title, and chapter before opening the Reader.
+ * - Supports Long-Press (`onLongClick`) to open the Incognito Switcher & Quick-Jump menu.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -749,50 +1216,72 @@ private fun KotatsuContinueFloatingButton(
 	onClick: () -> Unit,
 	onLongClick: () -> Unit,
 	iconOnly: Boolean,
+	isIncognitoActive: Boolean = false,
 	modifier: Modifier = Modifier,
 ) {
 	val primaryColor = MaterialTheme.colorScheme.primary
 	val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+	val incognitoContainerColor = Color(0xFF19242E)
+	val incognitoRingColor = Color(0xFF5CE1E6)
 
 	if (iconOnly) {
 		val islandMatchingShape = RoundedCornerShape(32.dp)
-		Surface(
-			color = primaryColor,
-			contentColor = onPrimaryColor,
-			tonalElevation = 8.dp,
-			shadowElevation = 14.dp,
-			shape = islandMatchingShape,
-			modifier = modifier
-				.size(56.dp)
-				.clip(islandMatchingShape)
-				.combinedClickable(
-					onClick = onClick,
-					onLongClick = onLongClick,
-				)
-				.border(
-					width = 1.dp,
-					color = primaryColor.copy(alpha = 0.65f),
-					shape = islandMatchingShape,
-				)
-				.testTag("floating_continue_button"),
-		) {
-			Box(
-				modifier = Modifier.fillMaxSize(),
-				contentAlignment = Alignment.Center,
+		Box(modifier = modifier.size(56.dp)) {
+			Surface(
+				color = if (isIncognitoActive) incognitoContainerColor else primaryColor,
+				contentColor = if (isIncognitoActive) incognitoRingColor else onPrimaryColor,
+				tonalElevation = 8.dp,
+				shadowElevation = 14.dp,
+				shape = islandMatchingShape,
+				modifier = Modifier
+					.fillMaxSize()
+					.clip(islandMatchingShape)
+					.combinedClickable(
+						onClick = onClick,
+						onLongClick = onLongClick,
+					)
+					.border(
+						width = if (isIncognitoActive) 2.dp else 1.dp,
+						color = if (isIncognitoActive) incognitoRingColor else primaryColor.copy(alpha = 0.65f),
+						shape = islandMatchingShape,
+					)
+					.testTag("floating_continue_button"),
 			) {
-				Icon(
-					imageVector = Icons.AutoMirrored.Filled.MenuBook,
-					contentDescription = "Continue reading (Long-press to peek)",
-					tint = onPrimaryColor,
-					modifier = Modifier.size(24.dp),
-				)
+				Box(
+					modifier = Modifier.fillMaxSize(),
+					contentAlignment = Alignment.Center,
+				) {
+					Icon(
+						imageVector = Icons.AutoMirrored.Filled.MenuBook,
+						contentDescription = "Continue reading (Long-press for Incognito & Quick-Jump)",
+						tint = if (isIncognitoActive) incognitoRingColor else onPrimaryColor,
+						modifier = Modifier.size(24.dp),
+					)
+				}
+			}
+			if (isIncognitoActive) {
+				Surface(
+					color = incognitoRingColor,
+					shape = CircleShape,
+					modifier = Modifier
+						.align(Alignment.TopEnd)
+						.size(20.dp)
+						.testTag("continue_fab_incognito_badge"),
+				) {
+					Box(contentAlignment = Alignment.Center) {
+						Text(
+							text = "🕵️",
+							fontSize = 10.sp,
+						)
+					}
+				}
 			}
 		}
 	} else {
 		val classicShape = RoundedCornerShape(18.dp)
 		Surface(
-			color = MaterialTheme.colorScheme.primaryContainer,
-			contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+			color = if (isIncognitoActive) incognitoContainerColor else MaterialTheme.colorScheme.primaryContainer,
+			contentColor = if (isIncognitoActive) incognitoRingColor else MaterialTheme.colorScheme.onPrimaryContainer,
 			tonalElevation = 8.dp,
 			shadowElevation = 12.dp,
 			shape = classicShape,
@@ -804,8 +1293,8 @@ private fun KotatsuContinueFloatingButton(
 					onLongClick = onLongClick,
 				)
 				.border(
-					width = 1.dp,
-					color = primaryColor.copy(alpha = 0.35f),
+					width = if (isIncognitoActive) 2.dp else 1.dp,
+					color = if (isIncognitoActive) incognitoRingColor else primaryColor.copy(alpha = 0.35f),
 					shape = classicShape,
 				)
 				.testTag("floating_continue_button"),
@@ -817,18 +1306,18 @@ private fun KotatsuContinueFloatingButton(
 			) {
 				Icon(
 					imageVector = Icons.AutoMirrored.Filled.MenuBook,
-					contentDescription = "Continue reading (Long-press to peek)",
-					tint = primaryColor,
+					contentDescription = "Continue reading (Long-press for Incognito & Quick-Jump)",
+					tint = if (isIncognitoActive) incognitoRingColor else primaryColor,
 					modifier = Modifier.size(22.dp),
 				)
 				Text(
-					text = "Continue",
+					text = if (isIncognitoActive) "🕵️ Continue" else "Continue",
 					style = MaterialTheme.typography.titleSmall,
 					fontWeight = FontWeight.SemiBold,
 					fontSize = 15.sp,
 					maxLines = 1,
 					softWrap = false,
-					color = MaterialTheme.colorScheme.onPrimaryContainer,
+					color = if (isIncognitoActive) incognitoRingColor else MaterialTheme.colorScheme.onPrimaryContainer,
 				)
 			}
 		}

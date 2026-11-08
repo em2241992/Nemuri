@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -94,6 +95,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.koitharu.kotatsu.core.db.entity.TitleNormalizer
 import org.koitharu.kotatsu.core.model.CardCoverShape
+import org.koitharu.kotatsu.core.model.DefaultFeedViewMode
 import org.koitharu.kotatsu.core.model.FeedUpdateItem
 import org.koitharu.kotatsu.core.model.LibraryMangaItem
 import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
@@ -147,6 +149,8 @@ fun HistoryScreen(
 	onRemoveHistoryItem: (Long) -> Unit,
 	onClearAllHistory: () -> Unit,
 	onOpenSettingsScreen: () -> Unit,
+	onOpenAiEngineSettings: () -> Unit = {},
+	isAiActive: Boolean = true,
 	modifier: Modifier = Modifier,
 ) {
 	var searchQuery by remember { mutableStateOf("") }
@@ -350,39 +354,14 @@ fun HistoryScreen(
 						}
 					}
 
-					// Just Left of Settings: History Layout & Display Settings Button
-					IconButton(
-						onClick = { showHistoryCustomizerSheet = true },
-						modifier = Modifier
-							.size(44.dp)
-							.clip(CircleShape)
-							.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-							.testTag("history_customizer_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.Tune,
-							contentDescription = "History Display Settings",
-							tint = MaterialTheme.colorScheme.onSurface,
-							modifier = Modifier.size(20.dp),
-						)
-					}
-
-					// Far Right: Settings Gear Icon
-					IconButton(
-						onClick = onOpenSettingsScreen,
-						modifier = Modifier
-							.size(44.dp)
-							.clip(CircleShape)
-							.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-							.testTag("history_settings_gear_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.Settings,
-							contentDescription = "Settings Menu",
-							tint = MaterialTheme.colorScheme.onSurface,
-							modifier = Modifier.size(20.dp),
-						)
-					}
+					// Strict 2-Icon Header Rule on History via Shared UnifiedTopRightIconCluster: [🎚️ Display/Filter Sliders] + [⚙ Settings]
+					org.koitharu.kotatsu.ui.components.UnifiedTopRightIconCluster(
+						activeTab = org.koitharu.kotatsu.core.model.AppNavTab.HISTORY,
+						onOpenDisplayOrFilterSliders = { showHistoryCustomizerSheet = true },
+						onOpenSettingsScreen = onOpenSettingsScreen,
+						customizerTestTag = "history_customizer_button",
+						settingsTestTag = "history_settings_gear_button",
+					)
 				}
 
 				// Collapsible Grouping & Clear Strip (Swappable Group by Date <-> Group by Series)
@@ -589,7 +568,8 @@ fun HistoryScreen(
 				modifier = Modifier
 					.fillMaxWidth()
 					.verticalScroll(rememberScrollState())
-					.padding(horizontal = 20.dp, vertical = 12.dp),
+					.navigationBarsPadding()
+					.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 56.dp),
 				verticalArrangement = Arrangement.spacedBy(14.dp),
 			) {
 				Row(
@@ -729,7 +709,8 @@ fun HistoryScreen(
 				modifier = Modifier
 					.fillMaxWidth()
 					.verticalScroll(rememberScrollState())
-					.padding(horizontal = 20.dp, vertical = 12.dp),
+					.navigationBarsPadding()
+					.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 56.dp),
 				verticalArrangement = Arrangement.spacedBy(14.dp),
 			) {
 				Row(
@@ -940,6 +921,10 @@ fun FeedScreen(
 	onRequestAddCatalogManga: (ExtensionCatalogManga) -> Unit,
 	onRefreshFeed: () -> Unit,
 	onOpenSettingsScreen: () -> Unit,
+	onOpenAiEngineSettings: () -> Unit = {},
+	isAiActive: Boolean = true,
+	defaultFeedView: DefaultFeedViewMode = DefaultFeedViewMode.UPDATES,
+	onSetDefaultFeedView: (DefaultFeedViewMode) -> Unit = {},
 	onMarkFeedChapterRead: (Long, Long, Int) -> Unit = { _, _, _ -> },
 	initialPrimaryMode: HybridFeedPrimaryMode = HybridFeedPrimaryMode.UPDATES_AND_BROWSE,
 	modifier: Modifier = Modifier,
@@ -1134,39 +1119,14 @@ fun FeedScreen(
 							}
 						}
 
-						// Just Left of Settings: Feed Display & Layout Customizer Button
-						IconButton(
-							onClick = { showFeedCustomizerSheet = true },
-							modifier = Modifier
-								.size(44.dp)
-								.clip(CircleShape)
-								.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-								.testTag("feed_customizer_button"),
-						) {
-							Icon(
-								imageVector = Icons.Default.Tune,
-								contentDescription = "Feed Display Settings",
-								tint = MaterialTheme.colorScheme.onSurface,
-								modifier = Modifier.size(20.dp),
-							)
-						}
-
-						// Far Right: Settings Gear Icon
-						IconButton(
-							onClick = onOpenSettingsScreen,
-							modifier = Modifier
-								.size(44.dp)
-								.clip(CircleShape)
-								.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-								.testTag("feed_settings_gear_button"),
-						) {
-							Icon(
-								imageVector = Icons.Default.Settings,
-								contentDescription = "Settings Menu",
-								tint = MaterialTheme.colorScheme.onSurface,
-								modifier = Modifier.size(20.dp),
-							)
-						}
+						// Strict 2-Icon Header Rule on Feed via Shared UnifiedTopRightIconCluster: [🎚️ Display/Filter Sliders] + [⚙ Settings]
+						org.koitharu.kotatsu.ui.components.UnifiedTopRightIconCluster(
+							activeTab = org.koitharu.kotatsu.core.model.AppNavTab.FEED,
+							onOpenDisplayOrFilterSliders = { showFeedCustomizerSheet = true },
+							onOpenSettingsScreen = onOpenSettingsScreen,
+							customizerTestTag = "feed_customizer_button",
+							settingsTestTag = "feed_settings_gear_button",
+						)
 					}
 				}
 			}
@@ -1176,6 +1136,8 @@ fun FeedScreen(
 				FeedSectionCategory.HOME_PAGE -> {
 					DualModeHybridFeedHomeView(
 						initialPrimaryMode = initialPrimaryMode,
+						defaultFeedView = defaultFeedView,
+						onSetDefaultFeedView = onSetDefaultFeedView,
 						defaultSource = defaultCatalogueSource,
 						availableSources = availableCatalogueSources,
 						feedUpdates = filteredUpdates,
@@ -1355,7 +1317,8 @@ fun FeedScreen(
 				modifier = Modifier
 					.fillMaxWidth()
 					.verticalScroll(rememberScrollState())
-					.padding(horizontal = 20.dp, vertical = 12.dp),
+					.navigationBarsPadding()
+					.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 40.dp),
 				verticalArrangement = Arrangement.spacedBy(14.dp),
 			) {
 				Row(
@@ -1551,7 +1514,8 @@ fun FeedScreen(
 				modifier = Modifier
 					.fillMaxWidth()
 					.verticalScroll(rememberScrollState())
-					.padding(horizontal = 20.dp, vertical = 12.dp),
+					.navigationBarsPadding()
+					.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 40.dp),
 				verticalArrangement = Arrangement.spacedBy(14.dp),
 			) {
 				Row(

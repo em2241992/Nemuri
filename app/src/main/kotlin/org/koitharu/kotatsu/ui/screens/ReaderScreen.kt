@@ -2,6 +2,7 @@ package org.koitharu.kotatsu.ui.screens
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -11,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -18,6 +20,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -59,14 +63,18 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.FormatListNumbered
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -97,6 +105,9 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -112,7 +123,11 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.core.model.AiUpscaleMode
 import org.koitharu.kotatsu.core.model.LibraryMangaItem
@@ -144,15 +159,6 @@ private enum class NekoSettingsSubTab(val title: String) {
 	FILTER("Filter"),
 }
 
-private data class ReaderChapterEntry(
-	val index: Int,
-	val volumeNumber: Int,
-	val chapterNumber: String,
-	val title: String,
-	val relativeDate: String,
-	val scanlatorOrSource: String,
-)
-
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ReaderScreen(
@@ -169,6 +175,8 @@ fun ReaderScreen(
 	onSaveSeriesProfile: () -> Unit,
 	onCloseReader: () -> Unit,
 	onJumpToHome: () -> Unit = onCloseReader,
+	volumeKeyEvents: Flow<Int> = emptyFlow(),
+	isIncognitoSession: Boolean = false,
 ) {
 	val totalPages = 18
 	val totalChapters = mangaItem.totalChapters.coerceAtLeast(1)
@@ -177,14 +185,28 @@ fun ReaderScreen(
 	var isHudVisible by remember { mutableStateOf(false) }
 	var expandedSheetTab by remember { mutableStateOf<NekoBottomSheetTab?>(null) }
 	var settingsSubTab by remember { mutableStateOf(NekoSettingsSubTab.GENERAL) }
+	var showAiUpscalePreviewModal by remember { mutableStateOf(false) }
+	var showReadingMoreSheet by remember { mutableStateOf(false) }
+	var activeReadingMoreTab by remember { mutableStateOf(ReaderOptionsSheetTab.READING) }
+	var showColorCorrectionPanel by remember { mutableStateOf(false) }
+	var showThreeTabDrawer by remember { mutableStateOf(false) }
+	var activeThreeTabDrawerTab by remember { mutableStateOf(ReaderDrawerTab.PAGE_GRID) }
+
+	val bookmarkedPagesInChapter = remember(mangaItem.manga.id, chapterIndex) {
+		mutableStateListOf<Int>().apply {
+			if (isPageBookmarked) add(pageIndex)
+		}
+	}
 
 	BackHandler {
-		if (expandedSheetTab != null) {
-			expandedSheetTab = null
-		} else if (isHudVisible) {
-			isHudVisible = false
-		} else {
-			onCloseReader()
+		when {
+			showAiUpscalePreviewModal -> showAiUpscalePreviewModal = false
+			showColorCorrectionPanel -> showColorCorrectionPanel = false
+			showReadingMoreSheet -> showReadingMoreSheet = false
+			showThreeTabDrawer -> showThreeTabDrawer = false
+			expandedSheetTab != null -> expandedSheetTab = null
+			isHudVisible -> isHudVisible = false
+			else -> onCloseReader()
 		}
 	}
 
@@ -357,47 +379,144 @@ fun ReaderScreen(
 			}
 		}
 
-		// Tap handler for 3x3 reading zones: center tap toggles HUD & collapses sheet; left/right taps turn pages and hide HUD
+		// Tap handler for 3x3 reading zones + Bedtime One-Handed Tap Zones
 		val handleCanvasTap: (Offset, IntSize) -> Unit = { tapOffset, containerSize ->
 			val normX = if (containerSize.width > 0) tapOffset.x / containerSize.width else 0.5f
 			val normY = if (containerSize.height > 0) tapOffset.y / containerSize.height else 0.5f
 
-			if (expandedSheetTab != null) {
-				expandedSheetTab = null
-			} else if (normX in 0.30f..0.70f && normY in 0.25f..0.75f) {
-				isHudVisible = !isHudVisible
-			} else {
-				// Turning a page via tap zone hides HUD for zero-clutter reading
-				isHudVisible = false
-				val isLeftZone = normX < 0.30f
-				val isRightZone = normX > 0.70f
-				val goNext = if (isRtl) isLeftZone else isRightZone
-				val goPrev = if (isRtl) isRightZone else isLeftZone
+			when {
+				showColorCorrectionPanel -> showColorCorrectionPanel = false
+				expandedSheetTab != null -> expandedSheetTab = null
+				normX in 0.30f..0.70f && normY in 0.25f..0.75f -> {
+					isHudVisible = !isHudVisible
+				}
+				else -> {
+					// Turning a page via tap zone hides HUD for zero-clutter reading
+					isHudVisible = false
+					val isLeftZone = normX < 0.30f
+					val isRightZone = normX > 0.70f
+					val isLowerEdge = normY > 0.50f && (isLeftZone || isRightZone)
 
-				if (goNext) {
+					val goNext = if (readerConfig.bedtimeOneHandedTapZones && isLowerEdge) {
+						true // Both lower edges advance to next page for effortless bedtime reading
+					} else if (isRtl) {
+						isLeftZone
+					} else {
+						isRightZone
+					}
+					val goPrev = if (readerConfig.bedtimeOneHandedTapZones && isLowerEdge) {
+						false
+					} else if (isRtl) {
+						isRightZone
+					} else {
+						isLeftZone
+					}
+
+					if (goNext) {
+						if (pageIndex < totalPages - 1) {
+							onPageChange(pageIndex + 1)
+						} else if (chapterIndex < totalChapters - 1) {
+							onChapterChange(chapterIndex + 1)
+						}
+					} else if (goPrev) {
+						if (pageIndex > 0) {
+							onPageChange(pageIndex - 1)
+						} else if (chapterIndex > 0) {
+							onChapterChange(chapterIndex - 1)
+						}
+					} else {
+						isHudVisible = !isHudVisible
+					}
+				}
+			}
+		}
+
+		val webtoonListState = rememberLazyListState(
+			initialFirstVisibleItemIndex = pageIndex.coerceIn(0, totalPages - 1)
+		)
+
+		// Hands-Free Automatic Scroll with Bedtime Auto-Pause at end of chapter
+		LaunchedEffect(
+			readerConfig.autoScrollEnabled,
+			readerConfig.autoScrollSpeedMultiplier,
+			readerConfig.bedtimeAutoPauseAtChapterEnd,
+			isWebtoon,
+			pageIndex,
+			chapterIndex,
+		) {
+			if (readerConfig.autoScrollEnabled) {
+				val speed = readerConfig.autoScrollSpeedMultiplier.coerceIn(0.25f, 3.0f)
+				if (isWebtoon) {
+					while (readerConfig.autoScrollEnabled) {
+						delay(48L)
+						val scrolled = webtoonListState.animateScrollBy(14f * speed)
+						if (scrolled <= 0.5f && readerConfig.bedtimeAutoPauseAtChapterEnd) {
+							onUpdateReaderConfig { it.copy(autoScrollEnabled = false) }
+							break
+						}
+					}
+				} else {
+					val intervalMs = (3600L / speed).toLong().coerceIn(900L, 8000L)
+					delay(intervalMs)
+					if (pageIndex < totalPages - 1) {
+						onPageChange(pageIndex + 1)
+					} else if (readerConfig.bedtimeAutoPauseAtChapterEnd) {
+						// Bedtime Auto-Pause at end of chapter so it stops if the user falls asleep
+						onUpdateReaderConfig { it.copy(autoScrollEnabled = false) }
+					} else if (chapterIndex < totalChapters - 1) {
+						onChapterChange(chapterIndex + 1)
+					} else {
+						onUpdateReaderConfig { it.copy(autoScrollEnabled = false) }
+					}
+				}
+			}
+		}
+
+		val handleHardwareKeyNavigation: (Int) -> Boolean = { keyCode ->
+			val isVolumeKey = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+			val isPageOrArrowKey = keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+				keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+				keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
+				keyCode == KeyEvent.KEYCODE_PAGE_UP
+			if ((isVolumeKey && readerConfig.switchPagesWithVolumeKeys) || isPageOrArrowKey) {
+				isHudVisible = false
+				expandedSheetTab = null
+				val rawForward = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+					keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+					keyCode == KeyEvent.KEYCODE_PAGE_DOWN
+				val goNext = if (isVolumeKey && readerConfig.invertVolumeKeys) !rawForward else rawForward
+				if (isWebtoon) {
+					val deltaPx = if (goNext) screenHeightPx * 0.75f else -screenHeightPx * 0.75f
+					coroutineScope.launch {
+						webtoonListState.animateScrollBy(deltaPx)
+					}
+				} else if (goNext) {
 					if (pageIndex < totalPages - 1) {
 						onPageChange(pageIndex + 1)
 					} else if (chapterIndex < totalChapters - 1) {
 						onChapterChange(chapterIndex + 1)
 					}
-				} else if (goPrev) {
+				} else {
 					if (pageIndex > 0) {
 						onPageChange(pageIndex - 1)
 					} else if (chapterIndex > 0) {
 						onChapterChange(chapterIndex - 1)
 					}
-				} else {
-					isHudVisible = !isHudVisible
 				}
+				true
+			} else {
+				false
+			}
+		}
+
+		LaunchedEffect(volumeKeyEvents, readerConfig.switchPagesWithVolumeKeys, readerConfig.invertVolumeKeys, isWebtoon, pageIndex, chapterIndex) {
+			volumeKeyEvents.collect { keyCode ->
+				handleHardwareKeyNavigation(keyCode)
 			}
 		}
 
 		// MAIN READER VIEWPORT (Webtoon Strip vs Horizontal/Vertical Pager)
 		if (isWebtoon) {
-			val webtoonListState = rememberLazyListState(
-				initialFirstVisibleItemIndex = pageIndex.coerceIn(0, totalPages - 1)
-			)
-
 			// Sync external page scrubber changes to Webtoon scroll position
 			LaunchedEffect(pageIndex) {
 				if (webtoonListState.firstVisibleItemIndex != pageIndex && !webtoonListState.isScrollInProgress) {
@@ -435,7 +554,7 @@ fun ReaderScreen(
 				modifier = Modifier
 					.fillMaxSize()
 					.onSizeChanged { webtoonViewportSize = it }
-					.pointerInput(isRtl, pageIndex, chapterIndex, isHudVisible, expandedSheetTab) {
+					.pointerInput(isRtl, pageIndex, chapterIndex, isHudVisible, expandedSheetTab, readerConfig.bedtimeOneHandedTapZones) {
 						detectTapGestures(
 							onDoubleTap = {
 								zoomScale = if (zoomScale > 1.05f) 1f else 2f
@@ -468,6 +587,8 @@ fun ReaderScreen(
 							colorFilterPreset = readerConfig.colorFilterPreset,
 							brightnessDelta = readerConfig.brightnessDelta,
 							contrastDelta = readerConfig.contrastDelta,
+							warmthDelta = readerConfig.warmthDelta,
+							bedtimeDimmerAlpha = readerConfig.bedtimeDimmerAlpha,
 							saturation = readerConfig.saturation,
 							redBalance = readerConfig.redBalance,
 							greenBalance = readerConfig.greenBalance,
@@ -524,7 +645,7 @@ fun ReaderScreen(
 					modifier = Modifier
 						.fillMaxSize()
 						.onSizeChanged { pagerViewportSize = it }
-						.pointerInput(isRtl, pageIndex, chapterIndex, isHudVisible, expandedSheetTab) {
+						.pointerInput(isRtl, pageIndex, chapterIndex, isHudVisible, expandedSheetTab, readerConfig.bedtimeOneHandedTapZones) {
 							detectTapGestures(
 								onDoubleTap = {
 									zoomScale = if (zoomScale > 1.05f) 1f else 2.25f
@@ -579,6 +700,8 @@ fun ReaderScreen(
 							colorFilterPreset = readerConfig.colorFilterPreset,
 							brightnessDelta = readerConfig.brightnessDelta,
 							contrastDelta = readerConfig.contrastDelta,
+							warmthDelta = readerConfig.warmthDelta,
+							bedtimeDimmerAlpha = readerConfig.bedtimeDimmerAlpha,
 							saturation = readerConfig.saturation,
 							redBalance = readerConfig.redBalance,
 							greenBalance = readerConfig.greenBalance,
@@ -639,54 +762,94 @@ fun ReaderScreen(
 		// 2. MOVABLE NEKO-STYLE PAGE SCRUBBER (Left | Horizontal | Right)
 		// Visible only when isHudVisible == true && !isBottomSheetExpanded
 		// =========================================================================
-		val isBottomSheetExpanded = expandedSheetTab != null
-		AnimatedVisibility(
-			visible = isHudVisible && !isBottomSheetExpanded && (readerConfig.sliderPosition == SliderPosition.LEFT_ALIGN || readerConfig.sliderPosition == SliderPosition.RIGHT_ALIGN),
-			enter = fadeIn(tween(180)),
-			exit = fadeOut(tween(180)),
-			modifier = Modifier
-				.align(
-					if (readerConfig.sliderPosition == SliderPosition.LEFT_ALIGN) {
-						Alignment.CenterStart
-					} else {
-						Alignment.CenterEnd
-					}
-				)
-				.padding(horizontal = 12.dp),
-		) {
-			NekoVerticalPageScrubber(
-				currentPage = pageIndex + 1,
-				totalPages = totalPages,
-				canGoPrevChapter = chapterIndex > 0,
-				canGoNextChapter = chapterIndex < totalChapters - 1,
-				onSelectPage = { oneBased ->
-					onPageChange((oneBased - 1).coerceIn(0, totalPages - 1))
-				},
-				onPrevChapter = {
-					if (chapterIndex > 0) onChapterChange(chapterIndex - 1)
-				},
-				onNextChapter = {
-					if (chapterIndex < totalChapters - 1) onChapterChange(chapterIndex + 1)
-				},
-				onRepositionByDrag = { rawScreenOffset ->
-					val newPos = resolveSliderPositionFromDrag(
-						rawScreenOffset = rawScreenOffset,
-						currentPos = readerConfig.sliderPosition,
-						screenWidthPx = screenWidthPx,
-						screenHeightPx = screenHeightPx,
+		val anyModalOrDrawerOpen = expandedSheetTab != null ||
+			showReadingMoreSheet ||
+			showColorCorrectionPanel ||
+			showThreeTabDrawer ||
+			showAiUpscalePreviewModal
+
+		if (!anyModalOrDrawerOpen) {
+			AnimatedVisibility(
+				visible = isHudVisible && (readerConfig.sliderPosition == SliderPosition.LEFT_ALIGN || readerConfig.sliderPosition == SliderPosition.RIGHT_ALIGN),
+				enter = fadeIn(tween(180)),
+				exit = fadeOut(tween(120)),
+				modifier = Modifier
+					.align(
+						if (readerConfig.sliderPosition == SliderPosition.LEFT_ALIGN) {
+							Alignment.CenterStart
+						} else {
+							Alignment.CenterEnd
+						},
 					)
-					if (newPos != readerConfig.sliderPosition) {
-						onUpdateReaderConfig { it.copy(sliderPosition = newPos) }
-					}
+					.padding(
+						start = 12.dp,
+						end = 12.dp,
+						bottom = if (readerConfig.showZoomButtons && readerConfig.sliderPosition == SliderPosition.RIGHT_ALIGN) 88.dp else 0.dp,
+					),
+			) {
+				NekoVerticalPageScrubber(
+					currentPage = pageIndex + 1,
+					totalPages = totalPages,
+					canGoPrevChapter = chapterIndex > 0,
+					canGoNextChapter = chapterIndex < totalChapters - 1,
+					onSelectPage = { oneBased ->
+						onPageChange((oneBased - 1).coerceIn(0, totalPages - 1))
+					},
+					onPrevChapter = {
+						if (chapterIndex > 0) onChapterChange(chapterIndex - 1)
+					},
+					onNextChapter = {
+						if (chapterIndex < totalChapters - 1) onChapterChange(chapterIndex + 1)
+					},
+					onRepositionByDrag = { rawScreenOffset ->
+						val newPos = resolveSliderPositionFromDrag(
+							rawScreenOffset = rawScreenOffset,
+							currentPos = readerConfig.sliderPosition,
+							screenWidthPx = screenWidthPx,
+							screenHeightPx = screenHeightPx,
+						)
+						if (newPos != readerConfig.sliderPosition) {
+							onUpdateReaderConfig { it.copy(sliderPosition = newPos) }
+						}
+					},
+				)
+			}
+		}
+
+		// =========================================================================
+		// TASK 5.1: TOGGLEABLE ON-SCREEN ZOOM BUTTONS (🔍+ / 🔍- & 100% ↺)
+		// Bound strictly to isHudVisible && readerConfig.showZoomButtons && !anyModalOrDrawerOpen
+		// Aligned to exact 12.dp right margin and 40.dp width matching NekoVerticalPageScrubber
+		// =========================================================================
+		AnimatedVisibility(
+			visible = isHudVisible && readerConfig.showZoomButtons && !anyModalOrDrawerOpen,
+			enter = fadeIn(tween(160)),
+			exit = fadeOut(tween(120)),
+			modifier = Modifier
+				.align(Alignment.BottomEnd)
+				.padding(end = 12.dp, bottom = 144.dp),
+		) {
+			ReaderFloatingZoomControls(
+				zoomScale = zoomScale,
+				onZoomIn = { zoomScale = (zoomScale + 0.35f).coerceAtMost(3.5f) },
+				onZoomOut = {
+					val next = (zoomScale - 0.35f).coerceAtLeast(1f)
+					zoomScale = next
+					if (next <= 1.02f) panOffset = Offset.Zero
+				},
+				onResetZoom = {
+					zoomScale = 1f
+					panOffset = Offset.Zero
 				},
 			)
 		}
 
 		// =========================================================================
 		// 3.1 NEKO TOP APP BAR (when isHudVisible == true)
-		// Clean translucent dark header (#E6121318) with ONLY:
 		// - Left: Back arrow button (single tap = back; long-press = jump to Home)
-		// - Center: Two-line centered title block (Line 1: Clean Manga Title; Line 2: Vol & Ch)
+		// - Center: Two-line title block + compact 🕵️ Incognito badge next to chapter subtitle
+		// - Right: Circular [ ✦ ] (AI Upscaling Preview) & [ ⋮ ] (Two-Tab Reading | More Sheet)
+		// - Swipe down on top bar exits Reader back to MangaDetailsScreen
 		// =========================================================================
 		AnimatedVisibility(
 			visible = isHudVisible,
@@ -694,11 +857,29 @@ fun ReaderScreen(
 			exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { -it },
 			modifier = Modifier.align(Alignment.TopCenter),
 		) {
+			var topBarSwipeDownDelta by remember { mutableFloatStateOf(0f) }
 			Surface(
 				color = Color(0xE6121318),
 				tonalElevation = 0.dp,
 				modifier = Modifier
 					.fillMaxWidth()
+					.pointerInput(Unit) {
+						detectDragGestures(
+							onDragStart = { topBarSwipeDownDelta = 0f },
+							onDrag = { change, dragAmount ->
+								if (dragAmount.y > 0f && abs(dragAmount.y) > abs(dragAmount.x)) {
+									change.consume()
+									topBarSwipeDownDelta += dragAmount.y
+								}
+							},
+							onDragEnd = {
+								if (topBarSwipeDownDelta > 60f) {
+									onCloseReader()
+								}
+								topBarSwipeDownDelta = 0f
+							},
+						)
+					}
 					.testTag("neko_reader_top_bar"),
 			) {
 				Box(
@@ -728,11 +909,11 @@ fun ReaderScreen(
 						)
 					}
 
-					// Center: Two-line centered title block
+					// Center: Two-line centered title block + 🕵️ Incognito HUD badge
 					Column(
 						modifier = Modifier
 							.align(Alignment.Center)
-							.padding(horizontal = 56.dp),
+							.padding(horizontal = 52.dp),
 						horizontalAlignment = Alignment.CenterHorizontally,
 					) {
 						Text(
@@ -744,25 +925,69 @@ fun ReaderScreen(
 							overflow = TextOverflow.Ellipsis,
 							textAlign = TextAlign.Center,
 						)
-						Text(
-							text = "Vol.${currentChapterEntry.volumeNumber} Ch.${currentChapterEntry.chapterNumber}",
-							style = MaterialTheme.typography.bodySmall,
-							color = Color(0xFF9EA4B0),
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-							textAlign = TextAlign.Center,
-						)
+						Row(
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							Text(
+								text = "Vol.${currentChapterEntry.volumeNumber} Ch.${currentChapterEntry.chapterNumber}",
+								style = MaterialTheme.typography.bodySmall,
+								color = Color(0xFF9EA4B0),
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis,
+								textAlign = TextAlign.Center,
+							)
+							if (isIncognitoSession) {
+								Surface(
+									color = Color(0xFF5CE1E6).copy(alpha = 0.18f),
+									shape = RoundedCornerShape(999.dp),
+									modifier = Modifier.testTag("reader_incognito_hud_badge"),
+								) {
+									Text(
+										text = "🕵️ Incognito",
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.Bold,
+										color = Color(0xFF5CE1E6),
+										modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+									)
+								}
+							}
+						}
+					}
+
+					// Right: Single circular icon button [ ⋮ ] (AI tools consolidated into bottom [✦] sheet)
+					Surface(
+						color = Color.White.copy(alpha = 0.08f),
+						shape = CircleShape,
+						modifier = Modifier
+							.align(Alignment.CenterEnd)
+							.size(40.dp)
+							.clip(CircleShape)
+							.clickable {
+								activeReadingMoreTab = ReaderOptionsSheetTab.READING
+								showReadingMoreSheet = true
+							}
+							.testTag("reader_more_options_button"),
+					) {
+						Box(contentAlignment = Alignment.Center) {
+							Icon(
+								imageVector = Icons.Default.MoreVert,
+								contentDescription = "Reader Reading & More options",
+								tint = Color.White,
+								modifier = Modifier.size(20.dp),
+							)
+						}
 					}
 				}
 			}
 		}
 
 		// =========================================================================
-		// 3.2 EXPANDABLE BOTTOM SHEET (Chapters | AI & Tools | Settings)
-		// + Horizontal Page Scrubber when SliderPosition.HORIZONTAL is active
+		// 3.2 EXPANDABLE BOTTOM SHEET + NEMURI BOTTOM SCRUBBER DOCK
+		// [ |◀ ]  ━━━|••••••••  [ ▶| ]  [ ⊞ ]
 		// =========================================================================
 		AnimatedVisibility(
-			visible = isHudVisible,
+			visible = isHudVisible && !showColorCorrectionPanel,
 			enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it },
 			exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { it },
 			modifier = Modifier.align(Alignment.BottomCenter),
@@ -771,13 +996,13 @@ fun ReaderScreen(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalAlignment = Alignment.CenterHorizontally,
 			) {
-				// Docked Horizontal Page Scrubber just above the Bottom Sheet Bar when HORIZONTAL is selected and sheet is collapsed
+				// Nemuri Bottom Scrubber Dock ([ |◀ ]  ━━━|••••••••  [ ▶| ]  [ ⊞ ])
 				AnimatedVisibility(
-					visible = isHudVisible && !isBottomSheetExpanded && readerConfig.sliderPosition == SliderPosition.HORIZONTAL,
+					visible = isHudVisible && expandedSheetTab == null && readerConfig.sliderPosition == SliderPosition.HORIZONTAL,
 					enter = fadeIn(tween(160)),
-					exit = fadeOut(tween(160)),
+					exit = fadeOut(tween(120)),
 				) {
-					NekoHorizontalPageScrubber(
+					NemuriBottomScrubberDock(
 						currentPage = pageIndex + 1,
 						totalPages = totalPages,
 						isRtl = isRtl,
@@ -792,16 +1017,15 @@ fun ReaderScreen(
 						onNextChapter = {
 							if (chapterIndex < totalChapters - 1) onChapterChange(chapterIndex + 1)
 						},
-						onRepositionByDrag = { rawDeltaOffset ->
-							if (rawDeltaOffset.y < -90f) {
-								val targetPos = if (rawDeltaOffset.x < 0f) {
-									SliderPosition.LEFT_ALIGN
-								} else {
-									SliderPosition.RIGHT_ALIGN
-								}
-								onUpdateReaderConfig { it.copy(sliderPosition = targetPos) }
-							}
+						onOpenThreeTabDrawer = {
+							activeThreeTabDrawerTab = ReaderDrawerTab.PAGE_GRID
+							showThreeTabDrawer = true
 						},
+						onSwipeUpOpenOptions = {
+							activeReadingMoreTab = ReaderOptionsSheetTab.READING
+							showReadingMoreSheet = true
+						},
+						onSwipeDownExitReader = onCloseReader,
 						modifier = Modifier
 							.fillMaxWidth()
 							.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -882,12 +1106,17 @@ fun ReaderScreen(
 
 									NekoBottomSheetTab.AI_TOOLS -> {
 										NekoAiAndPageToolsTabContent(
+											mangaItem = mangaItem,
 											readerConfig = readerConfig,
 											effectiveAutoCrop = effectiveAutoCrop,
-											croppedPercent = 27,
+											croppedPercent = readerConfig.marginCropPercent,
 											activeSource = activeChapterSource,
 											onSelectSource = { newSource ->
 												activeChapterSource = newSource
+											},
+											onOpenAiUpscalePreview = {
+												expandedSheetTab = null
+												showAiUpscalePreviewModal = true
 											},
 											onUpdateReaderConfig = onUpdateReaderConfig,
 										)
@@ -967,6 +1196,114 @@ fun ReaderScreen(
 				}
 			}
 		}
+
+		// =========================================================================
+		// TASK 3.3: LIVE COLOR CORRECTION & "NEMURI BEDTIME PAPER" PANEL
+		// Compact bottom panel WITHOUT a dark backdrop dim so the live manga page
+		// above updates in real time.
+		// =========================================================================
+		AnimatedVisibility(
+			visible = showColorCorrectionPanel,
+			enter = fadeIn(tween(160)) + slideInVertically(tween(200)) { it },
+			exit = fadeOut(tween(140)) + slideOutVertically(tween(180)) { it },
+			modifier = Modifier.align(Alignment.BottomCenter),
+		) {
+			ReaderBedtimeColorCorrectionPanel(
+				readerConfig = readerConfig,
+				hasCustomSeriesProfile = hasCustomSeriesProfile,
+				onUpdateReaderConfig = onUpdateReaderConfig,
+				onSaveSeriesProfile = onSaveSeriesProfile,
+				onDismiss = { showColorCorrectionPanel = false },
+			)
+		}
+
+		// =========================================================================
+		// TASK 3: TWO-TAB READER OPTIONS SHEET (Reading | More)
+		// =========================================================================
+		if (showReadingMoreSheet) {
+			ReaderTwoTabOptionsSheet(
+				activeTab = activeReadingMoreTab,
+				onSelectTab = { activeReadingMoreTab = it },
+				readerConfig = readerConfig,
+				isPageBookmarked = isPageBookmarked || bookmarkedPagesInChapter.contains(pageIndex),
+				mangaTitle = cleanMangaTitle,
+				chapterNumber = currentChapterEntry.chapterNumber,
+				pageNumber = pageIndex + 1,
+				onUpdateReaderConfig = onUpdateReaderConfig,
+				onTogglePageBookmark = {
+					if (bookmarkedPagesInChapter.contains(pageIndex)) {
+						bookmarkedPagesInChapter.remove(pageIndex)
+					} else {
+						bookmarkedPagesInChapter.add(pageIndex)
+					}
+					onTogglePageBookmark()
+				},
+				onOpenColorCorrection = {
+					showReadingMoreSheet = false
+					showColorCorrectionPanel = true
+				},
+				onOpenAdvancedReaderSettings = {
+					showReadingMoreSheet = false
+					isHudVisible = true
+					expandedSheetTab = NekoBottomSheetTab.SETTINGS
+				},
+				onDismiss = { showReadingMoreSheet = false },
+			)
+		}
+
+		// =========================================================================
+		// TASK 4.2: 3-TAB CHAPTER / PAGE GRID / BOOKMARKS DRAWER
+		// =========================================================================
+		if (showThreeTabDrawer) {
+			ReaderThreeTabChapterPageGridDrawer(
+				activeTab = activeThreeTabDrawerTab,
+				onSelectTab = { activeThreeTabDrawerTab = it },
+				mangaTitle = cleanMangaTitle,
+				chapters = chapterEntries,
+				activeChapterIndex = chapterIndex,
+				currentPageIndex = pageIndex,
+				totalPages = totalPages,
+				bookmarkedPages = bookmarkedPagesInChapter,
+				readerConfig = readerConfig,
+				onSelectChapter = { selectedCh ->
+					onChapterChange(selectedCh)
+					showThreeTabDrawer = false
+					isHudVisible = false
+				},
+				onSelectPage = { selectedPage ->
+					onPageChange(selectedPage)
+					showThreeTabDrawer = false
+					isHudVisible = false
+				},
+				onToggleBookmarkPage = { targetPage ->
+					if (bookmarkedPagesInChapter.contains(targetPage)) {
+						bookmarkedPagesInChapter.remove(targetPage)
+					} else {
+						bookmarkedPagesInChapter.add(targetPage)
+					}
+					if (targetPage == pageIndex) {
+						onTogglePageBookmark()
+					}
+				},
+				onDismiss = { showThreeTabDrawer = false },
+			)
+		}
+
+		// =========================================================================
+		// TASK 2: LIVE "✦ AI UPSCALING PREVIEW" MODAL
+		// =========================================================================
+		if (showAiUpscalePreviewModal) {
+			ReaderAiUpscalingPreviewModal(
+				mangaTitle = cleanMangaTitle,
+				chapterNumber = (chapterIndex + 1).toFloat(),
+				pageNumber = pageIndex + 1,
+				totalPages = totalPages,
+				readerConfig = readerConfig,
+				decodedBitmap = decodedPageBitmap,
+				onUpdateReaderConfig = onUpdateReaderConfig,
+				onDismiss = { showAiUpscalePreviewModal = false },
+			)
+		}
 	}
 }
 
@@ -1024,7 +1361,8 @@ private fun NekoVerticalPageScrubber(
 	onRepositionByDrag: (Offset) -> Unit,
 	modifier: Modifier = Modifier,
 ) {
-	val capsuleBg = Color(0xCC1A1C24)
+	val capsuleBg = Color(0xD91E2532)
+	val capsuleBorder = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
 	val accentColor = Color(0xFF5CE1E6)
 	var dragAccumulatedOffset by remember { mutableStateOf(Offset.Zero) }
 
@@ -1047,11 +1385,12 @@ private fun NekoVerticalPageScrubber(
 		horizontalAlignment = Alignment.CenterHorizontally,
 		verticalArrangement = Arrangement.spacedBy(8.dp),
 	) {
-		// Top Capsule (44.dp x 44.dp, RoundedCornerShape(12.dp), #CC1A1C24): SkipPrevious rotated vertically
+		// Top Capsule (40.dp x 40.dp, RoundedCornerShape(14.dp), rgba(30, 37, 50, 0.85)): SkipPrevious rotated vertically
 		Surface(
 			color = capsuleBg,
-			shape = RoundedCornerShape(12.dp),
-			modifier = Modifier.size(44.dp),
+			shape = RoundedCornerShape(14.dp),
+			border = capsuleBorder,
+			modifier = Modifier.size(40.dp),
 		) {
 			IconButton(
 				onClick = onPrevChapter,
@@ -1063,19 +1402,20 @@ private fun NekoVerticalPageScrubber(
 					contentDescription = "Previous Chapter",
 					tint = if (canGoPrevChapter) Color.White else Color.White.copy(alpha = 0.35f),
 					modifier = Modifier
-						.size(22.dp)
+						.size(20.dp)
 						.rotate(90f),
 				)
 			}
 		}
 
-		// Middle Scrubber Pill (44.dp wide, 220.dp tall, RoundedCornerShape(16.dp), #CC1A1C24)
+		// Middle Scrubber Pill (40.dp wide, 200.dp tall, RoundedCornerShape(20.dp), rgba(30, 37, 50, 0.85))
 		Surface(
 			color = capsuleBg,
-			shape = RoundedCornerShape(16.dp),
+			shape = RoundedCornerShape(20.dp),
+			border = capsuleBorder,
 			modifier = Modifier
-				.width(44.dp)
-				.height(220.dp),
+				.width(40.dp)
+				.height(200.dp),
 		) {
 			Column(
 				modifier = Modifier
@@ -1167,11 +1507,12 @@ private fun NekoVerticalPageScrubber(
 			}
 		}
 
-		// Bottom Capsule (44.dp x 44.dp, RoundedCornerShape(12.dp), #CC1A1C24): SkipNext rotated vertically
+		// Bottom Capsule (40.dp x 40.dp, RoundedCornerShape(14.dp), rgba(30, 37, 50, 0.85)): SkipNext rotated vertically
 		Surface(
 			color = capsuleBg,
-			shape = RoundedCornerShape(12.dp),
-			modifier = Modifier.size(44.dp),
+			shape = RoundedCornerShape(14.dp),
+			border = capsuleBorder,
+			modifier = Modifier.size(40.dp),
 		) {
 			IconButton(
 				onClick = onNextChapter,
@@ -1183,7 +1524,7 @@ private fun NekoVerticalPageScrubber(
 					contentDescription = "Next Chapter",
 					tint = if (canGoNextChapter) Color.White else Color.White.copy(alpha = 0.35f),
 					modifier = Modifier
-						.size(22.dp)
+						.size(20.dp)
 						.rotate(90f),
 				)
 			}
@@ -1522,26 +1863,28 @@ private fun NekoChaptersTabContent(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun NekoAiAndPageToolsTabContent(
+	mangaItem: LibraryMangaItem,
 	readerConfig: ReaderCustomizationConfig,
 	effectiveAutoCrop: Boolean,
 	croppedPercent: Int,
 	activeSource: String,
 	onSelectSource: (String) -> Unit,
+	onOpenAiUpscalePreview: () -> Unit,
 	onUpdateReaderConfig: ((ReaderCustomizationConfig) -> ReaderCustomizationConfig) -> Unit,
 ) {
 	val accentCyan = Color(0xFF5CE1E6)
-	val fallbackSources = remember(activeSource) {
-		listOf(activeSource, "MangaDex", "ComicK", "Bato.to", "Mangakakalot").distinct()
-	}
+	var showSourceFailoverPicker by remember { mutableStateOf(false) }
+	var isAutoFailoverEnabled by remember { mutableStateOf(true) }
 
 	Column(
 		modifier = Modifier
 			.fillMaxSize()
 			.verticalScroll(rememberScrollState())
 			.padding(horizontal = 20.dp, vertical = 12.dp),
-		verticalArrangement = Arrangement.spacedBy(18.dp),
+		verticalArrangement = Arrangement.spacedBy(16.dp),
 	) {
 		// 1. AI Crisp Ink & Line Art Upscaler: Segmented selector (Off | 1.5x Fast NPU | 2.0x HQ)
+		//    + Full-width action button: ✦ Compare Original vs. AI Upscaled Preview
 		Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 			Row(
 				verticalAlignment = Alignment.CenterVertically,
@@ -1581,6 +1924,33 @@ private fun NekoAiAndPageToolsTabContent(
 						modifier = Modifier.weight(1f),
 					)
 				}
+			}
+
+			OutlinedButton(
+				onClick = onOpenAiUpscalePreview,
+				shape = RoundedCornerShape(12.dp),
+				border = BorderStroke(1.dp, accentCyan.copy(alpha = 0.45f)),
+				colors = ButtonDefaults.outlinedButtonColors(
+					containerColor = accentCyan.copy(alpha = 0.10f),
+					contentColor = accentCyan,
+				),
+				modifier = Modifier
+					.fillMaxWidth()
+					.testTag("reader_ai_compare_upscale_preview_button"),
+			) {
+				Icon(
+					imageVector = Icons.Default.AutoAwesome,
+					contentDescription = null,
+					tint = accentCyan,
+					modifier = Modifier.size(16.dp),
+				)
+				Spacer(modifier = Modifier.width(8.dp))
+				Text(
+					text = "✦ Preview AI Upscaling (Split Compare)",
+					style = MaterialTheme.typography.labelLarge,
+					fontWeight = FontWeight.Bold,
+					color = accentCyan,
+				)
 			}
 		}
 
@@ -1679,7 +2049,7 @@ private fun NekoAiAndPageToolsTabContent(
 			}
 		}
 
-		// 4. Source Failover / Switcher: Shows current active source with one-tap fallback chips
+		// 4. Source Failover / Switcher: Single compact card with Switch ▸ button opening MigrationSourceSelectorScreen
 		Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 			Row(
 				verticalAlignment = Alignment.CenterVertically,
@@ -1698,26 +2068,91 @@ private fun NekoAiAndPageToolsTabContent(
 					color = Color.White,
 				)
 			}
-			Text(
-				text = "Active Chapter Source: $activeSource",
-				style = MaterialTheme.typography.bodySmall,
-				color = Color(0xFF9EA4B0),
-			)
-			FlowRow(
-				modifier = Modifier.fillMaxWidth(),
-				horizontalArrangement = Arrangement.spacedBy(8.dp),
-				verticalArrangement = Arrangement.spacedBy(8.dp),
+			Surface(
+				color = Color(0xFF21232C),
+				shape = RoundedCornerShape(16.dp),
+				border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+				modifier = Modifier
+					.fillMaxWidth()
+					.clickable { showSourceFailoverPicker = true }
+					.testTag("reader_source_failover_compact_card"),
 			) {
-				fallbackSources.forEach { src ->
-					val isCurrent = src == activeSource
-					NekoPillOptionButton(
-						label = src,
-						selected = isCurrent,
-						onClick = { onSelectSource(src) },
-						leadingCheckIcon = isCurrent,
-					)
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(horizontal = 16.dp, vertical = 12.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.SpaceBetween,
+				) {
+					Column(
+						modifier = Modifier.weight(1f),
+						verticalArrangement = Arrangement.spacedBy(3.dp),
+					) {
+						Text(
+							text = "Active Source: $activeSource (Mirror)",
+							style = MaterialTheme.typography.bodyMedium,
+							fontWeight = FontWeight.Bold,
+							color = Color.White,
+						)
+						Text(
+							text = if (isAutoFailoverEnabled) {
+								"✦ Auto-Failover Enabled (4 backup sources ready)"
+							} else {
+								"Manual Mirror Override • Tap Switch to change source"
+							},
+							style = MaterialTheme.typography.labelSmall,
+							color = accentCyan,
+						)
+					}
+					FilledTonalButton(
+						onClick = { showSourceFailoverPicker = true },
+						colors = ButtonDefaults.filledTonalButtonColors(
+							containerColor = accentCyan.copy(alpha = 0.16f),
+							contentColor = accentCyan,
+						),
+						contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+						modifier = Modifier.testTag("reader_source_failover_switch_button"),
+					) {
+						Text(
+							text = "Switch ▸",
+							style = MaterialTheme.typography.labelMedium,
+							fontWeight = FontWeight.Bold,
+						)
+					}
 				}
 			}
+		}
+	}
+
+	if (showSourceFailoverPicker) {
+		val liveReaderItem = remember(mangaItem, activeSource) {
+			mangaItem.copy(manga = mangaItem.manga.copy(source = activeSource))
+		}
+		org.koitharu.kotatsu.ui.components.UniversalSheet(
+			onClose = { showSourceFailoverPicker = false },
+			containerColor = Color(0xFF121620),
+			sheetTestTag = "reader_source_manager_universal_sheet",
+		) {
+			SourceMigrationModalSheet(
+				itemsToMigrate = listOf(liveReaderItem),
+				onMigrateSingle = { _, targetSource, _ ->
+					isAutoFailoverEnabled = false
+					onSelectSource(UiSourceAndTitleFormatter.formatSourceName(targetSource))
+					showSourceFailoverPicker = false
+				},
+				onMigrateAllSelected = { migrations ->
+					migrations.firstOrNull()?.let { (_, targetSource, _) ->
+						isAutoFailoverEnabled = false
+						onSelectSource(UiSourceAndTitleFormatter.formatSourceName(targetSource))
+					}
+					showSourceFailoverPicker = false
+				},
+				onMergeSecondarySource = { _, mergedSource, _ ->
+					isAutoFailoverEnabled = true
+					onSelectSource(UiSourceAndTitleFormatter.formatSourceName(mergedSource))
+				},
+				onClose = { showSourceFailoverPicker = false },
+			)
 		}
 	}
 }
@@ -1887,6 +2322,51 @@ private fun NekoSettingsTabContent(
 							}
 						}
 					}
+
+					// 5. Show Zoom Buttons (🔍+ / 🔍-): ON / OFF toggle switch
+					Surface(
+						color = Color(0xFF21232C),
+						shape = RoundedCornerShape(14.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.testTag("reader_settings_show_zoom_buttons_row"),
+					) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 14.dp, vertical = 10.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = "Show Zoom Buttons (🔍+ / 🔍-)",
+									style = MaterialTheme.typography.bodyMedium,
+									fontWeight = FontWeight.SemiBold,
+									color = Color.White,
+								)
+								Text(
+									text = "Floating zoom pill aligned beneath vertical page scrubber",
+									style = MaterialTheme.typography.labelSmall,
+									color = Color(0xFF9EA4B0),
+								)
+							}
+							Switch(
+								checked = readerConfig.showZoomButtons,
+								onCheckedChange = { enabled ->
+									onUpdateReaderConfig { it.copy(showZoomButtons = enabled) }
+								},
+								colors = SwitchDefaults.colors(
+									checkedThumbColor = Color(0xFF0A1014),
+									checkedTrackColor = accentCyan,
+								),
+								modifier = Modifier.testTag("reader_sheet_toggle_zoom_buttons_switch"),
+							)
+						}
+					}
 				}
 
 				NekoSettingsSubTab.PAGED -> {
@@ -2019,7 +2499,7 @@ private fun NekoPillOptionButton(
 			.clickable(onClick = onClick),
 	) {
 		Row(
-			modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+			modifier = Modifier.padding(horizontal = 6.dp, vertical = 9.dp),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.Center,
 		) {
@@ -2029,7 +2509,7 @@ private fun NekoPillOptionButton(
 					contentDescription = null,
 					tint = accentCyan,
 					modifier = Modifier
-						.padding(end = 5.dp)
+						.padding(end = 4.dp)
 						.size(14.dp),
 				)
 			}
@@ -2039,6 +2519,7 @@ private fun NekoPillOptionButton(
 				fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
 				color = textColor,
 				maxLines = 1,
+				softWrap = false,
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
@@ -2180,6 +2661,8 @@ private fun buildReaderColorFilter(config: ReaderCustomizationConfig): ColorFilt
 	val isDefault = config.colorFilterPreset == ReaderColorFilterPreset.NONE &&
 		abs(config.brightnessDelta) < 0.01f &&
 		abs(config.contrastDelta) < 0.01f &&
+		abs(config.warmthDelta) < 0.01f &&
+		config.bedtimeDimmerAlpha < 0.01f &&
 		abs(config.saturation - 1f) < 0.01f &&
 		abs(config.redBalance - 1f) < 0.01f &&
 		abs(config.greenBalance - 1f) < 0.01f &&
@@ -2201,17 +2684,28 @@ private fun buildReaderColorFilter(config: ReaderCustomizationConfig): ColorFilt
 
 	// Contrast & Brightness + RGB balance
 	val c = 1f + config.contrastDelta +
-		if (config.colorFilterPreset == ReaderColorFilterPreset.CRISP_HIGH_CONTRAST) 0.22f else 0f
-	val b = config.brightnessDelta * 255f
+		when (config.colorFilterPreset) {
+			ReaderColorFilterPreset.CRISP_HIGH_CONTRAST -> 0.22f
+			ReaderColorFilterPreset.AI_AUTO_INK_RESTORE -> 0.28f
+			else -> 0f
+		}
+	val b = (config.brightnessDelta - config.bedtimeDimmerAlpha * 0.65f) * 255f
 
 	var rScale = config.redBalance * c
 	var gScale = config.greenBalance * c
 	var bScale = config.blueBalance * c
 
-	if (config.warmPaperTint || config.colorFilterPreset == ReaderColorFilterPreset.WARM_SEPIA) {
-		rScale *= 1.06f
-		gScale *= 1.01f
-		bScale *= 0.88f
+	val warmth = config.warmthDelta +
+		when {
+			config.colorFilterPreset == ReaderColorFilterPreset.NEMURI_BEDTIME -> 0.45f
+			config.warmPaperTint || config.colorFilterPreset == ReaderColorFilterPreset.WARM_SEPIA -> 0.30f
+			else -> 0f
+		}
+
+	if (warmth > 0.01f) {
+		rScale *= (1f + warmth * 0.08f)
+		gScale *= (1f - warmth * 0.02f)
+		bScale *= (1f - warmth * 0.26f)
 	} else if (config.colorFilterPreset == ReaderColorFilterPreset.NIGHT_BLUE_LIGHT) {
 		rScale *= 0.90f
 		gScale *= 0.95f
@@ -2243,3 +2737,4 @@ private fun buildReaderColorFilter(config: ReaderCustomizationConfig): ColorFilt
 	matrix.timesAssign(scaleMatrix)
 	return ColorFilter.colorMatrix(matrix)
 }
+

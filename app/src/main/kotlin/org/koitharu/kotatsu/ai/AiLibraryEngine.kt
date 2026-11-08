@@ -311,7 +311,7 @@ class AiLibraryEngine(
 					candidateUrl = bestCandidate.url,
 					candidateChaptersCount = bestCandidate.totalChapters,
 					confidenceScore = sim,
-					aiDiagnosisNote = "DropSauce AI Fix-It matched '${item.manga.title}' -> '${bestCandidate.title}' on ${bestCandidate.sourceName} (${bestCandidate.totalChapters} chapters available, preserving ${item.chapters.count { it.isRead }} read chapters).",
+					aiDiagnosisNote = "Source Fix-It matched '${item.manga.title}' -> '${bestCandidate.title}' on ${bestCandidate.sourceName} (${bestCandidate.totalChapters} chapters available, preserving ${item.chapters.count { it.isRead }} read chapters).",
 				),
 			)
 		}

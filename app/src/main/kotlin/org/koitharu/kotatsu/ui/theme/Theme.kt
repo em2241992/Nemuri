@@ -151,8 +151,10 @@ fun KotatsuNeoTheme(
 	themeMode: org.koitharu.kotatsu.core.model.AppThemeMode = org.koitharu.kotatsu.core.model.AppThemeMode.DARK,
 	colorSchemePreset: org.koitharu.kotatsu.core.model.AppColorSchemePreset = org.koitharu.kotatsu.core.model.AppColorSchemePreset.KOTATSU_TEAL,
 	pureOledBlack: Boolean = false,
+	useDynamicColor: Boolean = false,
 	content: @Composable () -> Unit,
 ) {
+	val context = androidx.compose.ui.platform.LocalContext.current
 	val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
 	val useDark = when (themeMode) {
 		org.koitharu.kotatsu.core.model.AppThemeMode.SYSTEM -> systemDark
@@ -160,30 +162,49 @@ fun KotatsuNeoTheme(
 		org.koitharu.kotatsu.core.model.AppThemeMode.DARK -> darkTheme
 	}
 
-	val primaryColor = Color(
-		if (useDark) colorSchemePreset.darkPrimaryHex else colorSchemePreset.lightPrimaryHex,
-	)
-	val primaryContainerColor = Color(
-		if (useDark) colorSchemePreset.darkContainerHex else colorSchemePreset.lightContainerHex,
-	)
-	val onPrimaryColor = if (useDark && colorSchemePreset != org.koitharu.kotatsu.core.model.AppColorSchemePreset.CRIMSON_INK) {
-		Color(0xFF041F22)
+	val colorScheme = if (useDynamicColor && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+		val dynamicBase = if (useDark) {
+			androidx.compose.material3.dynamicDarkColorScheme(context)
+		} else {
+			androidx.compose.material3.dynamicLightColorScheme(context)
+		}
+		if (useDark && pureOledBlack) {
+			dynamicBase.copy(
+				background = Color(0xFF000000),
+				surface = Color(0xFF07080C),
+				surfaceVariant = Color(0xFF12141C),
+			)
+		} else {
+			dynamicBase
+		}
 	} else {
-		Color.White
-	}
+		val primaryColor = Color(
+			if (useDark) colorSchemePreset.darkPrimaryHex else colorSchemePreset.lightPrimaryHex,
+		)
+		val primaryContainerColor = Color(
+			if (useDark) colorSchemePreset.darkContainerHex else colorSchemePreset.lightContainerHex,
+		)
+		val secondaryColor = Color(colorSchemePreset.secondarySwatchHex)
+		val onPrimaryColor = if (useDark && colorSchemePreset != org.koitharu.kotatsu.core.model.AppColorSchemePreset.CRIMSON_INK) {
+			Color(0xFF041F22)
+		} else {
+			Color.White
+		}
 
-	val baseScheme = when {
-		!useDark -> WarmPaperLightScheme
-		pureOledBlack -> PureOledDarkScheme
-		else -> ObsidianDarkScheme
-	}
+		val baseScheme = when {
+			!useDark -> WarmPaperLightScheme
+			pureOledBlack -> PureOledDarkScheme
+			else -> ObsidianDarkScheme
+		}
 
-	val colorScheme = baseScheme.copy(
-		primary = primaryColor,
-		onPrimary = onPrimaryColor,
-		primaryContainer = primaryContainerColor,
-		onPrimaryContainer = if (useDark) Color(0xFFF1F5F9) else Color(0xFF0F172A),
-	)
+		baseScheme.copy(
+			primary = primaryColor,
+			onPrimary = onPrimaryColor,
+			primaryContainer = primaryContainerColor,
+			onPrimaryContainer = if (useDark) Color(0xFFF1F5F9) else Color(0xFF0F172A),
+			secondary = secondaryColor,
+		)
+	}
 
 	MaterialTheme(
 		colorScheme = colorScheme,

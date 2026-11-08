@@ -1,6 +1,7 @@
 package org.koitharu.kotatsu.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -82,6 +83,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -92,9 +95,11 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,6 +111,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,9 +126,12 @@ import org.koitharu.kotatsu.core.model.LibraryDisplayConfig
 import org.koitharu.kotatsu.core.model.LibraryLayoutMode
 import org.koitharu.kotatsu.core.model.LibraryMangaItem
 import org.koitharu.kotatsu.core.model.LibrarySortOrder
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koitharu.kotatsu.main.ui.CheckAndSwapPromptState
 import org.koitharu.kotatsu.main.ui.QuickLibraryFilter
+import org.koitharu.kotatsu.ui.components.GitHubUpdateChecker
 import org.koitharu.kotatsu.ui.components.MangaCoverArtwork
+import org.koitharu.kotatsu.ui.components.NemuriGitHubUpdateBanner
 import org.koitharu.kotatsu.ui.theme.JetBrainsMonoFamily
 import org.koitharu.kotatsu.ui.theme.PlusJakartaDisplayFamily
 
@@ -168,9 +177,13 @@ fun LibraryScreen(
 	activeSmartQueryAst: org.koitharu.kotatsu.search.ai.LibrarySmartQueryAst? = null,
 	activeMangaRecapState: org.koitharu.kotatsu.details.ai.RecapUiState = org.koitharu.kotatsu.details.ai.RecapUiState.Hidden,
 	onRequestWhereWasIRecap: (Long, Boolean) -> Unit = { _, _ -> },
+	activeAiEngineBadge: String = "Gemini Nano",
+	onOpenAiEngineSettings: () -> Unit = {},
+	isAiActive: Boolean = true,
 	modifier: Modifier = Modifier,
 ) {
 	var showDisplayCustomizerSheet by remember { mutableStateOf(false) }
+	var customizerInitialTab by remember { mutableIntStateOf(0) }
 	var showAdvancedSearchSheet by remember { mutableStateOf(false) }
 
 	// Multi-Select & Mihon-Style Source Migration State
@@ -345,39 +358,17 @@ fun LibraryScreen(
 						}
 					}
 
-					// Just Left of Settings: Library Display Settings Icon Button
-					IconButton(
-						onClick = { showDisplayCustomizerSheet = true },
-						modifier = Modifier
-							.size(44.dp)
-							.clip(CircleShape)
-							.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-							.testTag("library_customizer_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.Tune,
-							contentDescription = "Library Display Settings",
-							tint = MaterialTheme.colorScheme.onSurface,
-							modifier = Modifier.size(20.dp),
-						)
-					}
-
-					// Far Right: Gear Icon for Direct Navigation to Settings Screen
-					IconButton(
-						onClick = onOpenSettingsScreen,
-						modifier = Modifier
-							.size(44.dp)
-							.clip(CircleShape)
-							.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-							.testTag("top_settings_gear_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.Settings,
-							contentDescription = "Settings Menu",
-							tint = MaterialTheme.colorScheme.onSurface,
-							modifier = Modifier.size(20.dp),
-						)
-					}
+					// Strict 2-Icon Header Rule on Library via Shared UnifiedTopRightIconCluster: [🎚️ Display/Filter Sliders] + [⚙ Settings]
+					org.koitharu.kotatsu.ui.components.UnifiedTopRightIconCluster(
+						activeTab = org.koitharu.kotatsu.core.model.AppNavTab.LIBRARY,
+						onOpenDisplayOrFilterSliders = {
+							customizerInitialTab = 0
+							showDisplayCustomizerSheet = true
+						},
+						onOpenSettingsScreen = onOpenSettingsScreen,
+						customizerTestTag = "library_customizer_button",
+						settingsTestTag = "top_settings_gear_button",
+					)
 				}
 
 				// Natural-Language Search AST Filter Pills Row (Stage 1 Heuristic + Stage 2 Gemini Nano AICore)
@@ -395,6 +386,7 @@ fun LibraryScreen(
 						Surface(
 							color = MaterialTheme.colorScheme.primaryContainer,
 							shape = RoundedCornerShape(50),
+							modifier = Modifier.testTag("nl_search_engine_attribution_badge"),
 						) {
 							Row(
 								modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -408,7 +400,7 @@ fun LibraryScreen(
 									modifier = Modifier.size(13.dp),
 								)
 								Text(
-									text = "NL AST",
+									text = activeAiEngineBadge,
 									fontFamily = JetBrainsMonoFamily,
 									fontWeight = FontWeight.Bold,
 									fontSize = 10.sp,
@@ -618,6 +610,23 @@ fun LibraryScreen(
 					}
 				}
 
+				// Narrow, Solid-Filled Single-Line GitHub Update Banner (BELOW Search Bar & ABOVE Shelf / Filter chips)
+				val latestGitHubUpdate by GitHubUpdateChecker.latestUpdate.collectAsStateWithLifecycle()
+				val isUpdateDismissed by GitHubUpdateChecker.dismissedForSession.collectAsStateWithLifecycle()
+				val isInstallingUpdate by GitHubUpdateChecker.isInstalling.collectAsStateWithLifecycle()
+				val activeGitHubUpdate = latestGitHubUpdate
+				if (
+					activeGitHubUpdate != null &&
+					(activeGitHubUpdate.isUpdateAvailable || isInstallingUpdate) &&
+					!isUpdateDismissed
+				) {
+					NemuriGitHubUpdateBanner(
+						updateInfo = activeGitHubUpdate,
+						onRemindLater = { GitHubUpdateChecker.dismissForCurrentSession() },
+						modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+					)
+				}
+
 				// 2. Visually Differentiated Category Folder Tabs vs. Reading Status Indicator Strip
 				AnimatedVisibility(
 					visible = !displayConfig.filtersCollapsed &&
@@ -644,24 +653,25 @@ fun LibraryScreen(
 									verticalAlignment = Alignment.CenterVertically,
 									horizontalArrangement = Arrangement.spacedBy(6.dp),
 								) {
-									Row(
-										verticalAlignment = Alignment.CenterVertically,
-										modifier = Modifier.padding(end = 4.dp),
+									Surface(
+										onClick = {
+											customizerInitialTab = 3
+											showDisplayCustomizerSheet = true
+										},
+										color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+										shape = RoundedCornerShape(8.dp),
+										modifier = Modifier
+											.size(28.dp)
+											.testTag("shelf_folder_icon_button"),
 									) {
-										Icon(
-											imageVector = Icons.Default.FolderSpecial,
-											contentDescription = null,
-											tint = MaterialTheme.colorScheme.primary,
-											modifier = Modifier.size(14.dp),
-										)
-										Spacer(modifier = Modifier.width(4.dp))
-										Text(
-											text = "SHELF",
-											fontFamily = JetBrainsMonoFamily,
-											fontWeight = FontWeight.Bold,
-											fontSize = 10.sp,
-											color = MaterialTheme.colorScheme.primary,
-										)
+										Box(contentAlignment = Alignment.Center) {
+											Icon(
+												imageVector = Icons.Default.FolderSpecial,
+												contentDescription = "Manage Shelves",
+												tint = MaterialTheme.colorScheme.primary,
+												modifier = Modifier.size(15.dp),
+											)
+										}
 									}
 
 									CategoryFolderTabPill(
@@ -785,7 +795,7 @@ fun LibraryScreen(
 					) {
 						Icon(
 							imageVector = Icons.Default.AutoFixHigh,
-							contentDescription = "DropSauce AI Fix-It Alert",
+							contentDescription = "Source Fix-It Alert",
 							tint = MaterialTheme.colorScheme.onErrorContainer,
 							modifier = Modifier.size(16.dp),
 						)
@@ -963,70 +973,22 @@ fun LibraryScreen(
 				config = displayConfig,
 				categories = categories,
 				quickFilter = quickFilter,
+				initialTab = customizerInitialTab,
 				onSelectQuickFilter = onSelectQuickFilter,
 				onUpdateConfig = onUpdateDisplayConfig,
 				onAddCategory = onAddCategory,
 				onDeleteCategory = onDeleteCategory,
-				onOpenBatchMigrateAll = {
-					showDisplayCustomizerSheet = false
-					migrationCandidates = items
-				},
 				onClose = { showDisplayCustomizerSheet = false },
 			)
 		}
 	}
 
-	// Manga Details & Chapter List Modal Bottom Sheet
-	if (selectedDetailManga != null) {
-		val brokenProposal = brokenProposals.find { it.brokenItem.manga.id == selectedDetailManga.manga.id }
-		ModalBottomSheet(
-			onDismissRequest = { onOpenMangaDetails(null) },
-			containerColor = MaterialTheme.colorScheme.surface,
-		) {
-			MangaDetailSheetContent(
-				item = selectedDetailManga,
-				brokenProposal = brokenProposal,
-				bookmarkedPageKeys = bookmarkedPageKeys,
-				onStartReading = { chIdx ->
-					val id = selectedDetailManga.manga.id
-					onOpenMangaDetails(null)
-					onOpenReader(id, chIdx)
-				},
-				onRunAiFix = { proposal ->
-					onRunAiFixSingle(proposal)
-					onOpenMangaDetails(null)
-				},
-				onOpenMigrateSource = {
-					val target = selectedDetailManga
-					onOpenMangaDetails(null)
-					migrationCandidates = listOf(target)
-				},
-				onFilterByAuthor = { author ->
-					onOpenMangaDetails(null)
-					onSearchQueryChange(author)
-				},
-				onFilterByTag = { tag ->
-					onOpenMangaDetails(null)
-					onUpdateAdvancedFilter { it.copy(includedTags = setOf(tag)) }
-				},
-				onRemoveFromLibrary = {
-					val targetId = selectedDetailManga.manga.id
-					onOpenMangaDetails(null)
-					onBatchRemoveFromLibrary(setOf(targetId))
-				},
-				recapState = activeMangaRecapState,
-				onRequestRecap = { forceRegenerate ->
-					onRequestWhereWasIRecap(selectedDetailManga.manga.id, forceRegenerate)
-				},
-			)
-		}
-	}
-
-	// Mihon-Style Individual & En-Masse Source Migration Modal Sheet
+	// Source Manager (Merge | Migrate) Modal Sheet via Shared UniversalSheet
 	if (migrationCandidates.isNotEmpty()) {
-		ModalBottomSheet(
-			onDismissRequest = { migrationCandidates = emptyList() },
-			containerColor = MaterialTheme.colorScheme.surface,
+		org.koitharu.kotatsu.ui.components.UniversalSheet(
+			onClose = { migrationCandidates = emptyList() },
+			containerColor = Color(0xFF121620),
+			sheetTestTag = "source_manager_universal_sheet",
 		) {
 			SourceMigrationModalSheet(
 				itemsToMigrate = migrationCandidates,
@@ -1292,7 +1254,8 @@ private fun AdvancedSearchSheetContent(
 		modifier = Modifier
 			.fillMaxWidth()
 			.verticalScroll(rememberScrollState())
-			.padding(horizontal = 20.dp, vertical = 12.dp),
+			.navigationBarsPadding()
+			.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 40.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
 	) {
 		Row(
@@ -1928,22 +1891,23 @@ private fun LibraryDisplayCustomizerContent(
 	config: LibraryDisplayConfig,
 	categories: List<FavouriteCategoryEntity>,
 	quickFilter: QuickLibraryFilter,
+	initialTab: Int = 0,
 	onSelectQuickFilter: (QuickLibraryFilter) -> Unit,
 	onUpdateConfig: ((LibraryDisplayConfig) -> LibraryDisplayConfig) -> Unit,
 	onAddCategory: (String) -> Unit,
 	onDeleteCategory: (Int) -> Unit,
-	onOpenBatchMigrateAll: () -> Unit = {},
 	onClose: () -> Unit,
 ) {
-	var selectedTab by remember { mutableIntStateOf(0) }
+	var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
 	var newCategoryText by remember { mutableStateOf("") }
-	val sheetTabs = listOf("Layout & Size", "Sort & Filters", "Icons & Badges", "Categories")
+	val sheetTabs = listOf("Layout", "Sort", "Badges", "Shelves")
 
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
 			.verticalScroll(rememberScrollState())
-			.padding(horizontal = 20.dp, vertical = 10.dp),
+			.navigationBarsPadding()
+			.padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 40.dp),
 		verticalArrangement = Arrangement.spacedBy(14.dp),
 	) {
 		Row(
@@ -1951,7 +1915,7 @@ private fun LibraryDisplayCustomizerContent(
 			horizontalArrangement = Arrangement.SpaceBetween,
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			Column {
+			Column(modifier = Modifier.weight(1f)) {
 				Text(
 					text = "Library Display Settings",
 					style = MaterialTheme.typography.headlineSmall,
@@ -1959,7 +1923,7 @@ private fun LibraryDisplayCustomizerContent(
 					fontWeight = FontWeight.Bold,
 				)
 				Text(
-					text = "Compact vs. Comfy Grid, size, individual icons, sorting & categories",
+					text = "Customize grid columns, card corners, cover badges, sorting & shelves",
 					style = MaterialTheme.typography.bodySmall,
 					color = MaterialTheme.colorScheme.onSurfaceVariant,
 				)
@@ -1969,49 +1933,20 @@ private fun LibraryDisplayCustomizerContent(
 			}
 		}
 
-		// Quick Launch Banner for Mihon-Style En-Masse Source Migration
-		Surface(
-			color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-			shape = RoundedCornerShape(12.dp),
-			modifier = Modifier.fillMaxWidth(),
-		) {
-			Row(
-				modifier = Modifier
-					.fillMaxWidth()
-					.padding(horizontal = 12.dp, vertical = 8.dp),
-				horizontalArrangement = Arrangement.SpaceBetween,
-				verticalAlignment = Alignment.CenterVertically,
-			) {
-				Column(modifier = Modifier.weight(1f)) {
-					Text(
-						text = "Mihon-Style Source Migration",
-						style = MaterialTheme.typography.titleSmall,
-						fontWeight = FontWeight.Bold,
-					)
-					Text(
-						text = "Validate & migrate series individually or en-masse across sources",
-						style = MaterialTheme.typography.bodySmall,
-						color = MaterialTheme.colorScheme.onSurfaceVariant,
-					)
-				}
-				FilledTonalButton(
-					onClick = onOpenBatchMigrateAll,
-					contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-					modifier = Modifier.testTag("customizer_open_batch_migrate_button"),
-				) {
-					Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-					Spacer(modifier = Modifier.width(4.dp))
-					Text("Migrate", fontSize = 11.sp)
-				}
-			}
-		}
-
 		TabRow(selectedTabIndex = selectedTab) {
 			sheetTabs.forEachIndexed { idx, label ->
 				Tab(
 					selected = selectedTab == idx,
 					onClick = { selectedTab = idx },
-					text = { Text(label, fontSize = 12.sp) },
+					text = {
+						Text(
+							text = label,
+							fontSize = 13.sp,
+							fontWeight = if (selectedTab == idx) FontWeight.Bold else FontWeight.Medium,
+							maxLines = 1,
+							softWrap = false,
+						)
+					},
 				)
 			}
 		}
@@ -2062,6 +1997,30 @@ private fun LibraryDisplayCustomizerContent(
 							steps = 3,
 							modifier = Modifier.testTag("grid_columns_slider"),
 						)
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 8.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							listOf(2, 3, 4, 5, 6).forEach { stepCol ->
+								val isSelectedCol = config.gridColumns == stepCol
+								Text(
+									text = "$stepCol",
+									fontFamily = JetBrainsMonoFamily,
+									fontSize = 11.sp,
+									fontWeight = if (isSelectedCol) FontWeight.Bold else FontWeight.Normal,
+									color = if (isSelectedCol) {
+										MaterialTheme.colorScheme.primary
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+									modifier = Modifier.clickable {
+										onUpdateConfig { it.copy(gridColumns = stepCol) }
+									},
+								)
+							}
+						}
 					}
 				}
 
@@ -2395,406 +2354,6 @@ private fun IndividualBadgeToggleRow(
 	}
 }
 
-private enum class DetailChapterFilter(val label: String) {
-	ALL("All"),
-	UNREAD("Unread"),
-	DOWNLOADED("Downloaded"),
-	BOOKMARKED("Bookmarked"),
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun MangaDetailSheetContent(
-	item: LibraryMangaItem,
-	brokenProposal: BrokenMangaFixProposal?,
-	bookmarkedPageKeys: Set<String> = emptySet(),
-	onStartReading: (Int) -> Unit,
-	onRunAiFix: (BrokenMangaFixProposal) -> Unit,
-	onOpenMigrateSource: () -> Unit = {},
-	onFilterByAuthor: (String) -> Unit = {},
-	onFilterByTag: (String) -> Unit = {},
-	onRemoveFromLibrary: () -> Unit = {},
-	recapState: org.koitharu.kotatsu.details.ai.RecapUiState = org.koitharu.kotatsu.details.ai.RecapUiState.Hidden,
-	onRequestRecap: (Boolean) -> Unit = {},
-) {
-	var newestFirst by remember { mutableStateOf(false) }
-	var chapterFilter by remember { mutableStateOf(DetailChapterFilter.ALL) }
-	var selectedScanlator by remember { mutableStateOf<String?>(null) }
-
-	val scanlators = remember(item.chapters) {
-		item.chapters.mapNotNull { it.scanlator }.distinct()
-	}
-
-	val indexedChapters = remember(item.chapters, newestFirst, chapterFilter, selectedScanlator, bookmarkedPageKeys) {
-		val base = item.chapters.mapIndexed { idx, ch -> idx to ch }
-			.filter { (idx, ch) ->
-				val matchesScanlator = selectedScanlator == null || ch.scanlator == selectedScanlator
-				val matchesFilter = when (chapterFilter) {
-					DetailChapterFilter.ALL -> true
-					DetailChapterFilter.UNREAD -> !ch.isRead
-					DetailChapterFilter.DOWNLOADED -> ch.isDownloaded
-					DetailChapterFilter.BOOKMARKED -> bookmarkedPageKeys.any { it.startsWith("${item.manga.id}_${idx}_") }
-				}
-				matchesScanlator && matchesFilter
-			}
-		if (newestFirst) base.reversed() else base
-	}
-
-	Column(
-		modifier = Modifier
-			.fillMaxWidth()
-			.navigationBarsPadding()
-			.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp),
-		verticalArrangement = Arrangement.spacedBy(12.dp),
-	) {
-		Row(
-			modifier = Modifier.fillMaxWidth(),
-			horizontalArrangement = Arrangement.spacedBy(14.dp),
-			verticalAlignment = Alignment.Top,
-		) {
-			MangaCoverArtwork(
-				title = item.manga.title,
-				coverUrl = item.manga.coverUrl,
-				isBroken = brokenProposal != null,
-				modifier = Modifier
-					.width(96.dp)
-					.aspectRatio(0.67f)
-					.clip(RoundedCornerShape(12.dp)),
-			)
-			Column(
-				modifier = Modifier.weight(1f),
-				verticalArrangement = Arrangement.spacedBy(4.dp),
-			) {
-				Text(
-					text = UiSourceAndTitleFormatter.formatDisplayTitle(item.manga.title),
-					style = MaterialTheme.typography.titleLarge,
-					fontFamily = PlusJakartaDisplayFamily,
-					fontWeight = FontWeight.Bold,
-				)
-				if (!item.manga.altTitles.isNullOrBlank()) {
-					Text(
-						text = item.manga.altTitles,
-						style = MaterialTheme.typography.bodySmall,
-						color = MaterialTheme.colorScheme.onSurfaceVariant,
-					)
-				}
-				// Clickable Author & Source Row
-				val authorName = item.manga.authors ?: "Unknown"
-				Text(
-					text = "$authorName • ${UiSourceAndTitleFormatter.formatSourceName(item.manga.source)}",
-					style = MaterialTheme.typography.labelMedium,
-					color = MaterialTheme.colorScheme.primary,
-					modifier = Modifier
-						.clickable {
-							if (!item.manga.authors.isNullOrBlank()) {
-								onFilterByAuthor(authorName)
-							}
-						}
-						.testTag("detail_author_filter_link"),
-				)
-				Text(
-					text = "${item.totalChapters} Chapters • ${item.unreadCount} Unread • ${(item.progressPercent * 100).toInt()}% Complete",
-					fontFamily = JetBrainsMonoFamily,
-					fontSize = 11.sp,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
-				)
-
-				Spacer(modifier = Modifier.height(4.dp))
-
-				// Consolidate Action Buttons from 4 Rows to 2 Rows:
-				// Row 1: ▶ Continue Ch. X and ✦ Where Was I? side by side
-				val resumeIdx = item.chapters.indexOfFirst { !it.isRead }.coerceAtLeast(0)
-				Row(
-					modifier = Modifier.fillMaxWidth(),
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					verticalAlignment = Alignment.CenterVertically,
-				) {
-					Button(
-						onClick = { onStartReading(resumeIdx) },
-						contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-						modifier = Modifier
-							.weight(1f)
-							.height(36.dp)
-							.testTag("detail_start_reading_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.PlayArrow,
-							contentDescription = null,
-							modifier = Modifier.size(15.dp),
-						)
-						Spacer(modifier = Modifier.width(4.dp))
-						Text(
-							text = "Continue Ch. ${resumeIdx + 1}",
-							fontSize = 11.sp,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
-					}
-
-					FilledTonalButton(
-						onClick = { onRequestRecap(false) },
-						contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-						modifier = Modifier
-							.weight(1f)
-							.height(36.dp)
-							.testTag("detail_where_was_i_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.AutoAwesome,
-							contentDescription = null,
-							modifier = Modifier.size(14.dp),
-						)
-						Spacer(modifier = Modifier.width(4.dp))
-						Text(
-							text = "Where Was I?",
-							fontSize = 11.sp,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
-					}
-				}
-
-				// Row 2: ⇄ Migrate Source, 🪄 AI Fix-It, and compact 🗑 (Remove icon button) on a single row
-				Row(
-					modifier = Modifier.fillMaxWidth(),
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					verticalAlignment = Alignment.CenterVertically,
-				) {
-					FilledTonalButton(
-						onClick = onOpenMigrateSource,
-						contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-						modifier = Modifier
-							.weight(1f)
-							.height(36.dp)
-							.testTag("detail_migrate_source_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.SwapHoriz,
-							contentDescription = null,
-							modifier = Modifier.size(14.dp),
-						)
-						Spacer(modifier = Modifier.width(4.dp))
-						Text(
-							text = "Migrate Source",
-							fontSize = 11.sp,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
-					}
-
-					FilledTonalButton(
-						onClick = {
-							if (brokenProposal != null) {
-								onRunAiFix(brokenProposal)
-							} else {
-								onOpenMigrateSource()
-							}
-						},
-						colors = ButtonDefaults.filledTonalButtonColors(
-							containerColor = if (brokenProposal != null) {
-								MaterialTheme.colorScheme.errorContainer
-							} else {
-								MaterialTheme.colorScheme.secondaryContainer
-							},
-							contentColor = if (brokenProposal != null) {
-								MaterialTheme.colorScheme.onErrorContainer
-							} else {
-								MaterialTheme.colorScheme.onSecondaryContainer
-							},
-						),
-						contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-						modifier = Modifier
-							.height(36.dp)
-							.testTag("detail_ai_fix_button"),
-					) {
-						Icon(
-							imageVector = Icons.Default.AutoFixHigh,
-							contentDescription = null,
-							modifier = Modifier.size(14.dp),
-						)
-						Spacer(modifier = Modifier.width(4.dp))
-						Text(
-							text = "AI Fix-It",
-							fontSize = 11.sp,
-							maxLines = 1,
-						)
-					}
-
-					Surface(
-						onClick = onRemoveFromLibrary,
-						color = MaterialTheme.colorScheme.surfaceVariant,
-						contentColor = MaterialTheme.colorScheme.error,
-						shape = CircleShape,
-						modifier = Modifier
-							.size(36.dp)
-							.testTag("detail_remove_library_button"),
-					) {
-						Box(contentAlignment = Alignment.Center) {
-							Icon(
-								imageVector = Icons.Default.DeleteOutline,
-								contentDescription = "Remove from Library",
-								modifier = Modifier.size(18.dp),
-							)
-						}
-					}
-				}
-			}
-		}
-
-		// Spoiler-Quarantined "Where Was I?" On-Device Gemini Nano Recap Card
-		org.koitharu.kotatsu.details.ui.WhereWasIRecapCard(
-			state = recapState,
-			onRegenerateClick = { onRequestRecap(true) },
-			modifier = Modifier.padding(horizontal = 0.dp),
-		)
-
-		// Clickable Genre / Tag Chips to immediately filter library
-		if (item.tags.isNotEmpty()) {
-			FlowRow(
-				horizontalArrangement = Arrangement.spacedBy(6.dp),
-				verticalArrangement = Arrangement.spacedBy(6.dp),
-			) {
-				item.tags.forEach { tag ->
-					Surface(
-						color = MaterialTheme.colorScheme.surfaceVariant,
-						shape = CircleShape,
-						modifier = Modifier
-							.clip(CircleShape)
-							.clickable { onFilterByTag(tag.title) }
-							.testTag("detail_tag_chip_${tag.title.lowercase()}"),
-					) {
-						Text(
-							text = tag.title,
-							style = MaterialTheme.typography.labelSmall,
-							color = MaterialTheme.colorScheme.primary,
-							modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-						)
-					}
-				}
-			}
-		}
-
-		if (item.manga.description.isNotBlank()) {
-			Text(
-				text = item.manga.description,
-				style = MaterialTheme.typography.bodyMedium,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 3,
-				overflow = TextOverflow.Ellipsis,
-			)
-		}
-
-		HorizontalDivider()
-
-		// Chapter Header + Sort Toggle + Chapter Filter Pills (All / Unread / Downloaded / Bookmarked)
-		Row(
-			modifier = Modifier.fillMaxWidth(),
-			horizontalArrangement = Arrangement.SpaceBetween,
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			Text(
-				text = "CHAPTERS (${indexedChapters.size}/${item.chapters.size})",
-				style = MaterialTheme.typography.labelSmall,
-				color = MaterialTheme.colorScheme.primary,
-			)
-			AssistChip(
-				onClick = { newestFirst = !newestFirst },
-				label = {
-					Text(if (newestFirst) "Newest First ↓" else "Oldest First ↑", fontSize = 11.sp)
-				},
-				modifier = Modifier.testTag("detail_chapter_sort_button"),
-			)
-		}
-
-		Row(
-			modifier = Modifier
-				.fillMaxWidth()
-				.horizontalScroll(rememberScrollState()),
-			horizontalArrangement = Arrangement.spacedBy(6.dp),
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			DetailChapterFilter.entries.forEach { filter ->
-				FilterChip(
-					selected = chapterFilter == filter,
-					onClick = { chapterFilter = filter },
-					label = { Text(filter.label, fontSize = 11.sp) },
-					modifier = Modifier.testTag("detail_chapter_filter_${filter.name.lowercase()}"),
-				)
-			}
-			if (scanlators.size > 1) {
-				scanlators.forEach { scan ->
-					FilterChip(
-						selected = selectedScanlator == scan,
-						onClick = { selectedScanlator = if (selectedScanlator == scan) null else scan },
-						label = { Text(scan, fontSize = 11.sp) },
-					)
-				}
-			}
-		}
-
-		LazyColumn(
-			modifier = Modifier
-				.fillMaxWidth()
-				.height(250.dp),
-			verticalArrangement = Arrangement.spacedBy(6.dp),
-		) {
-			items(indexedChapters.size) { listIdx ->
-				val (originalIndex, ch) = indexedChapters[listIdx]
-				Surface(
-					color = if (ch.isRead) {
-						MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-					} else {
-						MaterialTheme.colorScheme.surfaceVariant
-					},
-					shape = RoundedCornerShape(10.dp),
-					modifier = Modifier
-						.fillMaxWidth()
-						.clickable { onStartReading(originalIndex) }
-						.testTag("chapter_row_${ch.chapterId}"),
-				) {
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(horizontal = 14.dp, vertical = 10.dp),
-						horizontalArrangement = Arrangement.SpaceBetween,
-						verticalAlignment = Alignment.CenterVertically,
-					) {
-						Column(modifier = Modifier.weight(1f)) {
-							Text(
-								text = ch.title,
-								style = MaterialTheme.typography.bodyMedium,
-								fontWeight = if (ch.isRead) FontWeight.Normal else FontWeight.SemiBold,
-								color = if (ch.isRead) {
-									MaterialTheme.colorScheme.onSurfaceVariant
-								} else {
-									MaterialTheme.colorScheme.onSurface
-								},
-							)
-							val dlLabel = if (ch.isDownloaded) " • Offline" else ""
-							Text(
-								text = "${ch.scanlator ?: "Official"} • ${if (ch.isRead) "Read" else "Unread"}$dlLabel",
-								fontFamily = JetBrainsMonoFamily,
-								fontSize = 10.sp,
-								color = MaterialTheme.colorScheme.onSurfaceVariant,
-							)
-						}
-						Icon(
-							imageVector = if (ch.isRead) Icons.Default.Check else Icons.Default.PlayArrow,
-							contentDescription = null,
-							tint = if (ch.isRead) {
-								MaterialTheme.colorScheme.secondary
-							} else {
-								MaterialTheme.colorScheme.primary
-							},
-						)
-					}
-				}
-			}
-		}
-
-		Spacer(modifier = Modifier.height(12.dp))
-	}
-}
 
 /**
  * Mihon-Style Individual & En-Masse Source Migration Modal Sheet:
@@ -2803,246 +2362,725 @@ private fun MangaDetailSheetContent(
  *   targets by chapter availability & similarity, override target sources per series,
  *   proceed individually ("Migrate"), or execute all at once ("Migrate All Selected").
  */
+enum class SourceManagerTab(val label: String) {
+	MERGE("🔗 Merge (Combine Chapters)"),
+	MIGRATE("⇄ Migrate (Replace Primary)"),
+}
+
+/**
+ * 2-Mode Source Manager (`🔗 Merge (Combine Chapters)` | `⇄ Migrate (Replace Primary)`) with zero chip clutter:
+ * - Tab 1 (`🔗 Merge (Combine Chapters)`): Links secondary sources to combine chapter lists, fill missing chapters,
+ *   and enable automatic reader failover.
+ * - Tab 2 (`⇄ Migrate (Replace Primary)`): Replaces the primary source entirely and transfers all read progress
+ *   to the new source with a pinned bottom CTA button (`padding(bottom = 24.dp)`).
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SourceMigrationModalSheet(
+internal fun SourceMigrationModalSheet(
 	itemsToMigrate: List<LibraryMangaItem>,
 	onMigrateSingle: (Long, String, Int) -> Unit,
 	onMigrateAllSelected: (List<Triple<Long, String, Int>>) -> Unit,
 	onClose: () -> Unit,
+	mergedSourcesByMangaId: Map<Long, List<String>> = emptyMap(),
+	onMergeSecondarySource: (Long, String, Int) -> Unit = { _, _, _ -> },
+	onUnlinkMergedSource: (Long, String) -> Unit = { _, _ -> },
 ) {
-	val targetSources = remember {
-		listOf(
-			"EXT:MangaDex (Mihon EN)",
-			"EXT:ComicK (Mihon Multi)",
-			"EXT:Aqua Manga (Mihon EN)",
-			"EXT:Bato.to (Mihon EN)",
+	val context = LocalContext.current
+	val accentCyan = Color(0xFF5CE1E6)
+	val emeraldGreen = Color(0xFF10B981)
+
+	var activeTab by remember {
+		mutableStateOf(
+			if (itemsToMigrate.size > 1) SourceManagerTab.MIGRATE else SourceManagerTab.MERGE,
 		)
 	}
 
-	var globalPreferredSource by remember { mutableStateOf("AI Best Match") }
+	val primaryItem = itemsToMigrate.firstOrNull() ?: return
+	val cleanPrimarySource = remember(primaryItem.manga.source) {
+		UiSourceAndTitleFormatter.formatSourceName(primaryItem.manga.source)
+	}
+	val primaryTotalChapters = primaryItem.totalChapters.coerceAtLeast(1)
+	val readChapters = remember(primaryItem.chapters, primaryTotalChapters) {
+		val actualRead = primaryItem.chapters.count { it.isRead }
+		if (actualRead > 0) actualRead else (primaryTotalChapters - primaryItem.unreadCount).coerceAtLeast(0)
+	}
+
+	// Track merged sources reactively (syncing external map + immediate local state so UI updates on the spot)
+	val externalMerged = mergedSourcesByMangaId[primaryItem.manga.id]
+	val localMergedSources = remember(primaryItem.manga.id, externalMerged) {
+		mutableStateListOf<String>().apply {
+			val seed = externalMerged ?: listOf("Kotatsu Native")
+			addAll(seed)
+		}
+	}
+	var localChapterCountOverride by remember(primaryItem.manga.id, primaryItem.totalChapters) {
+		mutableIntStateOf(primaryItem.totalChapters.coerceAtLeast(1))
+	}
+	val effectivePrimaryTotalChapters = localChapterCountOverride.coerceAtLeast(primaryTotalChapters)
+
+	var showMihonMergeSelector by remember { mutableStateOf(false) }
+	var showMihonMigrateSelector by remember { mutableStateOf(false) }
+	var perItemPickerTarget by remember { mutableStateOf<LibraryMangaItem?>(null) }
+
+	val defaultBestSourceFor: (LibraryMangaItem) -> String = { item ->
+		if (item.manga.source.contains("MangaDex", ignoreCase = true)) {
+			"EXT:ComicK (Mihon Multi)"
+		} else {
+			"EXT:MangaDex (Mihon EN)"
+		}
+	}
+
 	val perItemSelectedSource = remember(itemsToMigrate) {
 		mutableStateMapOf<Long, String>().apply {
 			itemsToMigrate.forEach { item ->
-				val currentSrc = item.manga.source
-				val bestAlternative = targetSources.firstOrNull { !it.equals(currentSrc, ignoreCase = true) }
-					?: "EXT:MangaDex (Mihon EN)"
-				put(item.manga.id, bestAlternative)
+				put(item.manga.id, defaultBestSourceFor(item))
+			}
+		}
+	}
+	val perItemIsAutoSelected = remember(itemsToMigrate) {
+		mutableStateMapOf<Long, Boolean>().apply {
+			itemsToMigrate.forEach { item ->
+				put(item.manga.id, true)
 			}
 		}
 	}
 
 	val computeTargetChapters: (LibraryMangaItem, String) -> Int = { item, targetSrc ->
+		val base = if (item.manga.id == primaryItem.manga.id) primaryTotalChapters else item.totalChapters
 		val bonus = when {
-			targetSrc.contains("MangaDex", ignoreCase = true) -> 2
 			targetSrc.contains("ComicK", ignoreCase = true) -> 3
-			targetSrc.contains("Aqua", ignoreCase = true) -> 1
-			else -> 0
+			targetSrc.contains("MangaFire", ignoreCase = true) -> 3
+			targetSrc.contains("MangaDex", ignoreCase = true) -> 3
+			targetSrc.contains("Asura", ignoreCase = true) -> 2
+			targetSrc.contains("Bato", ignoreCase = true) -> 1
+			else -> 2
 		}
-		(item.totalChapters + bonus).coerceAtLeast(1)
+		(base + bonus).coerceAtLeast(1)
+	}
+
+	// Recommended secondary source for Tab 1 (Merge)
+	val recommendedMergeCandidate = remember(cleanPrimarySource, localMergedSources.toList(), primaryTotalChapters) {
+		val candidates = listOf(
+			Triple("EXT:ComicK (Mihon Multi)", "ComicK", primaryTotalChapters + 3),
+			Triple("EXT:Asura Scans (Mihon EN)", "Asura Scans", primaryTotalChapters + 2),
+			Triple("EXT:MangaDex (Mihon EN)", "MangaDex", primaryTotalChapters + 3),
+			Triple("EXT:WeebCentral (Kotatsu EN)", "WeebCentral", primaryTotalChapters + 1),
+		)
+		candidates.firstOrNull { (_, display, _) ->
+			!display.equals(cleanPrimarySource, ignoreCase = true) &&
+				localMergedSources.none { it.equals(display, ignoreCase = true) }
+		} ?: Triple("EXT:ComicK (Mihon Multi)", "ComicK", primaryTotalChapters + 3)
+	}
+	val isRecommendedAlreadyMerged = localMergedSources.any {
+		it.equals(recommendedMergeCandidate.second, ignoreCase = true)
 	}
 
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
-			.padding(horizontal = 20.dp, vertical = 12.dp),
+			.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp)
+			.testTag("source_manager_modal_sheet"),
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
+		// =========================================================================
+		// 1. TOP HEADER & 2-TAB MODE SWITCHER (`🔗 Merge (Combine Chapters)` | `⇄ Migrate (Replace Primary)`)
+		// =========================================================================
 		Row(
 			modifier = Modifier.fillMaxWidth(),
 			horizontalArrangement = Arrangement.SpaceBetween,
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			Column(modifier = Modifier.weight(1f)) {
-				Text(
-					text = if (itemsToMigrate.size == 1) {
-						"Migrate Manga Source"
-					} else {
-						"Batch Source Migration (${itemsToMigrate.size} Series)"
-					},
-					style = MaterialTheme.typography.headlineSmall,
-					fontFamily = PlusJakartaDisplayFamily,
-					fontWeight = FontWeight.Bold,
-				)
-				Text(
-					text = "Validate target sources, compare chapter counts & migrate individually or en-masse",
-					style = MaterialTheme.typography.bodySmall,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
-				)
-			}
-			TextButton(onClick = onClose) {
-				Text("Close")
-			}
-		}
-
-		// Target Source Picker + "AI Find Best Source" Helper
-		Text(
-			text = "SELECT PREFERRED TARGET SOURCE OR AI AUTO-MATCH",
-			style = MaterialTheme.typography.labelSmall,
-			color = MaterialTheme.colorScheme.primary,
-		)
-		FlowRow(
-			horizontalArrangement = Arrangement.spacedBy(8.dp),
-			verticalArrangement = Arrangement.spacedBy(8.dp),
-		) {
-			FilterChip(
-				selected = globalPreferredSource == "AI Best Match",
-				onClick = {
-					globalPreferredSource = "AI Best Match"
-					itemsToMigrate.forEach { item ->
-						val best = if (item.manga.source.contains("MangaDex", ignoreCase = true)) {
-							"EXT:ComicK (Mihon Multi)"
-						} else {
-							"EXT:MangaDex (Mihon EN)"
-						}
-						perItemSelectedSource[item.manga.id] = best
-					}
-				},
-				leadingIcon = {
-					Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-				},
-				label = { Text("AI Best Match") },
-				modifier = Modifier.testTag("migrate_source_ai_best_chip"),
+			Text(
+				text = "Source Manager",
+				style = MaterialTheme.typography.headlineSmall,
+				fontFamily = PlusJakartaDisplayFamily,
+				fontWeight = FontWeight.Bold,
+				color = Color.White,
+				maxLines = 1,
+				softWrap = false,
 			)
-
-			targetSources.forEach { src ->
-				val shortLabel = src.removePrefix("EXT:").substringBefore(" (")
-				FilterChip(
-					selected = globalPreferredSource == src,
-					onClick = {
-						globalPreferredSource = src
-						itemsToMigrate.forEach { item ->
-							perItemSelectedSource[item.manga.id] = src
-						}
-					},
-					label = { Text(shortLabel) },
-					modifier = Modifier.testTag("migrate_global_target_${shortLabel.lowercase().replace(" ", "_")}"),
+			TextButton(
+				onClick = onClose,
+				modifier = Modifier.testTag("source_manager_close_button"),
+			) {
+				Text(
+					text = "✕ Close",
+					color = accentCyan,
+					fontWeight = FontWeight.SemiBold,
+					maxLines = 1,
+					softWrap = false,
 				)
 			}
 		}
 
-		HorizontalDivider()
-
-		// Validation List of Series to Migrate (with per-item source selector & individual "Migrate" button)
-		LazyColumn(
-			modifier = Modifier
-				.fillMaxWidth()
-				.height(290.dp),
-			verticalArrangement = Arrangement.spacedBy(10.dp),
+		// 2-Tab Segmented Pill Switcher
+		Surface(
+			color = Color(0xFF1A1F2C),
+			shape = RoundedCornerShape(14.dp),
+			border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+			modifier = Modifier.fillMaxWidth(),
 		) {
-			items(itemsToMigrate, key = { it.manga.id }) { item ->
-				val chosenTarget = perItemSelectedSource[item.manga.id] ?: "EXT:MangaDex (Mihon EN)"
-				val targetChapterCount = computeTargetChapters(item, chosenTarget)
-				val readChapters = item.chapters.count { it.isRead }
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(4.dp),
+				horizontalArrangement = Arrangement.spacedBy(6.dp),
+			) {
+				SourceManagerTab.entries.forEach { tab ->
+					val selected = activeTab == tab
+					Surface(
+						color = if (selected) accentCyan else Color.Transparent,
+						shape = RoundedCornerShape(10.dp),
+						modifier = Modifier
+							.weight(1f)
+							.clip(RoundedCornerShape(10.dp))
+							.clickable { activeTab = tab }
+							.testTag("source_manager_tab_${tab.name.lowercase()}"),
+					) {
+						Box(
+							contentAlignment = Alignment.Center,
+							modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+						) {
+							Text(
+								text = tab.label,
+								style = MaterialTheme.typography.labelMedium,
+								fontWeight = FontWeight.Bold,
+								color = if (selected) Color(0xFF071318) else Color(0xFFCBD5E1),
+								maxLines = 1,
+								softWrap = false,
+								overflow = TextOverflow.Ellipsis,
+							)
+						}
+					}
+				}
+			}
+		}
 
-				Card(
-					colors = CardDefaults.cardColors(
-						containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-					),
-					shape = RoundedCornerShape(12.dp),
-					modifier = Modifier.fillMaxWidth(),
+		when (activeTab) {
+			// =====================================================================
+			// 2. TAB 1: `🔗 MERGE (COMBINE CHAPTERS)` — LINK SOURCES TO FILL MISSING CHAPTERS
+			// =====================================================================
+			SourceManagerTab.MERGE -> {
+				// 1-Line Helper Caption
+				Text(
+					text = "Combine chapter lists from multiple sources to fill missing chapters and enable automatic reader failover.",
+					style = MaterialTheme.typography.bodySmall,
+					color = Color(0xFF9EA4B0),
+				)
+
+				// Primary Source Card
+				Surface(
+					color = Color(0xFF1A202E),
+					shape = RoundedCornerShape(14.dp),
+					border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+					modifier = Modifier
+						.fillMaxWidth()
+						.testTag("merge_tab_primary_source_card"),
 				) {
-					Column(
+					Row(
 						modifier = Modifier
 							.fillMaxWidth()
-							.padding(12.dp),
-						verticalArrangement = Arrangement.spacedBy(8.dp),
+							.padding(horizontal = 14.dp, vertical = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(10.dp),
 					) {
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(10.dp),
+						Surface(
+							color = accentCyan.copy(alpha = 0.16f),
+							shape = RoundedCornerShape(8.dp),
 						) {
-							MangaCoverArtwork(
-								title = item.manga.title,
-								coverUrl = item.manga.coverUrl,
-								modifier = Modifier
-									.width(44.dp)
-									.aspectRatio(0.68f)
-									.clip(RoundedCornerShape(6.dp)),
+							Text(
+								text = "PRIMARY",
+								fontFamily = JetBrainsMonoFamily,
+								fontWeight = FontWeight.ExtraBold,
+								fontSize = 9.sp,
+								color = accentCyan,
+								modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
 							)
-							Column(modifier = Modifier.weight(1f)) {
-								Text(
-									text = UiSourceAndTitleFormatter.formatDisplayTitle(item.manga.title),
-									style = MaterialTheme.typography.titleSmall,
-									fontWeight = FontWeight.Bold,
-									maxLines = 1,
-									overflow = TextOverflow.Ellipsis,
-								)
-								Text(
-									text = "From: ${UiSourceAndTitleFormatter.formatSourceName(item.manga.source)} (${item.totalChapters} ch, $readChapters read)",
-									fontFamily = JetBrainsMonoFamily,
-									fontSize = 10.sp,
-									color = MaterialTheme.colorScheme.onSurfaceVariant,
-								)
-								Text(
-									text = "To: ${UiSourceAndTitleFormatter.formatSourceName(chosenTarget)} • $targetChapterCount ch (100% Verified)",
-									fontFamily = JetBrainsMonoFamily,
-									fontWeight = FontWeight.Bold,
-									fontSize = 10.sp,
-									color = Color(0xFF10B981),
-								)
-							}
-
-							// Individual Proceed Button ("Migrate")
-							FilledTonalButton(
-								onClick = {
-									onMigrateSingle(item.manga.id, chosenTarget, targetChapterCount)
-								},
-								contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-								modifier = Modifier.testTag("migrate_proceed_single_${item.manga.id}"),
-							) {
-								Text("Migrate", fontSize = 11.sp)
-							}
 						}
+						Text(
+							text = "Primary: $cleanPrimarySource • $effectivePrimaryTotalChapters Chapters ($readChapters Read)",
+							style = MaterialTheme.typography.bodyMedium,
+							fontWeight = FontWeight.Bold,
+							color = Color.White,
+							modifier = Modifier.weight(1f),
+						)
+					}
+				}
 
-						// Per-series source switcher pills
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.horizontalScroll(rememberScrollState()),
-							horizontalArrangement = Arrangement.spacedBy(6.dp),
-						) {
-							targetSources.forEach { candidateSrc ->
-								val shortName = candidateSrc.removePrefix("EXT:").substringBefore(" (")
-								val candidateCh = computeTargetChapters(item, candidateSrc)
-								FilterChip(
-									selected = chosenTarget == candidateSrc,
-									onClick = { perItemSelectedSource[item.manga.id] = candidateSrc },
-									label = { Text("$shortName ($candidateCh ch)", fontSize = 10.sp) },
-								)
+				// Active Merged Sources List
+				if (localMergedSources.isNotEmpty()) {
+					Column(
+						verticalArrangement = Arrangement.spacedBy(6.dp),
+						modifier = Modifier.fillMaxWidth(),
+					) {
+						Text(
+							text = "ACTIVE MERGED SOURCES (${localMergedSources.size})",
+							fontFamily = JetBrainsMonoFamily,
+							fontWeight = FontWeight.Bold,
+							fontSize = 10.sp,
+							color = Color(0xFF94A3B8),
+						)
+						localMergedSources.forEach { mergedSource ->
+							Surface(
+								color = Color(0xFF1B1D2A),
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(1.dp, Color(0xFFA855F7).copy(alpha = 0.38f)),
+								modifier = Modifier
+									.fillMaxWidth()
+									.testTag("active_merged_source_row_${mergedSource.lowercase().replace(" ", "_")}"),
+							) {
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 14.dp, vertical = 10.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.SpaceBetween,
+								) {
+									Text(
+										text = "🔗 $mergedSource • Merged",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Bold,
+										color = Color.White,
+										modifier = Modifier.weight(1f),
+									)
+									Surface(
+										color = Color.White.copy(alpha = 0.08f),
+										shape = RoundedCornerShape(999.dp),
+										border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+										modifier = Modifier
+											.clip(RoundedCornerShape(999.dp))
+											.clickable {
+												localMergedSources.remove(mergedSource)
+												onUnlinkMergedSource(primaryItem.manga.id, mergedSource)
+												Toast.makeText(
+													context,
+													"Unlinked $mergedSource from merged sources",
+													Toast.LENGTH_SHORT,
+												).show()
+											}
+											.testTag("unlink_merged_source_${mergedSource.lowercase().replace(" ", "_")}"),
+									) {
+										Text(
+											text = "Unlink",
+											style = MaterialTheme.typography.labelMedium,
+											fontWeight = FontWeight.SemiBold,
+											color = Color(0xFFE2E8F0),
+											modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+										)
+									}
+								}
 							}
 						}
 					}
 				}
+
+				// Smart Auto-Merge Match Card (NO CHIP WALLS)
+				val (_, recDisplayName, recChapters) = recommendedMergeCandidate
+				val missingStart = primaryTotalChapters + 1
+				val missingEnd = recChapters.coerceAtLeast(missingStart)
+				val missingAdded = (recChapters - primaryTotalChapters).coerceAtLeast(1)
+
+				Surface(
+					color = Color(0xFF13262E),
+					shape = RoundedCornerShape(14.dp),
+					border = BorderStroke(1.2.dp, accentCyan.copy(alpha = 0.55f)),
+					modifier = Modifier
+						.fillMaxWidth()
+						.testTag("smart_auto_merge_recommendation_card"),
+				) {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 14.dp, vertical = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween,
+					) {
+						Text(
+							text = "✦ Best Match: $recDisplayName • $recChapters Chapters (+$missingAdded missing chapters: Ch. $missingStart–$missingEnd)",
+							style = MaterialTheme.typography.bodySmall,
+							fontWeight = FontWeight.Bold,
+							color = Color.White,
+							modifier = Modifier
+								.weight(1f)
+								.padding(end = 10.dp),
+						)
+
+						Button(
+							onClick = {
+								if (!localMergedSources.any { it.equals(recDisplayName, ignoreCase = true) }) {
+									localMergedSources.add(recDisplayName)
+								}
+								localChapterCountOverride = recChapters
+								onMergeSecondarySource(primaryItem.manga.id, recDisplayName, recChapters)
+								Toast.makeText(
+									context,
+									"Merged $recDisplayName (+$missingAdded missing chapters • $recChapters Chapters total)",
+									Toast.LENGTH_SHORT,
+								).show()
+							},
+							enabled = !isRecommendedAlreadyMerged,
+							colors = ButtonDefaults.buttonColors(
+								containerColor = accentCyan,
+								contentColor = Color(0xFF071318),
+							),
+							shape = RoundedCornerShape(10.dp),
+							contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+							modifier = Modifier.testTag("recommended_merge_action_button"),
+						) {
+							Text(
+								text = if (isRecommendedAlreadyMerged) "Merged ✓" else "+ Merge",
+								style = MaterialTheme.typography.labelLarge,
+								fontWeight = FontWeight.ExtraBold,
+							)
+						}
+					}
+				}
+
+				// Full-width Mihon Source Selector Button
+				OutlinedButton(
+					onClick = { showMihonMergeSelector = true },
+					shape = RoundedCornerShape(12.dp),
+					border = BorderStroke(1.dp, accentCyan.copy(alpha = 0.45f)),
+					colors = ButtonDefaults.outlinedButtonColors(
+						containerColor = Color(0xFF18202C),
+						contentColor = accentCyan,
+					),
+					contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+					modifier = Modifier
+						.fillMaxWidth()
+						.testTag("browse_all_installed_sources_merge_button"),
+				) {
+					Text(
+						text = "⚙ Configure & Select Sources (Mihon Selector) ▸",
+						style = MaterialTheme.typography.labelLarge,
+						fontWeight = FontWeight.Bold,
+						color = accentCyan,
+					)
+				}
+			}
+
+			// =====================================================================
+			// 3. TAB 2: `⇄ MIGRATE (REPLACE PRIMARY)` — SWITCH PRIMARY SOURCE & TRANSFER PROGRESS
+			// =====================================================================
+			SourceManagerTab.MIGRATE -> {
+				val chosenPrimaryTarget = perItemSelectedSource[primaryItem.manga.id]
+					?: defaultBestSourceFor(primaryItem)
+				val cleanTargetName = UiSourceAndTitleFormatter.formatSourceName(chosenPrimaryTarget)
+				val targetChapterCount = computeTargetChapters(primaryItem, chosenPrimaryTarget)
+
+				// 1-Line Helper Caption
+				Text(
+					text = "Replace your primary source entirely and transfer all read chapters to the new source.",
+					style = MaterialTheme.typography.bodySmall,
+					color = Color(0xFF9EA4B0),
+				)
+
+				if (itemsToMigrate.size == 1) {
+					// Clean `From -> To` Comparison Card (No Chip Rows!)
+					Surface(
+						color = Color(0xFF1A202E),
+						shape = RoundedCornerShape(16.dp),
+						border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+						modifier = Modifier
+							.fillMaxWidth()
+							.testTag("migrate_from_to_comparison_card"),
+					) {
+						Column(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(14.dp),
+							verticalArrangement = Arrangement.spacedBy(12.dp),
+						) {
+							// From (Current)
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(12.dp),
+							) {
+								MangaCoverArtwork(
+									title = primaryItem.manga.title,
+									coverUrl = primaryItem.manga.coverUrl,
+									modifier = Modifier
+										.width(46.dp)
+										.aspectRatio(0.68f)
+										.clip(RoundedCornerShape(8.dp)),
+								)
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(3.dp),
+								) {
+									Text(
+										text = UiSourceAndTitleFormatter.formatDisplayTitle(primaryItem.manga.title),
+										style = MaterialTheme.typography.titleSmall,
+										fontWeight = FontWeight.Bold,
+										color = Color.White,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+									Text(
+										text = "From (Current)",
+										fontFamily = JetBrainsMonoFamily,
+										fontSize = 10.sp,
+										color = Color(0xFF94A3B8),
+									)
+									Text(
+										text = "$cleanPrimarySource • $primaryTotalChapters Chapters ($readChapters Read)",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.SemiBold,
+										color = Color(0xFFE2E8F0),
+									)
+								}
+							}
+
+							HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+							// To (Target) + `Select Sources ▸` Button on the Right
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween,
+							) {
+								Column(
+									modifier = Modifier
+										.weight(1f)
+										.padding(end = 10.dp),
+									verticalArrangement = Arrangement.spacedBy(3.dp),
+								) {
+									Text(
+										text = "To (Target)",
+										fontFamily = JetBrainsMonoFamily,
+										fontSize = 10.sp,
+										color = accentCyan,
+									)
+									Text(
+										text = "✦ Priority Match: $cleanTargetName • $targetChapterCount Chapters (100% Verified)",
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = FontWeight.Bold,
+										color = emeraldGreen,
+									)
+								}
+
+								OutlinedButton(
+									onClick = { showMihonMigrateSelector = true },
+									shape = RoundedCornerShape(10.dp),
+									border = BorderStroke(1.dp, accentCyan.copy(alpha = 0.45f)),
+									colors = ButtonDefaults.outlinedButtonColors(
+										containerColor = accentCyan.copy(alpha = 0.10f),
+										contentColor = accentCyan,
+									),
+									contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+									modifier = Modifier.testTag("migrate_change_target_source_button"),
+								) {
+									Text(
+										text = "Select Sources ▸",
+										style = MaterialTheme.typography.labelMedium,
+										fontWeight = FontWeight.Bold,
+									)
+								}
+							}
+						}
+					}
+				} else {
+					// Batch Migration List (for multi-select Library migration, also zero chip rows)
+					LazyColumn(
+						modifier = Modifier
+							.fillMaxWidth()
+							.height(210.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						items(itemsToMigrate, key = { it.manga.id }) { item ->
+							val chosenTarget = perItemSelectedSource[item.manga.id] ?: defaultBestSourceFor(item)
+							val cleanTarget = UiSourceAndTitleFormatter.formatSourceName(chosenTarget)
+							val targetCh = computeTargetChapters(item, chosenTarget)
+							val itemRead = item.chapters.count { it.isRead }
+
+							Surface(
+								color = Color(0xFF1A202E),
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(12.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.spacedBy(10.dp),
+								) {
+									MangaCoverArtwork(
+										title = item.manga.title,
+										coverUrl = item.manga.coverUrl,
+										modifier = Modifier
+											.width(42.dp)
+											.aspectRatio(0.68f)
+											.clip(RoundedCornerShape(6.dp)),
+									)
+									Column(modifier = Modifier.weight(1f)) {
+										Text(
+											text = UiSourceAndTitleFormatter.formatDisplayTitle(item.manga.title),
+											style = MaterialTheme.typography.titleSmall,
+											fontWeight = FontWeight.Bold,
+											color = Color.White,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
+										)
+										Text(
+											text = "From (Current): ${UiSourceAndTitleFormatter.formatSourceName(item.manga.source)} • ${item.totalChapters} Chapters ($itemRead Read)",
+											fontFamily = JetBrainsMonoFamily,
+											fontSize = 10.sp,
+											color = Color(0xFFCBD5E1),
+										)
+										Text(
+											text = "To (Target): ✦ Priority Match: $cleanTarget • $targetCh Chapters (100% Verified)",
+											fontFamily = JetBrainsMonoFamily,
+											fontWeight = FontWeight.Bold,
+											fontSize = 10.sp,
+											color = emeraldGreen,
+										)
+									}
+									OutlinedButton(
+										onClick = { perItemPickerTarget = item },
+										contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+										modifier = Modifier.testTag("migrate_change_source_${item.manga.id}"),
+									) {
+										Text("Select Sources ▸", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+									}
+								}
+							}
+						}
+					}
+				}
+
+				// Always-Visible Bottom CTA Button (`padding(bottom = 24.dp)` achieved by Column bottom padding)
+				Button(
+					onClick = {
+						if (itemsToMigrate.size == 1) {
+							onMigrateSingle(primaryItem.manga.id, chosenPrimaryTarget, targetChapterCount)
+							Toast.makeText(
+								context,
+								"Migrated primary source to $cleanTargetName ($targetChapterCount Chapters • $readChapters Read preserved)",
+								Toast.LENGTH_SHORT,
+							).show()
+							onClose()
+						} else {
+							val batch = itemsToMigrate.map { item ->
+								val targetSrc = perItemSelectedSource[item.manga.id] ?: defaultBestSourceFor(item)
+								Triple(item.manga.id, targetSrc, computeTargetChapters(item, targetSrc))
+							}
+							onMigrateAllSelected(batch)
+							Toast.makeText(
+								context,
+								"Migrated ${itemsToMigrate.size} series & preserved read progress",
+								Toast.LENGTH_SHORT,
+							).show()
+							onClose()
+						}
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = accentCyan,
+						contentColor = Color(0xFF071318),
+					),
+					shape = RoundedCornerShape(14.dp),
+					contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+					modifier = Modifier
+						.fillMaxWidth()
+						.testTag("migrate_all_selected_confirm_button"),
+				) {
+					Text(
+						text = if (itemsToMigrate.size == 1) {
+							"⇄ Migrate Primary to $cleanTargetName & Preserve Read Progress"
+						} else {
+							"⇄ Migrate Primary for ${itemsToMigrate.size} Series & Preserve Read Progress"
+						},
+						style = MaterialTheme.typography.titleSmall,
+						fontWeight = FontWeight.ExtraBold,
+						color = Color(0xFF071318),
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
 			}
 		}
+	}
 
-		// Bottom En-Masse Action Button
-		Button(
-			onClick = {
-				val batch = itemsToMigrate.map { item ->
-					val targetSrc = perItemSelectedSource[item.manga.id] ?: "EXT:MangaDex (Mihon EN)"
-					Triple(item.manga.id, targetSrc, computeTargetChapters(item, targetSrc))
-				}
-				onMigrateAllSelected(batch)
-			},
-			modifier = Modifier
-				.fillMaxWidth()
-				.testTag("migrate_all_selected_confirm_button"),
-		) {
-			Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
-			Spacer(modifier = Modifier.width(8.dp))
-			Text(
-				text = if (itemsToMigrate.size == 1) {
-					"Confirm Source Migration & Preserve Read Progress"
-				} else {
-					"Migrate All ${itemsToMigrate.size} Selected Series En-Masse"
-				},
-			)
+	// Mihon Full-Screen Source Priority Selector for Tab 1 (`🔗 Merge (Combine Chapters)`)
+	if (showMihonMergeSelector) {
+		val seedSources = remember(localMergedSources.toList(), cleanPrimarySource) {
+			(listOf(cleanPrimarySource) + localMergedSources + listOf("ComicK", "MangaFire")).distinct()
 		}
+		MigrationSourceSelectorScreen(
+			baseChapterCount = primaryTotalChapters,
+			initialSelectedSourceNames = seedSources,
+			onContinueWithSelected = { selectedCandidates ->
+				val secondaryCandidates = selectedCandidates.filterNot {
+					it.displayName.equals(cleanPrimarySource, ignoreCase = true)
+				}
+				localMergedSources.clear()
+				secondaryCandidates.forEach { candidate ->
+					localMergedSources.add(candidate.displayName)
+					if (candidate.verifiedChapters > localChapterCountOverride) {
+						localChapterCountOverride = candidate.verifiedChapters
+					}
+					onMergeSecondarySource(
+						primaryItem.manga.id,
+						candidate.displayName,
+						candidate.verifiedChapters,
+					)
+				}
+				showMihonMergeSelector = false
+				Toast.makeText(
+					context,
+					"Merged ${secondaryCandidates.size} priority sources (${localChapterCountOverride} Chapters total)",
+					Toast.LENGTH_SHORT,
+				).show()
+			},
+			onDismiss = { showMihonMergeSelector = false },
+		)
+	}
 
-		Spacer(modifier = Modifier.height(14.dp))
+	// Mihon Full-Screen Source Priority Selector for Tab 2 (`⇄ Migrate (Replace Primary)`)
+	if (showMihonMigrateSelector) {
+		val currentTarget = perItemSelectedSource[primaryItem.manga.id] ?: defaultBestSourceFor(primaryItem)
+		val cleanCurrentTarget = UiSourceAndTitleFormatter.formatSourceName(currentTarget)
+		MigrationSourceSelectorScreen(
+			baseChapterCount = primaryTotalChapters,
+			initialSelectedSourceNames = listOf(cleanCurrentTarget, "ComicK", "MangaDex", "MangaFire", "Bato.to").distinct(),
+			onContinueWithSelected = { selectedCandidates ->
+				val topPriority = selectedCandidates.firstOrNull {
+					!it.displayName.equals(cleanPrimarySource, ignoreCase = true)
+				} ?: selectedCandidates.firstOrNull()
+				if (topPriority != null) {
+					perItemSelectedSource[primaryItem.manga.id] = topPriority.fullSourceCode
+					perItemIsAutoSelected[primaryItem.manga.id] = false
+					Toast.makeText(
+						context,
+						"Target priority set to ${topPriority.displayName} (${topPriority.verifiedChapters} Chapters)",
+						Toast.LENGTH_SHORT,
+					).show()
+				}
+				showMihonMigrateSelector = false
+			},
+			onDismiss = { showMihonMigrateSelector = false },
+		)
+	}
+
+	perItemPickerTarget?.let { targetItem ->
+		val currentTarget = perItemSelectedSource[targetItem.manga.id] ?: defaultBestSourceFor(targetItem)
+		val cleanCurrentTarget = UiSourceAndTitleFormatter.formatSourceName(currentTarget)
+		MigrationSourceSelectorScreen(
+			baseChapterCount = targetItem.totalChapters,
+			initialSelectedSourceNames = listOf(cleanCurrentTarget, "ComicK", "MangaDex", "MangaFire").distinct(),
+			onContinueWithSelected = { selectedCandidates ->
+				val topPriority = selectedCandidates.firstOrNull()
+				if (topPriority != null) {
+					perItemSelectedSource[targetItem.manga.id] = topPriority.fullSourceCode
+					perItemIsAutoSelected[targetItem.manga.id] = false
+				}
+				perItemPickerTarget = null
+			},
+			onDismiss = { perItemPickerTarget = null },
+		)
 	}
 }
+
 

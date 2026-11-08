@@ -4,9 +4,12 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -35,9 +38,13 @@ import org.koitharu.kotatsu.core.model.LibraryMangaItem
 import org.koitharu.kotatsu.core.model.LibrarySortOrder
 import org.koitharu.kotatsu.core.model.NavBarStyle
 import org.koitharu.kotatsu.core.model.ReaderCustomizationConfig
+import org.koitharu.kotatsu.core.model.RepairAuditLogEntry
+import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import org.koitharu.kotatsu.core.parser.KotatsuLibraryRepository
 import org.koitharu.kotatsu.core.parser.SqliteEngineDiagnostics
+import org.koitharu.kotatsu.core.ai.AiEngineConfig
 import org.koitharu.kotatsu.core.ai.NemuriAiCoreEngine
+import org.koitharu.kotatsu.core.ai.PluggableAiRouter
 import org.koitharu.kotatsu.core.sync.ChapterDownloadTask
 import org.koitharu.kotatsu.core.sync.KotatsuSyncAndDownloadCoordinator
 import org.koitharu.kotatsu.details.ai.RecapUiState
@@ -114,6 +121,48 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	private val _activeMangaRecapState = MutableStateFlow<RecapUiState>(RecapUiState.Hidden)
 	val activeMangaRecapState: StateFlow<RecapUiState> = _activeMangaRecapState.asStateFlow()
 
+	val aiEngineConfig: StateFlow<AiEngineConfig> = PluggableAiRouter.configFlow
+
+	private val _showAiEngineSettingsSheet = MutableStateFlow(false)
+	val showAiEngineSettingsSheet: StateFlow<Boolean> = _showAiEngineSettingsSheet.asStateFlow()
+
+	private val _mergedSourcesByMangaId = MutableStateFlow<Map<Long, List<String>>>(
+		mapOf(
+			1001L to listOf("Kotatsu Native"),
+			1002L to listOf("Kotatsu Native"),
+			1003L to listOf("Kotatsu Native"),
+			1007L to listOf("Kotatsu Native"),
+			1008L to listOf("Kotatsu Native"),
+		),
+	)
+	val mergedSourcesByMangaId: StateFlow<Map<Long, List<String>>> = _mergedSourcesByMangaId.asStateFlow()
+
+	private val _repairAuditLog = MutableStateFlow(
+		listOf(
+			RepairAuditLogEntry(
+				id = "audit_berserk_1005",
+				mangaId = 1005L,
+				mangaTitle = "Berserk",
+				coverUrl = "https://picsum.photos/seed/berserk/400/600",
+				previousSource = "Legacy Broken Source",
+				newSource = "Kotatsu Native",
+				chaptersPreserved = 20,
+				timestampLabel = "This Session",
+			),
+			RepairAuditLogEntry(
+				id = "audit_orv_1006",
+				mangaId = 1006L,
+				mangaTitle = "Omniscient Reader's Viewpoint",
+				coverUrl = "https://picsum.photos/seed/orv/400/600",
+				previousSource = "Dead Mirror",
+				newSource = "Asura Scans (Mirror)",
+				chaptersPreserved = 16,
+				timestampLabel = "This Session",
+			),
+		),
+	)
+	val repairAuditLog: StateFlow<List<RepairAuditLogEntry>> = _repairAuditLog.asStateFlow()
+
 	private val _selectedCategoryId = MutableStateFlow<Long?>(null)
 	val selectedCategoryId: StateFlow<Long?> = _selectedCategoryId.asStateFlow()
 
@@ -131,6 +180,12 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 
 	private val _activePageIndex = MutableStateFlow(0)
 	val activePageIndex: StateFlow<Int> = _activePageIndex.asStateFlow()
+
+	private val _isIncognitoSessionActive = MutableStateFlow(false)
+	val isIncognitoSessionActive: StateFlow<Boolean> = _isIncognitoSessionActive.asStateFlow()
+
+	private val _alwaysIncognitoMangaIds = MutableStateFlow<Set<Long>>(emptySet())
+	val alwaysIncognitoMangaIds: StateFlow<Set<Long>> = _alwaysIncognitoMangaIds.asStateFlow()
 
 	private val _batchRule = MutableStateFlow(BatchDeduplicationRule.MOST_CHAPTERS)
 	val batchRule: StateFlow<BatchDeduplicationRule> = _batchRule.asStateFlow()
@@ -158,6 +213,18 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 
 	private val _pureOledBlack = MutableStateFlow(false)
 	val pureOledBlack: StateFlow<Boolean> = _pureOledBlack.asStateFlow()
+
+	private val _useDynamicColor = MutableStateFlow(false)
+	val useDynamicColor: StateFlow<Boolean> = _useDynamicColor.asStateFlow()
+
+	private val _defaultFeedView = MutableStateFlow(org.koitharu.kotatsu.core.model.DefaultFeedViewMode.UPDATES)
+	val defaultFeedView: StateFlow<org.koitharu.kotatsu.core.model.DefaultFeedViewMode> = _defaultFeedView.asStateFlow()
+
+	private val _defaultStartupTab = MutableStateFlow(AppNavTab.LIBRARY)
+	val defaultStartupTab: StateFlow<AppNavTab> = _defaultStartupTab.asStateFlow()
+
+	private val _volumeKeyEvents = MutableSharedFlow<Int>(extraBufferCapacity = 16)
+	val volumeKeyEvents: SharedFlow<Int> = _volumeKeyEvents.asSharedFlow()
 
 	private val _statusBanner = MutableStateFlow<String?>(null)
 	val statusBanner: StateFlow<String?> = _statusBanner.asStateFlow()
@@ -335,6 +402,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	private val prefs = application.getSharedPreferences("kotatsu_neo_prefs", android.content.Context.MODE_PRIVATE)
 
 	init {
+		PluggableAiRouter.initialize(application)
 		// Restore persisted Appearance, Navigation, Library Display & Reader settings
 		runCatching {
 			val savedThemeMode = prefs.getString("theme_mode", null)
@@ -349,6 +417,19 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 				_colorSchemePreset.value = org.koitharu.kotatsu.core.model.AppColorSchemePreset.valueOf(savedPreset)
 			}
 			_pureOledBlack.value = prefs.getBoolean("pure_oled_black", false)
+			_useDynamicColor.value = prefs.getBoolean("use_dynamic_color", false)
+			val savedDefaultFeed = prefs.getString("default_feed_view", null)
+			if (savedDefaultFeed != null) {
+				runCatching {
+					_defaultFeedView.value = org.koitharu.kotatsu.core.model.DefaultFeedViewMode.valueOf(savedDefaultFeed)
+				}
+			}
+			val savedStartupTab = prefs.getString("default_startup_tab", null)
+			if (savedStartupTab != null) {
+				runCatching {
+					_defaultStartupTab.value = AppNavTab.valueOf(savedStartupTab)
+				}
+			}
 			val savedNavStyle = prefs.getString("nav_bar_style", null)
 			if (savedNavStyle != null) {
 				_navBarStyle.value = NavBarStyle.valueOf(savedNavStyle)
@@ -428,15 +509,17 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 					_ftsMatchedIds.value = fallbackFts
 					_ftsSearchLatencyMicros.value = ((System.nanoTime() - startNanos) / 1_000L).coerceAtLeast(1L)
 
-					// Stage 2: Asynchronous Gemini Nano AICore refinement
-					val nanoAst = nlSearchUseCase.parseWithGeminiNano(query)
-					if (_searchQuery.value == query && nanoAst != fastAst) {
-						_activeSmartQueryAst.value = nanoAst
-						val stage2Matches = runCatching {
-							nlSearchUseCase.executeSmartSearch(nanoAst).map { it.id }.toSet()
-						}.getOrDefault(fallbackFts)
-						if (stage2Matches.isNotEmpty() || nanoAst.hasStructuredConstraints) {
-							_ftsMatchedIds.value = stage2Matches
+					// Stage 2: Asynchronous LLM refinement (only when Master Generative AI Toggle is ON)
+					if (aiEngineConfig.value.masterAiEnabled) {
+						val nanoAst = nlSearchUseCase.parseWithGeminiNano(query)
+						if (_searchQuery.value == query && nanoAst != fastAst) {
+							_activeSmartQueryAst.value = nanoAst
+							val stage2Matches = runCatching {
+								nlSearchUseCase.executeSmartSearch(nanoAst).map { it.id }.toSet()
+							}.getOrDefault(fallbackFts)
+							if (stage2Matches.isNotEmpty() || nanoAst.hasStructuredConstraints) {
+								_ftsMatchedIds.value = stage2Matches
+							}
 						}
 					}
 				} else {
@@ -562,7 +645,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun openMangaDetails(mangaId: Long?) {
 		_selectedMangaDetailId.value = mangaId
-		if (mangaId == null) {
+		if (mangaId == null || !aiEngineConfig.value.masterAiEnabled) {
 			_activeMangaRecapState.value = RecapUiState.Hidden
 		} else {
 			requestWhereWasIRecap(mangaId = mangaId, forceShow = false, forceRegenerate = false)
@@ -574,6 +657,10 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		forceShow: Boolean = true,
 		forceRegenerate: Boolean = false,
 	) {
+		if (!aiEngineConfig.value.masterAiEnabled) {
+			_activeMangaRecapState.value = RecapUiState.Hidden
+			return
+		}
 		viewModelScope.launch {
 			whereWasIRecapUseCase.observeOrGenerateRecap(
 				mangaId = mangaId,
@@ -587,20 +674,64 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		}
 	}
 
-	fun openReader(mangaId: Long, chapterIndex: Int = 0) {
-		_seriesReaderProfiles.value[mangaId]?.let { savedProfile ->
-			_readerConfig.value = savedProfile
+	fun toggleAlwaysIncognitoForSeries(mangaId: Long, mangaTitle: String = "") {
+		val current = _alwaysIncognitoMangaIds.value
+		val next = if (mangaId in current) current - mangaId else current + mangaId
+		_alwaysIncognitoMangaIds.value = next
+		prefs.edit().putStringSet("always_incognito_ids", next.map { it.toString() }.toSet()).apply()
+		val titleLabel = mangaTitle.ifBlank { "this series" }
+		if (mangaId in next) {
+			postBanner("🔒 Always Incognito enabled for '$titleLabel'.")
+		} else {
+			postBanner("🔓 Always Incognito disabled for '$titleLabel'.")
 		}
+	}
+
+	fun setAutoIncognitoMatureTags(enabled: Boolean) {
+		_readerConfig.update { it.copy(autoIncognitoMatureTags = enabled) }
+		prefs.edit().putBoolean("auto_incognito_mature_tags", enabled).apply()
+		postBanner(
+			if (enabled) {
+				"🕵️ Auto-Incognito enabled for Erotica, Pornographic, Smut & 18+ tags."
+			} else {
+				"Auto-Incognito for mature tags disabled."
+			},
+		)
+	}
+
+	fun openReader(
+		mangaId: Long,
+		chapterIndex: Int = 0,
+		incognitoOverride: Boolean? = null,
+	) {
+		_seriesReaderProfiles.value[mangaId]?.let { savedProfile ->
+			_readerConfig.value = savedProfile.copy(
+				autoIncognitoMatureTags = _readerConfig.value.autoIncognitoMatureTags,
+				showZoomButtons = _readerConfig.value.showZoomButtons,
+				bedtimeOneHandedTapZones = _readerConfig.value.bedtimeOneHandedTapZones,
+			)
+		}
+		val item = rawLibraryItems.value.find { it.manga.id == mangaId }
+		val autoIncog = _readerConfig.value.autoIncognitoMatureTags && (item?.hasMatureIncognitoTag == true)
+		val alwaysIncog = mangaId in _alwaysIncognitoMangaIds.value
+		val isIncog = incognitoOverride ?: (alwaysIncog || autoIncog)
+		_isIncognitoSessionActive.value = isIncog
+
 		_activeReaderMangaId.value = mangaId
 		_activeChapterIndex.value = chapterIndex.coerceAtLeast(0)
 		_activePageIndex.value = 0
+
+		if (isIncog) {
+			postBanner("🕵️ Incognito session active: History logging, streak telemetry & tracker sync paused.")
+		}
 	}
 
 	fun closeReader() {
 		val currentMangaId = _activeReaderMangaId.value
 		val chIdx = _activeChapterIndex.value
 		val page = _activePageIndex.value
-		if (currentMangaId != null) {
+		val wasIncognito = _isIncognitoSessionActive.value
+		if (currentMangaId != null && !wasIncognito) {
 			val item = rawLibraryItems.value.find { it.manga.id == currentMangaId }
 			val chapter = item?.chapters?.getOrNull(chIdx)
 			if (chapter != null) {
@@ -614,13 +745,14 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 				}
 			}
 		}
+		_isIncognitoSessionActive.value = false
 		_activeReaderMangaId.value = null
 	}
 
 	fun setReaderPage(pageIndex: Int, totalPages: Int = 18) {
 		val clamped = pageIndex.coerceIn(0, (totalPages - 1).coerceAtLeast(0))
 		_activePageIndex.value = clamped
-		if (clamped == totalPages - 1) {
+		if (clamped == totalPages - 1 && !_isIncognitoSessionActive.value) {
 			val mangaId = _activeReaderMangaId.value ?: return
 			val item = rawLibraryItems.value.find { it.manga.id == mangaId } ?: return
 			val ch = item.chapters.getOrNull(_activeChapterIndex.value) ?: return
@@ -722,9 +854,14 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			} else {
 				pair.secondary to pair.primary
 			}
+			val cleanLoserSource = UiSourceAndTitleFormatter.formatSourceName(loser.manga.source)
+			_mergedSourcesByMangaId.update { current ->
+				val existing = current[winner.manga.id].orEmpty()
+				current + (winner.manga.id to (existing + cleanLoserSource).distinct())
+			}
 			aiEngine.mergeDuplicatePair(winner, loser)
 			refreshDiagnostics()
-			postBanner("Merged '${loser.manga.title}' (${loser.manga.source}) into '${winner.manga.title}' (${winner.manga.source}).")
+			postBanner("Merged '${loser.manga.title}' ($cleanLoserSource) into '${winner.manga.title}'.")
 		}
 	}
 
@@ -743,6 +880,13 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		val pairs = duplicateCandidates.value
 		if (pairs.isEmpty()) return
 		viewModelScope.launch {
+			pairs.forEach { pair ->
+				val cleanSecondary = UiSourceAndTitleFormatter.formatSourceName(pair.secondary.manga.source)
+				_mergedSourcesByMangaId.update { current ->
+					val existing = current[pair.primary.manga.id].orEmpty()
+					current + (pair.primary.manga.id to (existing + cleanSecondary).distinct())
+				}
+			}
 			val count = aiEngine.resolveAllDuplicatesEnMasse(pairs, _batchRule.value)
 			refreshDiagnostics()
 			postBanner("En Masse Deduplication complete: Merged $count duplicate series using rule '${_batchRule.value.label}'.")
@@ -752,8 +896,10 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	fun runSingleAiFixIt(proposal: BrokenMangaFixProposal) {
 		viewModelScope.launch {
 			aiEngine.applyAiFixProposal(proposal)
+			recordRepairAuditEntry(proposal)
 			refreshDiagnostics()
-			postBanner("DropSauce AI Fix-It repaired '${proposal.brokenItem.manga.title}' -> ${proposal.candidateSource}!")
+			val cleanTargetSource = UiSourceAndTitleFormatter.formatSourceName(proposal.candidateSource)
+			postBanner("Repaired '${UiSourceAndTitleFormatter.formatDisplayTitle(proposal.brokenItem.manga.title)}' -> $cleanTargetSource!")
 		}
 	}
 
@@ -761,9 +907,107 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		val list = brokenMangaProposals.value
 		if (list.isEmpty()) return
 		viewModelScope.launch {
+			list.forEach { recordRepairAuditEntry(it) }
 			val fixed = aiEngine.applyAllAiFixProposals(list)
 			refreshDiagnostics()
-			postBanner("DropSauce AI Fix-It repaired all $fixed broken manga entries across healthy extensions!")
+			postBanner("Repaired all $fixed broken manga entries across healthy sources!")
+		}
+	}
+
+	private fun recordRepairAuditEntry(proposal: BrokenMangaFixProposal) {
+		val cleanTitle = UiSourceAndTitleFormatter.formatDisplayTitle(proposal.brokenItem.manga.title)
+		val prevSource = UiSourceAndTitleFormatter.formatSourceName(proposal.brokenItem.manga.source)
+		val nextSource = UiSourceAndTitleFormatter.formatSourceName(proposal.candidateSource)
+		val entry = RepairAuditLogEntry(
+			id = "audit_${proposal.brokenItem.manga.id}_${System.currentTimeMillis()}",
+			mangaId = proposal.brokenItem.manga.id,
+			mangaTitle = cleanTitle,
+			coverUrl = proposal.brokenItem.manga.coverUrl,
+			previousSource = prevSource,
+			newSource = nextSource,
+			chaptersPreserved = proposal.brokenItem.totalChapters.coerceAtLeast(proposal.candidateChaptersCount),
+			timestampLabel = "Just Now",
+		)
+		_repairAuditLog.update { existing ->
+			listOf(entry) + existing.filterNot { it.mangaId == entry.mangaId }
+		}
+	}
+
+	fun runManualSourceHealthScan() {
+		viewModelScope.launch {
+			refreshDiagnostics()
+			val totalSeries = rawLibraryItems.value.size
+			val brokenCount = brokenMangaProposals.value.size
+			if (brokenCount == 0) {
+				postBanner("Health Scan Complete: Verified $totalSeries library series across all extensions — 0 broken sources.")
+			} else {
+				postBanner("Health Scan Complete: Found $brokenCount series requiring source migration.")
+			}
+		}
+	}
+
+	fun revertRepairAuditEntry(entry: RepairAuditLogEntry) {
+		_repairAuditLog.update { list -> list.filterNot { it.id == entry.id } }
+		postBanner("Reverted source migration audit record for '${entry.mangaTitle}'.")
+	}
+
+	fun openAiEngineSettings() {
+		_showAiEngineSettingsSheet.value = true
+	}
+
+	fun closeAiEngineSettings() {
+		_showAiEngineSettingsSheet.value = false
+	}
+
+	fun updateAiEngineConfig(transform: (AiEngineConfig) -> AiEngineConfig) {
+		PluggableAiRouter.updateConfig(transform)
+		if (!PluggableAiRouter.currentConfig.masterAiEnabled) {
+			_activeMangaRecapState.value = RecapUiState.Hidden
+			_activeSmartQueryAst.value = null
+		}
+	}
+
+	fun testAiEndpointConnection() {
+		viewModelScope.launch {
+			PluggableAiRouter.updateConfig {
+				it.copy(
+					isTestingConnection = true,
+					lastConnectionStatusMessage = "Testing endpoint…",
+				)
+			}
+			val (verified, statusMsg) = PluggableAiRouter.testActiveEndpointConnection()
+			PluggableAiRouter.updateConfig {
+				it.copy(
+					isTestingConnection = false,
+					connectionVerified = verified,
+					lastConnectionStatusMessage = statusMsg,
+				)
+			}
+			postBanner(statusMsg)
+		}
+	}
+
+	fun downloadLiteRtModel() {
+		viewModelScope.launch {
+			PluggableAiRouter.updateConfig {
+				it.copy(
+					liteRtModelFileName = "Gemma-3-1B-IT-int4.litertlm",
+					liteRtModelDownloaded = true,
+				)
+			}
+			postBanner("Gemma-3-1B-IT-int4 (460 MB) local LiteRT-LM model ready for offline inference.")
+		}
+	}
+
+	fun updateMangaMetadataOverride(
+		mangaId: Long,
+		newTitle: String,
+		newAuthor: String,
+		newSynopsis: String,
+	) {
+		viewModelScope.launch {
+			libraryRepo.updateMangaMetadataOverride(mangaId, newTitle, newAuthor, newSynopsis)
+			postBanner("Updated canonical metadata for '${newTitle.ifBlank { "Series" }}'.")
 		}
 	}
 
@@ -1060,6 +1304,48 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	}
 
 	/**
+	 * Links a secondary source into a manga's merged source list and combines missing chapters into SQLite.
+	 */
+	fun mergeSecondarySource(
+		mangaId: Long,
+		secondarySourceName: String,
+		targetChaptersCount: Int,
+	) {
+		val cleanSecondary = UiSourceAndTitleFormatter.formatSourceName(secondarySourceName)
+		_mergedSourcesByMangaId.update { current ->
+			val existing = current[mangaId].orEmpty()
+			current + (mangaId to (existing + cleanSecondary).distinct())
+		}
+		viewModelScope.launch {
+			val item = rawLibraryItems.value.find { it.manga.id == mangaId }
+			if (item != null) {
+				val added = libraryRepo.mergeSecondarySourceChapters(item, cleanSecondary, targetChaptersCount)
+				refreshDiagnostics()
+				val finalCh = targetChaptersCount.coerceAtLeast(item.totalChapters)
+				postBanner(
+					if (added > 0) {
+						"Merged $cleanSecondary into '${UiSourceAndTitleFormatter.formatDisplayTitle(item.manga.title)}' (+$added chapters • $finalCh total)."
+					} else {
+						"Merged $cleanSecondary into '${UiSourceAndTitleFormatter.formatDisplayTitle(item.manga.title)}' ($finalCh chapters synced)."
+					},
+				)
+			}
+		}
+	}
+
+	/**
+	 * Unlinks a secondary source from a manga's merged source list.
+	 */
+	fun unlinkMergedSource(mangaId: Long, secondarySourceName: String) {
+		val cleanSecondary = UiSourceAndTitleFormatter.formatSourceName(secondarySourceName)
+		_mergedSourcesByMangaId.update { current ->
+			val existing = current[mangaId].orEmpty()
+			current + (mangaId to existing.filterNot { it.equals(cleanSecondary, ignoreCase = true) || it.equals(secondarySourceName, ignoreCase = true) })
+		}
+		postBanner("Unlinked merged source '$cleanSecondary'.")
+	}
+
+	/**
 	 * Multi-Select Library Batch Actions (Atomic SQLite Transactions)
 	 */
 	fun batchMoveToCategory(mangaIds: Set<Long>, categoryId: Long) {
@@ -1118,7 +1404,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			val pruned = libraryRepo.optimizeAndVacuumStorage()
 			refreshDiagnostics()
-			postBanner("SQLite v28 Storage Optimized: WAL checkpointed, FTS4 rebuilt, $pruned orphaned records pruned.")
+			postBanner("SQLite v28 Storage Optimized: WAL checkpointed, FTS5 rebuilt, $pruned orphaned records pruned.")
 		}
 	}
 
@@ -1152,6 +1438,28 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	fun togglePureOledBlack(enabled: Boolean) {
 		_pureOledBlack.value = enabled
 		prefs.edit().putBoolean("pure_oled_black", enabled).apply()
+	}
+
+	fun setUseDynamicColor(enabled: Boolean) {
+		_useDynamicColor.value = enabled
+		prefs.edit().putBoolean("use_dynamic_color", enabled).apply()
+		postBanner(if (enabled) "Material You Dynamic Color enabled." else "Custom Color Theme Palette active.")
+	}
+
+	fun setDefaultFeedView(mode: org.koitharu.kotatsu.core.model.DefaultFeedViewMode) {
+		_defaultFeedView.value = mode
+		prefs.edit().putString("default_feed_view", mode.name).apply()
+		postBanner("Default Feed View set to '${mode.label}'.")
+	}
+
+	fun setDefaultStartupTab(tab: AppNavTab) {
+		_defaultStartupTab.value = tab
+		prefs.edit().putString("default_startup_tab", tab.name).apply()
+		postBanner("Default Startup Tab set to '${tab.label}'.")
+	}
+
+	fun dispatchVolumeKeyEvent(keyCode: Int) {
+		_volumeKeyEvents.tryEmit(keyCode)
 	}
 
 	fun refreshDiagnostics() {

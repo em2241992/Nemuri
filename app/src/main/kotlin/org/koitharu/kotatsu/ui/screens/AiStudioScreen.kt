@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -29,22 +30,30 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.MergeType
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,7 +72,9 @@ import org.koitharu.kotatsu.core.model.BatchDeduplicationRule
 import org.koitharu.kotatsu.core.model.BrokenMangaFixProposal
 import org.koitharu.kotatsu.core.model.DuplicateCandidatePair
 import org.koitharu.kotatsu.core.model.LibraryDisplayConfig
+import org.koitharu.kotatsu.core.model.LibraryMangaItem
 import org.koitharu.kotatsu.core.model.ReaderCustomizationConfig
+import org.koitharu.kotatsu.core.model.RepairAuditLogEntry
 import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import org.koitharu.kotatsu.extensions.ExtensionCatalogManga
 import org.koitharu.kotatsu.ui.components.MangaCoverArtwork
@@ -71,7 +82,7 @@ import org.koitharu.kotatsu.ui.components.MangaReaderPageCanvas
 import org.koitharu.kotatsu.ui.theme.JetBrainsMonoFamily
 import org.koitharu.kotatsu.ui.theme.PlusJakartaDisplayFamily
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AiStudioScreen(
 	duplicateCandidates: List<DuplicateCandidatePair>,
@@ -89,9 +100,21 @@ fun AiStudioScreen(
 	onUpdateDisplayConfig: ((LibraryDisplayConfig) -> LibraryDisplayConfig) -> Unit,
 	onUpdateReaderConfig: ((ReaderCustomizationConfig) -> ReaderCustomizationConfig) -> Unit,
 	onTestCheckAndSwapAdd: (ExtensionCatalogManga) -> Unit,
+	aiEnginePillLabel: String = "AI Engine: Gemini Nano",
+	onOpenAiEngineSettings: () -> Unit = {},
+	onOpenSettingsScreen: () -> Unit = {},
+	isAiActive: Boolean = true,
+	libraryItems: List<LibraryMangaItem> = emptyList(),
+	onMigrateSingleSource: (Long, String, Int) -> Unit = { _, _, _ -> },
+	onMigrateBatchSources: (List<Triple<Long, String, Int>>) -> Unit = {},
+	repairAuditLog: List<RepairAuditLogEntry> = emptyList(),
+	onRunManualHealthScan: () -> Unit = {},
+	onOpenMangaDetails: (Long) -> Unit = {},
+	onRevertRepair: (RepairAuditLogEntry) -> Unit = {},
 	modifier: Modifier = Modifier,
 ) {
 	var selectedTab by remember { mutableIntStateOf(0) }
+	var showBatchMigrateSheet by remember { mutableStateOf(false) }
 	val tabs = listOf(
 		"Duplicates (${duplicateCandidates.size})",
 		"Repair (${brokenProposals.size})",
@@ -103,20 +126,36 @@ fun AiStudioScreen(
 			.fillMaxSize()
 			.background(MaterialTheme.colorScheme.background),
 	) {
-		// Clean Header + Material 3 Segmented Pill Bar
+		// Clean Header + Standardized 2-Icon Cluster ([✦ AI] + [⚙ Settings]) + Material 3 Segmented Pill Bar
 		Column(
 			modifier = Modifier
 				.fillMaxWidth()
 				.padding(horizontal = 16.dp, vertical = 10.dp),
 			verticalArrangement = Arrangement.spacedBy(10.dp),
 		) {
-			Text(
-				text = "AI & Enhancement",
-				style = MaterialTheme.typography.headlineSmall,
-				fontFamily = PlusJakartaDisplayFamily,
-				fontWeight = FontWeight.Bold,
-				color = MaterialTheme.colorScheme.onSurface,
-			)
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = "AI & Enhancement",
+					style = MaterialTheme.typography.headlineSmall,
+					fontFamily = PlusJakartaDisplayFamily,
+					fontWeight = FontWeight.Bold,
+					color = MaterialTheme.colorScheme.onSurface,
+				)
+
+				// Strict 2-Icon Header Rule on Enhance via Shared UnifiedTopRightIconCluster: [✦ AI Engine] + [⚙ Settings]
+				org.koitharu.kotatsu.ui.components.UnifiedTopRightIconCluster(
+					activeTab = org.koitharu.kotatsu.core.model.AppNavTab.AI_STUDIO,
+					onOpenAiEngineSettings = onOpenAiEngineSettings,
+					onOpenSettingsScreen = onOpenSettingsScreen,
+					isAiActive = isAiActive,
+					aiButtonTestTag = "enhance_ai_engine_pill_button",
+					settingsTestTag = "enhance_settings_gear_button",
+				)
+			}
 
 			Surface(
 				color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -201,15 +240,40 @@ fun AiStudioScreen(
 				},
 			)
 
-			1 -> DropSauceAiFixItTab(
+			1 -> SourceRepairAndFixItTab(
 				proposals = brokenProposals,
+				repairAuditLog = repairAuditLog,
 				onRunSingleFix = onRunSingleAiFix,
 				onRunAllBatchFix = onRunAllAiFixBatch,
+				onRunManualHealthScan = onRunManualHealthScan,
+				onOpenBatchMigrate = { showBatchMigrateSheet = true },
+				onOpenMangaDetails = onOpenMangaDetails,
+				onRevertRepair = onRevertRepair,
 			)
 
 			else -> AiPageUpscalerStudioTab(
 				readerConfig = readerConfig,
 				onUpdateReaderConfig = onUpdateReaderConfig,
+			)
+		}
+	}
+
+	if (showBatchMigrateSheet && libraryItems.isNotEmpty()) {
+		org.koitharu.kotatsu.ui.components.UniversalSheet(
+			onClose = { showBatchMigrateSheet = false },
+			containerColor = Color(0xFF121620),
+			sheetTestTag = "enhance_batch_migrate_universal_sheet",
+		) {
+			SourceMigrationModalSheet(
+				itemsToMigrate = libraryItems,
+				onMigrateSingle = { mangaId, targetSource, targetChapters ->
+					onMigrateSingleSource(mangaId, targetSource, targetChapters)
+				},
+				onMigrateAllSelected = { migrations ->
+					onMigrateBatchSources(migrations)
+					showBatchMigrateSheet = false
+				},
+				onClose = { showBatchMigrateSheet = false },
 			)
 		}
 	}
@@ -325,6 +389,47 @@ private fun DuplicateResolutionTab(
 							Spacer(modifier = Modifier.width(6.dp))
 							Text("Merge All (${duplicateCandidates.size}) • ${batchRule.shortLabel}", fontSize = 12.sp)
 						}
+					}
+
+					var showDuplicatesMihonSelector by remember { mutableStateOf(false) }
+					var priorityOrderSummary by remember {
+						mutableStateOf("ComicK → MangaDex → MangaFire → Bato.to")
+					}
+					OutlinedButton(
+						onClick = { showDuplicatesMihonSelector = true },
+						contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.height(36.dp)
+							.testTag("duplicates_open_mihon_source_selector_button"),
+					) {
+						Text(
+							text = "⚙ Configure & Select Sources (Mihon Selector) ▸",
+							fontSize = 11.sp,
+							fontWeight = FontWeight.Bold,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+					}
+					Text(
+						text = "Priority: $priorityOrderSummary",
+						fontFamily = JetBrainsMonoFamily,
+						fontSize = 10.sp,
+						color = MaterialTheme.colorScheme.primary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+
+					if (showDuplicatesMihonSelector) {
+						MigrationSourceSelectorScreen(
+							baseChapterCount = 30,
+							initialSelectedSourceNames = listOf("ComicK", "MangaDex", "MangaFire", "Bato.to"),
+							onContinueWithSelected = { selected ->
+								priorityOrderSummary = selected.joinToString(" → ") { it.displayName }
+								showDuplicatesMihonSelector = false
+							},
+							onDismiss = { showDuplicatesMihonSelector = false },
+						)
 					}
 				}
 			}
@@ -588,16 +693,60 @@ private fun DuplicateOneByOneCard(
 }
 
 @Composable
-private fun DropSauceAiFixItTab(
+private fun SourceRepairAndFixItTab(
 	proposals: List<BrokenMangaFixProposal>,
+	repairAuditLog: List<RepairAuditLogEntry>,
 	onRunSingleFix: (BrokenMangaFixProposal) -> Unit,
 	onRunAllBatchFix: () -> Unit,
+	onRunManualHealthScan: () -> Unit,
+	onOpenBatchMigrate: () -> Unit = {},
+	onOpenMangaDetails: (Long) -> Unit,
+	onRevertRepair: (RepairAuditLogEntry) -> Unit,
 ) {
 	LazyColumn(
 		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp),
 		verticalArrangement = Arrangement.spacedBy(12.dp),
-		modifier = Modifier.fillMaxSize(),
+		modifier = Modifier
+			.fillMaxSize()
+			.testTag("repair_tab_lazy_column"),
 	) {
+		item {
+			Surface(
+				color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+				shape = RoundedCornerShape(14.dp),
+				modifier = Modifier.fillMaxWidth(),
+			) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(horizontal = 14.dp, vertical = 10.dp),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Text(
+							text = "Mihon-Style Source Migration",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.Bold,
+						)
+						Text(
+							text = "Validate & migrate series individually or en-masse across sources",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+						)
+					}
+					FilledTonalButton(
+						onClick = onOpenBatchMigrate,
+						contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+						modifier = Modifier.testTag("repair_open_batch_migrate_button"),
+					) {
+						Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+						Spacer(modifier = Modifier.width(4.dp))
+						Text("Migrate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+					}
+				}
+			}
+		}
 		if (proposals.isNotEmpty()) {
 			item {
 				Card(
@@ -613,36 +762,51 @@ private fun DropSauceAiFixItTab(
 							shape = RoundedCornerShape(20.dp),
 						),
 				) {
-					Row(
+					Column(
 						modifier = Modifier
 							.fillMaxWidth()
 							.padding(horizontal = 16.dp, vertical = 12.dp),
-						horizontalArrangement = Arrangement.SpaceBetween,
-						verticalAlignment = Alignment.CenterVertically,
+						verticalArrangement = Arrangement.spacedBy(10.dp),
 					) {
-						Column(modifier = Modifier.weight(1f)) {
-							Text(
-								text = "${proposals.size} unreachable sources",
-								style = MaterialTheme.typography.titleSmall,
-								fontWeight = FontWeight.Bold,
-							)
-							Text(
-								text = "Ready to migrate to healthy extensions",
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.onSurfaceVariant,
-							)
-						}
-						Button(
-							onClick = onRunAllBatchFix,
-							modifier = Modifier.testTag("ai_fix_all_batch_button"),
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
 						) {
-							Icon(
-								imageVector = Icons.Default.AutoFixHigh,
-								contentDescription = null,
-								modifier = Modifier.size(16.dp),
-							)
-							Spacer(modifier = Modifier.width(6.dp))
-							Text("Repair All")
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = "${proposals.size} unreachable sources",
+									style = MaterialTheme.typography.titleSmall,
+									fontWeight = FontWeight.Bold,
+								)
+								Text(
+									text = "Ready to migrate to healthy extensions",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Button(
+								onClick = onRunAllBatchFix,
+								modifier = Modifier.testTag("ai_fix_all_batch_button"),
+							) {
+								Icon(
+									imageVector = Icons.Default.AutoFixHigh,
+									contentDescription = null,
+									modifier = Modifier.size(16.dp),
+								)
+								Spacer(modifier = Modifier.width(6.dp))
+								Text("Repair All")
+							}
+						}
+
+						OutlinedButton(
+							onClick = onRunManualHealthScan,
+							shape = RoundedCornerShape(12.dp),
+							modifier = Modifier
+								.fillMaxWidth()
+								.testTag("run_manual_health_scan_button"),
+						) {
+							Text("Run Source & Extension Health Scan", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
 						}
 					}
 				}
@@ -656,30 +820,50 @@ private fun DropSauceAiFixItTab(
 					colors = CardDefaults.cardColors(
 						containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
 					),
+					modifier = Modifier.fillMaxWidth(),
 				) {
-					Row(
+					Column(
 						modifier = Modifier
 							.fillMaxWidth()
 							.padding(18.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(12.dp),
+						verticalArrangement = Arrangement.spacedBy(12.dp),
 					) {
-						Icon(
-							imageVector = Icons.Default.CheckCircle,
-							contentDescription = null,
-							tint = Color(0xFF10B981),
-							modifier = Modifier.size(28.dp),
-						)
-						Column {
-							Text(
-								text = "All Sources Healthy",
-								style = MaterialTheme.typography.titleSmall,
-								fontWeight = FontWeight.Bold,
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(12.dp),
+						) {
+							Icon(
+								imageVector = Icons.Default.CheckCircle,
+								contentDescription = null,
+								tint = Color(0xFF10B981),
+								modifier = Modifier.size(28.dp),
 							)
+							Column {
+								Text(
+									text = "All Sources Healthy",
+									style = MaterialTheme.typography.titleSmall,
+									fontWeight = FontWeight.Bold,
+								)
+								Text(
+									text = "Every series in your library is connected to an active source.",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+						}
+
+						OutlinedButton(
+							onClick = onRunManualHealthScan,
+							shape = RoundedCornerShape(12.dp),
+							modifier = Modifier
+								.fillMaxWidth()
+								.testTag("run_manual_health_scan_button"),
+						) {
 							Text(
-								text = "Every series in your library is connected to an active source.",
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.onSurfaceVariant,
+								text = "Run Source & Extension Health Scan",
+								fontSize = 12.sp,
+								fontWeight = FontWeight.SemiBold,
 							)
 						}
 					}
@@ -753,6 +937,142 @@ private fun DropSauceAiFixItTab(
 								.testTag("apply_single_ai_fix_${proposal.brokenItem.manga.id}"),
 						) {
 							Text("Migrate", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+						}
+					}
+				}
+			}
+		}
+
+		// RECENT REPAIRS & SOURCE MIGRATIONS Audit Log Section
+		if (repairAuditLog.isNotEmpty()) {
+			item(key = "recent_repairs_audit_header") {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(top = 6.dp),
+					verticalArrangement = Arrangement.spacedBy(4.dp),
+				) {
+					Text(
+						text = "RECENT REPAIRS & SOURCE MIGRATIONS",
+						fontFamily = JetBrainsMonoFamily,
+						fontWeight = FontWeight.Bold,
+						fontSize = 11.sp,
+						color = Color(0xFF5CE1E6),
+						modifier = Modifier.testTag("recent_repairs_audit_header"),
+					)
+					Text(
+						text = "Session audit trail of automatic & manual source migrations with chapter preservation",
+						style = MaterialTheme.typography.bodySmall,
+						fontSize = 11.sp,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+					)
+				}
+			}
+
+			items(
+				items = repairAuditLog,
+				key = { it.id },
+			) { audit ->
+				Card(
+					shape = RoundedCornerShape(18.dp),
+					colors = CardDefaults.cardColors(
+						containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+					),
+					modifier = Modifier
+						.fillMaxWidth()
+						.border(
+							width = 1.dp,
+							color = Color(0xFF10B981).copy(alpha = 0.28f),
+							shape = RoundedCornerShape(18.dp),
+						)
+						.testTag("repair_audit_card_${audit.mangaId}"),
+				) {
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(14.dp),
+						verticalArrangement = Arrangement.spacedBy(10.dp),
+					) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							MangaCoverArtwork(
+								title = audit.mangaTitle,
+								coverUrl = audit.coverUrl,
+								modifier = Modifier
+									.width(44.dp)
+									.aspectRatio(0.68f)
+									.clip(RoundedCornerShape(8.dp)),
+							)
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(3.dp),
+							) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.SpaceBetween,
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									Text(
+										text = audit.mangaTitle,
+										style = MaterialTheme.typography.titleSmall,
+										fontFamily = PlusJakartaDisplayFamily,
+										fontWeight = FontWeight.Bold,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+										modifier = Modifier.weight(1f),
+									)
+									Surface(
+										color = Color(0xFF10B981).copy(alpha = 0.16f),
+										shape = RoundedCornerShape(50),
+									) {
+										Text(
+											text = "✓ Repaired • ${audit.timestampLabel}",
+											fontFamily = JetBrainsMonoFamily,
+											fontSize = 9.sp,
+											fontWeight = FontWeight.Bold,
+											color = Color(0xFF34D399),
+											modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+										)
+									}
+								}
+								Text(
+									text = "${audit.previousSource} → ${audit.newSource} • ${audit.chaptersPreserved} Chapters Preserved",
+									fontFamily = JetBrainsMonoFamily,
+									fontSize = 11.sp,
+									color = Color(0xFF5CE1E6),
+								)
+							}
+						}
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							FilledTonalButton(
+								onClick = { onOpenMangaDetails(audit.mangaId) },
+								contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+								modifier = Modifier
+									.weight(1f)
+									.height(34.dp)
+									.testTag("repair_audit_view_series_${audit.mangaId}"),
+							) {
+								Text("View Series", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+							}
+
+							if (audit.canRevert) {
+								OutlinedButton(
+									onClick = { onRevertRepair(audit) },
+									contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+									modifier = Modifier
+										.height(34.dp)
+										.testTag("repair_audit_revert_${audit.mangaId}"),
+								) {
+									Text("Revert", fontSize = 12.sp)
+								}
+							}
 						}
 					}
 				}

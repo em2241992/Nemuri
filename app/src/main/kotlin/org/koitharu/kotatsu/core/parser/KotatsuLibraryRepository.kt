@@ -23,6 +23,7 @@ import org.koitharu.kotatsu.core.db.entity.TagEntity
 import org.koitharu.kotatsu.core.db.entity.TitleNormalizer
 import org.koitharu.kotatsu.core.db.entity.TrackEntity
 import org.koitharu.kotatsu.core.model.LibraryMangaItem
+import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import org.koitharu.kotatsu.extensions.ExtensionCatalogManga
 import org.koitharu.kotatsu.history.data.HistoryRepository
 import kotlin.math.abs
@@ -223,6 +224,56 @@ class KotatsuLibraryRepository(
 			db.openHelper.writableDatabase.execSQL("INSERT INTO manga_fts(manga_fts) VALUES('rebuild')")
 		}
 		migratedCount
+	}
+
+	/**
+	 * Merges missing chapters from a secondary source into the manga's canonical chapter list
+	 * without replacing the primary source, updating totalChapters in TrackEntity.
+	 */
+	suspend fun mergeSecondarySourceChapters(
+		item: LibraryMangaItem,
+		secondarySourceName: String,
+		targetChCount: Int,
+	): Int = withContext(Dispatchers.IO) {
+		val existingCount = item.chapters.size
+		val finalTotal = targetChCount.coerceAtLeast(existingCount)
+		val addedCount = (finalTotal - existingCount).coerceAtLeast(0)
+		db.withTransaction {
+			val now = System.currentTimeMillis()
+			val cleanSecondary = UiSourceAndTitleFormatter.formatSourceName(secondarySourceName)
+			if (finalTotal > existingCount) {
+				val extraChapters = (existingCount + 1..finalTotal.coerceAtMost(existingCount + 20)).map { num ->
+					ChapterEntity(
+						chapterId = item.manga.id * 10_000L + num,
+						mangaId = item.manga.id,
+						title = "Chapter $num (Merged via $cleanSecondary)",
+						number = num.toFloat(),
+						volume = ((num - 1) / 10) + 1,
+						url = "${item.manga.url}/merged-${cleanSecondary.lowercase().replace(" ", "")}-ch-$num",
+						scanlator = "$cleanSecondary (Merged)",
+						uploadDate = now,
+						branch = "Merged EN",
+						index = num - 1,
+						isRead = false,
+						isDownloaded = false,
+						lastPageRead = 0,
+					)
+				}
+				db.getChaptersDao().upsertAll(extraChapters)
+			}
+			val readCount = item.chapters.count { it.isRead }
+			db.getAuxiliaryDao().upsertTrack(
+				TrackEntity(
+					mangaId = item.manga.id,
+					totalChapters = finalTotal,
+					lastChapterId = item.chapters.lastOrNull()?.chapterId ?: (item.manga.id * 1000L + 1L),
+					newChapters = (finalTotal - readCount).coerceAtLeast(0),
+					lastCheckTime = now,
+					lastChapterDate = now,
+				),
+			)
+		}
+		addedCount
 	}
 
 	/**
@@ -655,7 +706,7 @@ class KotatsuLibraryRepository(
 					description = "The adventure is over but life goes on for an elf mage just beginning to learn what living is all about.",
 					tags = listOf("Fantasy", "Adventure", "Slice of Life", "Drama"),
 					categoryId = 1L,
-					totalChapters = 32,
+					totalChapters = 30,
 					readChapters = 28,
 					downloadedChapters = 6,
 					rating = 0.98f,
@@ -669,7 +720,7 @@ class KotatsuLibraryRepository(
 					author = "Kanehito Yamada, Tsukasa Abe",
 					source = "EXT:Bato.to (Mihon EN)",
 					coverSeed = "frieren_alt",
-					description = "Merged with Bato.to with earlier scanlation chapters. Ready for 1-by-1 or En Masse Deduplication!",
+					description = "After a ten-year quest to defeat the Demon King alongside the hero Himmel, the elven mage Frieren embarks on a new journey across the continent to understand human mortality and the fleeting bonds of time.",
 					tags = listOf("Fantasy", "Adventure", "Magic"),
 					categoryId = 2L,
 					totalChapters = 24,
@@ -702,7 +753,7 @@ class KotatsuLibraryRepository(
 					author = "Ryoko Kui",
 					source = "EXT:Kotatsu IPC Provider",
 					coverSeed = "dungeon_meshi",
-					description = "Secondary mirror entry from an external ContentProvider plugin.",
+					description = "After the Golden Kingdom is sunk underground by an insane magician, adventurer Laios and his party descend into the dungeon labyrinth—cooking and eating monsters to survive and rescue his sister Falin.",
 					tags = listOf("Fantasy", "Gourmet", "Dungeon"),
 					categoryId = 2L,
 					totalChapters = 19,
@@ -711,7 +762,7 @@ class KotatsuLibraryRepository(
 					rating = 0.94f,
 					updatedAgoMinutes = 520L,
 				),
-				// Broken Series #1 -> Ready for DropSauce AI Fix-It!
+				// Broken Series #1 -> Ready for Source Fix-It!
 				SeedSpec(
 					id = 1005L,
 					title = "Berserk [Legacy Source Broken]",
@@ -719,7 +770,7 @@ class KotatsuLibraryRepository(
 					author = "Kentaro Miura",
 					source = "DEAD:BuiltInKotatsuParser",
 					coverSeed = "berserk",
-					description = "Legacy built-in Kotatsu parser removed for DMCA compliance. Use DropSauce 'AI Fix-It' to migrate to EXT:MangaDex while keeping your 18 read chapters!",
+					description = "A lone mercenary named Guts, branded for sacrifice and wielding the colossal Dragon Slayer greatsword, battles apostles across a dark medieval world.",
 					tags = listOf("Dark Fantasy", "Seinen", "Action"),
 					categoryId = 2L,
 					totalChapters = 20,
@@ -727,10 +778,10 @@ class KotatsuLibraryRepository(
 					downloadedChapters = 0,
 					rating = 0.99f,
 					isBroken = true,
-					healthError = "Built-in Kotatsu parser deprecated & removed — Tap AI Fix-It to migrate to EXT:MangaDex",
+					healthError = "Built-in Kotatsu parser deprecated & removed — Tap Fix-It to migrate to EXT:MangaDex",
 					updatedAgoMinutes = 90L,
 				),
-				// Broken Series #2 -> Ready for DropSauce AI Fix-It!
+				// Broken Series #2 -> Ready for Source Fix-It!
 				SeedSpec(
 					id = 1006L,
 					title = "Omniscient Reader's Viewpoint",
@@ -738,7 +789,7 @@ class KotatsuLibraryRepository(
 					author = "Sing N Song, Sleepy-C",
 					source = "DEAD:AsuraLegacyMirror",
 					coverSeed = "orv",
-					description = "Kim Dokja is the sole reader of 'Three Ways to Survive in a Ruined World'. Source domain moved; ready for DropSauce AI Fix-It.",
+					description = "Kim Dokja is the sole reader of the web novel 'Three Ways to Survive in a Ruined World'. When the real world suddenly merges with the novel's apocalyptic scenarios, only he knows how the story unfolds.",
 					tags = listOf("Webtoon", "Action", "Fantasy", "Apocalyptic"),
 					categoryId = 3L,
 					totalChapters = 16,
@@ -746,7 +797,7 @@ class KotatsuLibraryRepository(
 					downloadedChapters = 3,
 					rating = 0.98f,
 					isBroken = true,
-					healthError = "HTTP 403 Cloudflare / Domain Moved — Tap AI Fix-It to migrate to healthy extension",
+					healthError = "HTTP 403 Cloudflare / Domain Moved — Tap Fix-It to migrate to healthy extension",
 					updatedAgoMinutes = 30L,
 				),
 				SeedSpec(
@@ -952,5 +1003,21 @@ class KotatsuLibraryRepository(
 
 			db.openHelper.writableDatabase.execSQL("INSERT INTO manga_fts(manga_fts) VALUES('rebuild')")
 		}
+	}
+
+	suspend fun updateMangaMetadataOverride(
+		mangaId: Long,
+		newTitle: String,
+		newAuthor: String,
+		newSynopsis: String,
+	) = withContext(Dispatchers.IO) {
+		val existing = db.getMangaDao().find(mangaId)?.manga ?: return@withContext
+		val updated = existing.copy(
+			title = newTitle.trim().ifBlank { existing.title },
+			authors = newAuthor.trim().ifBlank { existing.authors },
+			description = newSynopsis.trim().ifBlank { existing.description },
+			normalizedTitle = TitleNormalizer.normalize(newTitle.trim().ifBlank { existing.title }),
+		)
+		db.getMangaDao().upsertManga(updated)
 	}
 }

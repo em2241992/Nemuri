@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -428,10 +429,12 @@ private fun resolveSeriesSpecificHookQuote(cleanTitle: String, synopsis: String)
 	}
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun DualModeHybridFeedHomeView(
 	initialPrimaryMode: HybridFeedPrimaryMode = HybridFeedPrimaryMode.UPDATES_AND_BROWSE,
+	defaultFeedView: org.koitharu.kotatsu.core.model.DefaultFeedViewMode = org.koitharu.kotatsu.core.model.DefaultFeedViewMode.UPDATES,
+	onSetDefaultFeedView: (org.koitharu.kotatsu.core.model.DefaultFeedViewMode) -> Unit = {},
 	defaultSource: String,
 	availableSources: List<String>,
 	feedUpdates: List<FeedUpdateItem>,
@@ -595,6 +598,13 @@ fun DualModeHybridFeedHomeView(
 				) {
 					HybridFeedPrimaryMode.entries.forEach { mode ->
 						val isSelected = primaryMode == mode
+						val mappedDefaultMode = when (mode) {
+							HybridFeedPrimaryMode.UPDATES_AND_BROWSE -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.UPDATES
+							HybridFeedPrimaryMode.NEKO_HUB -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.HUB
+							HybridFeedPrimaryMode.NEKO_GALLERY -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.GALLERY
+							HybridFeedPrimaryMode.DISCOVERY_FOR_YOU -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.FOR_YOU
+						}
+						val isDefaultMode = defaultFeedView == mappedDefaultMode
 						val tag = when (mode) {
 							HybridFeedPrimaryMode.UPDATES_AND_BROWSE -> "hybrid_feed_mode_updates_browse"
 							HybridFeedPrimaryMode.NEKO_HUB -> "hybrid_feed_mode_neko_hub"
@@ -608,12 +618,6 @@ fun DualModeHybridFeedHomeView(
 							HybridFeedPrimaryMode.DISCOVERY_FOR_YOU -> Icons.Default.AutoAwesome
 						}
 						Surface(
-							onClick = {
-								if (mode == HybridFeedPrimaryMode.NEKO_HUB) {
-									gallerySectionFilter = null
-								}
-								primaryMode = mode
-							},
 							color = if (isSelected) {
 								MaterialTheme.colorScheme.primary
 							} else {
@@ -623,10 +627,23 @@ fun DualModeHybridFeedHomeView(
 							modifier = Modifier
 								.weight(1f)
 								.fillMaxHeight()
+								.clip(RoundedCornerShape(17.dp))
+								.combinedClickable(
+									onClick = {
+										if (mode == HybridFeedPrimaryMode.NEKO_HUB) {
+											gallerySectionFilter = null
+										}
+										primaryMode = mode
+									},
+									onLongClick = {
+										onSetDefaultFeedView(mappedDefaultMode)
+										primaryMode = mode
+									},
+								)
 								.testTag(tag),
 						) {
 							Row(
-								modifier = Modifier.padding(horizontal = 6.dp),
+								modifier = Modifier.padding(horizontal = 4.dp),
 								verticalAlignment = Alignment.CenterVertically,
 								horizontalArrangement = Arrangement.Center,
 							) {
@@ -638,11 +655,11 @@ fun DualModeHybridFeedHomeView(
 									} else {
 										MaterialTheme.colorScheme.onSurfaceVariant
 									},
-									modifier = Modifier.size(14.dp),
+									modifier = Modifier.size(13.dp),
 								)
-								Spacer(modifier = Modifier.width(4.dp))
+								Spacer(modifier = Modifier.width(3.dp))
 								Text(
-									text = mode.label,
+									text = if (isDefaultMode) "★ ${mode.label}" else mode.label,
 									style = MaterialTheme.typography.labelMedium,
 									fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
 									maxLines = 1,

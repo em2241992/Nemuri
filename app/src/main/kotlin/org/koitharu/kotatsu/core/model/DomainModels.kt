@@ -9,14 +9,21 @@ enum class LibraryLayoutMode(val label: String, val subtitle: String) {
 	COMFY_GRID("Comfy Grid", "Spacious grid • Title & progress below cover"),
 	COMPACT_LIST("Compact Rows", "Dense single-line rows"),
 	COMFORTABLE_LIST("Comfortable List", "Standard list with metadata"),
-	DETAILED_CARD("Detailed Studio Cards", "Large editorial cards"),
+	DETAILED_CARD("Detailed Cards", "Large editorial cards"),
 }
 
 enum class CardCoverShape(val label: String, val cornerRadiusDp: Int) {
-	SHARP("Sharp Studio (4dp)", 4),
+	SHARP("Sharp (4dp)", 4),
 	ROUNDED("Material Rounded (14dp)", 14),
 	PILL_EDGED("Soft Capsule (24dp)", 24),
 	BORDERLESS_FLAT("Crisp Edge (0dp)", 0),
+}
+
+enum class DefaultFeedViewMode(val label: String) {
+	UPDATES("Updates"),
+	HUB("Hub"),
+	GALLERY("Gallery"),
+	FOR_YOU("For You"),
 }
 
 enum class CoverAspectRatio(val label: String, val ratio: Float) {
@@ -63,14 +70,38 @@ enum class AppColorSchemePreset(
 	val lightPrimaryHex: Long,
 	val darkContainerHex: Long,
 	val lightContainerHex: Long,
+	val secondarySwatchHex: Long = darkPrimaryHex,
+	val surfaceSwatchHex: Long = darkContainerHex,
 ) {
 	KOTATSU_TEAL(
 		label = "Kotatsu Teal",
-		subtitle = "Signature Usagi / Kotatsu cyan-teal",
+		subtitle = "Signature Kotatsu cyan-teal",
 		darkPrimaryHex = 0xFF4CCAD0,
 		lightPrimaryHex = 0xFF0D9488,
 		darkContainerHex = 0xFF0F363A,
 		lightContainerHex = 0xFFCCFBF1,
+		secondarySwatchHex = 0xFF2DD4BF,
+		surfaceSwatchHex = 0xFF132A2E,
+	),
+	NEKO_INDIGO(
+		label = "Neko Indigo",
+		subtitle = "Deep MangaDex periwinkle blue",
+		darkPrimaryHex = 0xFF818CF8,
+		lightPrimaryHex = 0xFF4F46E5,
+		darkContainerHex = 0xFF1E1B4B,
+		lightContainerHex = 0xFFE0E7FF,
+		secondarySwatchHex = 0xFF6366F1,
+		surfaceSwatchHex = 0xFF191838,
+	),
+	MIHON_COBALT(
+		label = "Mihon Cobalt",
+		subtitle = "Classic sapphire blue",
+		darkPrimaryHex = 0xFF60A5FA,
+		lightPrimaryHex = 0xFF2563EB,
+		darkContainerHex = 0xFF172554,
+		lightContainerHex = 0xFFDBEAFE,
+		secondarySwatchHex = 0xFF38BDF8,
+		surfaceSwatchHex = 0xFF132042,
 	),
 	CRIMSON_INK(
 		label = "Crimson Ink",
@@ -79,14 +110,18 @@ enum class AppColorSchemePreset(
 		lightPrimaryHex = 0xFFD81B54,
 		darkContainerHex = 0xFF3B1022,
 		lightContainerHex = 0xFFFFD9E1,
+		secondarySwatchHex = 0xFFFB7185,
+		surfaceSwatchHex = 0xFF2D0D1B,
 	),
-	MIHON_COBALT(
-		label = "Mihon Cobalt",
-		subtitle = "Classic Mihon / Tachiyomi sapphire blue",
-		darkPrimaryHex = 0xFF60A5FA,
-		lightPrimaryHex = 0xFF2563EB,
-		darkContainerHex = 0xFF172554,
-		lightContainerHex = 0xFFDBEAFE,
+	CEREMONIAL_MATCHA(
+		label = "Ceremonial Matcha",
+		subtitle = "Rich Kyoto Uji green",
+		darkPrimaryHex = 0xFF84CC16,
+		lightPrimaryHex = 0xFF4D7C0F,
+		darkContainerHex = 0xFF1A2E05,
+		lightContainerHex = 0xFFECFCCB,
+		secondarySwatchHex = 0xFFA3E635,
+		surfaceSwatchHex = 0xFF182809,
 	),
 	SAKURA_ROSE(
 		label = "Sakura Rose",
@@ -95,6 +130,8 @@ enum class AppColorSchemePreset(
 		lightPrimaryHex = 0xFFDB2777,
 		darkContainerHex = 0xFF4A1533,
 		lightContainerHex = 0xFFFCE7F3,
+		secondarySwatchHex = 0xFFF9A8D4,
+		surfaceSwatchHex = 0xFF381228,
 	),
 	ROYAL_AMETHYST(
 		label = "Royal Amethyst",
@@ -103,6 +140,8 @@ enum class AppColorSchemePreset(
 		lightPrimaryHex = 0xFF7C3AED,
 		darkContainerHex = 0xFF2E1065,
 		lightContainerHex = 0xFFEDE9FE,
+		secondarySwatchHex = 0xFFC084FC,
+		surfaceSwatchHex = 0xFF240F4E,
 	),
 	AMBER_GOLD(
 		label = "Amber Gold",
@@ -111,6 +150,8 @@ enum class AppColorSchemePreset(
 		lightPrimaryHex = 0xFFD97706,
 		darkContainerHex = 0xFF451A03,
 		lightContainerHex = 0xFFFEF3C7,
+		secondarySwatchHex = 0xFFF59E0B,
+		surfaceSwatchHex = 0xFF331505,
 	),
 	EMERALD_FOREST(
 		label = "Emerald Forest",
@@ -119,6 +160,18 @@ enum class AppColorSchemePreset(
 		lightPrimaryHex = 0xFF059669,
 		darkContainerHex = 0xFF064E3B,
 		lightContainerHex = 0xFFD1FAE5,
+		secondarySwatchHex = 0xFF10B981,
+		surfaceSwatchHex = 0xFF083A2C,
+	),
+	MONOCHROME_E_INK(
+		label = "Monochrome E-Ink",
+		subtitle = "High-contrast grayscale ink",
+		darkPrimaryHex = 0xFFE2E8F0,
+		lightPrimaryHex = 0xFF1E293B,
+		darkContainerHex = 0xFF27272A,
+		lightContainerHex = 0xFFE4E4E7,
+		secondarySwatchHex = 0xFF94A3B8,
+		surfaceSwatchHex = 0xFF18181B,
 	),
 }
 
@@ -201,23 +254,25 @@ enum class AiUpscaleMode(val label: String, val badge: String, val scaleFactor: 
 	OFF("Standard Native Decode", "1.0x", 1.0f),
 	FAST_CRISP_INK_1_5X("AI Crisp Ink & Line Art (1.5x)", "AI 1.5x", 1.5f),
 	ANIME_SUPER_RES_2X("AI Anime/Manga Super-Res (2.0x)", "AI 2.0x", 2.0f),
-	HIGH_CONTRAST_RESTORE("DropSauce Scan De-Noise & Ink Restore", "INK+", 1.75f),
+	HIGH_CONTRAST_RESTORE("Scan De-Noise & Ink Restore", "INK+", 1.75f),
 }
 
 enum class ReaderColorFilterPreset(val label: String, val badge: String) {
-	NONE("Default Studio", "RAW"),
+	NONE("Original", "RAW"),
+	NEMURI_BEDTIME("🌙 Nemuri Bedtime (Warm Paper + Dimmer)", "BEDTIME"),
+	AI_AUTO_INK_RESTORE("✦ AI Auto-Ink Restore", "AI INK"),
 	WARM_SEPIA("Warm Archival Paper", "SEPIA"),
 	NIGHT_BLUE_LIGHT("Eye-Care Night Blue", "NIGHT"),
-	MONOCHROME_INK("Monochrome Manga Ink", "B&W"),
+	MONOCHROME_INK("Grayscale", "B&W"),
 	CRISP_HIGH_CONTRAST("Crisp Deep Blacks", "INK"),
-	INVERTED_NIGHT("Inverted Dark Page", "INV"),
+	INVERTED_NIGHT("Inverted OLED Dark", "INV"),
 	CUSTOM_RGB("Custom RGB Balance", "RGB"),
 }
 
 enum class SliderPosition(val label: String) {
-	LEFT_ALIGN("Left align"),
+	LEFT_ALIGN("Left Align"),
 	HORIZONTAL("Horizontal"),
-	RIGHT_ALIGN("Right align"),
+	RIGHT_ALIGN("Right Align"),
 }
 
 enum class NekoRotationMode(val label: String) {
@@ -258,6 +313,9 @@ data class ReaderCustomizationConfig(
 	val colorFilterPreset: ReaderColorFilterPreset = ReaderColorFilterPreset.NONE,
 	val brightnessDelta: Float = 0f,
 	val contrastDelta: Float = 0.1f,
+	val warmthDelta: Float = 0f,
+	val bedtimeDimmerAlpha: Float = 0.18f,
+	val marginCropPercent: Int = -27,
 	val saturation: Float = 1.0f,
 	val redBalance: Float = 1.0f,
 	val greenBalance: Float = 1.0f,
@@ -269,6 +327,17 @@ data class ReaderCustomizationConfig(
 	val autoCropMargins: Boolean = true,
 	val splitDoubleSpreadsInPortrait: Boolean = true,
 	val showTapGridZones: Boolean = false,
+	val switchPagesWithVolumeKeys: Boolean = true,
+	val invertVolumeKeys: Boolean = false,
+	val showZoomButtons: Boolean = true,
+	val bedtimeOneHandedTapZones: Boolean = false,
+	val autoIncognitoMatureTags: Boolean = true,
+	val twoPageOnLandscape: Boolean = true,
+	val autoTwoPageOnFoldable: Boolean = true,
+	val twoPageScrollSensitivity: Float = 0.5f,
+	val autoScrollEnabled: Boolean = false,
+	val autoScrollSpeedMultiplier: Float = 1.0f,
+	val bedtimeAutoPauseAtChapterEnd: Boolean = true,
 )
 
 data class SourceMigrationTargetOption(
@@ -304,6 +373,18 @@ data class LibraryMangaItem(
 	val languageCode: String,
 ) {
 	val totalChapters: Int get() = chapters.size
+
+	val hasMatureIncognitoTag: Boolean
+		get() = tags.any { tag ->
+			val t = tag.title.trim()
+			t.equals("Erotica", ignoreCase = true) ||
+				t.equals("Pornographic", ignoreCase = true) ||
+				t.equals("Smut", ignoreCase = true) ||
+				t.equals("18+", ignoreCase = true) ||
+				t.equals("Adult", ignoreCase = true) ||
+				t.contains("Erotica", ignoreCase = true) ||
+				t.contains("Pornographic", ignoreCase = true)
+		}
 
 	val contentTypeLabel: String
 		get() = when {
@@ -356,6 +437,18 @@ data class BrokenMangaFixProposal(
 	val confidenceScore: Float,
 	val aiDiagnosisNote: String,
 	val isFixed: Boolean = false,
+)
+
+data class RepairAuditLogEntry(
+	val id: String,
+	val mangaId: Long,
+	val mangaTitle: String,
+	val coverUrl: String,
+	val previousSource: String,
+	val newSource: String,
+	val chaptersPreserved: Int,
+	val timestampLabel: String = "This Session",
+	val canRevert: Boolean = true,
 )
 
 enum class ExtensionInstallStatus(val label: String) {
