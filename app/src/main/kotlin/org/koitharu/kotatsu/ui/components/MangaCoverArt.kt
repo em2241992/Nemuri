@@ -163,7 +163,7 @@ fun MangaReaderPageCanvas(
 	blueBalance: Float = 1f,
 	decodedBitmap: android.graphics.Bitmap? = null,
 	seamlessVerticalStitch: Boolean = false,
-	isDebugMock: Boolean = true,
+	isDebugMock: Boolean = false,
 	modifier: Modifier = Modifier,
 ) {
 	val effectiveInvert = invertColors || colorFilterPreset == ReaderColorFilterPreset.INVERTED_NIGHT

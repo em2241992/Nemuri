@@ -177,6 +177,7 @@ fun ExploreScreen(
 	isAiActive: Boolean = true,
 	onInstallOrUpdateExtension: (ExternalExtensionInfo) -> Unit = {},
 	onUninstallExtension: (ExternalExtensionInfo) -> Unit = {},
+	debugSandboxEnabled: Boolean = false,
 	modifier: Modifier = Modifier,
 ) {
 	var currentSubView by remember { mutableStateOf(ExploreSubView.HOME) }
@@ -283,23 +284,27 @@ fun ExploreScreen(
 				monogramText = "SJ",
 				brandColor = Color(0xFFEF4444),
 			),
-			KotatsuSourceTileModel(
-				id = "komga_lan",
-				displayName = "Komga LAN",
-				sourceMatchKey = "MangaDex",
-				subtitle = "192.168.1.50 • Zero-Copy",
-				tileType = SourceTileVisual.MONOGRAM_BADGE,
-				isNativeKotatsu = true,
-				monogramText = "KG",
-				brandColor = Color(0xFF10B981),
-			),
 		)
 	}
 
-	val sourceTiles = remember(baseSourceTiles, discoveredExtensions, pinnedSourceIds) {
+	val lanServers = org.koitharu.kotatsu.ui.components.LanMediaServerStore.servers
+	val sourceTiles = remember(baseSourceTiles, discoveredExtensions, pinnedSourceIds, lanServers.size) {
 		val baseNormalizedNames = baseSourceTiles.map {
 			org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(it.displayName).lowercase()
 		}.toSet()
+
+		val lanTiles = lanServers.map { server ->
+			KotatsuSourceTileModel(
+				id = "lan_${server.id}",
+				displayName = server.name,
+				sourceMatchKey = server.name,
+				subtitle = "${server.baseUrl.removePrefix("http://").removePrefix("https://")} • Zero-Copy",
+				tileType = SourceTileVisual.MONOGRAM_BADGE,
+				isNativeKotatsu = true,
+				monogramText = server.serverType.label.take(2).uppercase(),
+				brandColor = Color(0xFF10B981),
+			)
+		}
 
 		val extraInstalledTiles = discoveredExtensions
 			.filter { ext ->
@@ -339,7 +344,7 @@ fun ExploreScreen(
 					brandColor = Color(0xFFC084FC),
 				)
 			}
-		(baseSourceTiles + extraInstalledTiles).sortedByDescending { it.id in pinnedSourceIds }
+		(baseSourceTiles + lanTiles + extraInstalledTiles).sortedByDescending { it.id in pinnedSourceIds }
 	}
 
 	val displayedSourceTiles = remember(sourceTiles, activeSourceCategoryFilter, pinnedSourceIds) {
@@ -348,7 +353,7 @@ fun ExploreScreen(
 			SourceCategoryFilter.PINNED -> sourceTiles.filter { it.id in pinnedSourceIds }
 			SourceCategoryFilter.NATIVE_KT -> sourceTiles.filter { it.isNativeKotatsu }
 			SourceCategoryFilter.EXTENSIONS_EXT -> sourceTiles.filter { !it.isNativeKotatsu }
-			SourceCategoryFilter.LAN_SERVERS -> sourceTiles.filter { it.id == "komga_lan" }
+			SourceCategoryFilter.LAN_SERVERS -> sourceTiles.filter { it.id.startsWith("lan_") }
 		}
 	}
 
@@ -969,13 +974,15 @@ fun ExploreScreen(
 										Spacer(modifier = Modifier.width(6.dp))
 										Text("Browse CBZ/ZIP File")
 									}
-									FilledTonalButton(
-										onClick = { onImportCbzUri(null, "Lone_Wolf_And_Cub_Omnibus_v01.cbz") },
-										modifier = Modifier.testTag("quick_import_sample_cbz_button"),
-									) {
-										Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
-										Spacer(modifier = Modifier.width(6.dp))
-										Text("Index Sample CBZ")
+									if (debugSandboxEnabled) {
+										FilledTonalButton(
+											onClick = { onImportCbzUri(null, "Lone_Wolf_And_Cub_Omnibus_v01.cbz") },
+											modifier = Modifier.testTag("quick_import_sample_cbz_button"),
+										) {
+											Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
+											Spacer(modifier = Modifier.width(6.dp))
+											Text("Index Sample CBZ")
+										}
 									}
 								}
 							}

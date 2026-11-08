@@ -642,6 +642,9 @@ fun KotatsuNeoRootApp(
 									onSetDebugSandboxEnabled = viewModel::setDebugSandboxEnabled,
 									onPurgeLegacyMockData = viewModel::purgeLegacyCacheAndResetMockState,
 									onTestBottomCapsuleToast = viewModel::triggerTestBottomCapsuleToast,
+									onImportSampleCbz = {
+										viewModel.importCbzFromUri(null, "Lone_Wolf_And_Cub_Omnibus_v01.cbz")
+									},
 									onBackToLibrary = {
 										isSettingsDirectOpen = false
 										currentTab = AppNavTab.LIBRARY
@@ -755,6 +758,7 @@ fun KotatsuNeoRootApp(
 											isAiActive = aiEngineConfig.masterAiEnabled,
 											onInstallOrUpdateExtension = viewModel::installOrUpdateExtension,
 											onUninstallExtension = viewModel::uninstallExtension,
+											debugSandboxEnabled = debugSandboxEnabled,
 										)
 									}
 

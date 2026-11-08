@@ -12,7 +12,7 @@ android {
 		applicationId = 'org.nemuri.manga'
 		minSdk = 24
 		targetSdk = 36
-		versionCode = 1037
+		versionCode = 1038
 		versionName = '10.0.0-neo'
 		testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
 	}

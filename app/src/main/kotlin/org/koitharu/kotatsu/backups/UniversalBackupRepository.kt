@@ -28,7 +28,7 @@ import kotlin.math.abs
 enum class BackupFormat(val label: String, val extension: String) {
 	KOTATSU_BAK("Kotatsu Archive (.bak / .zip)", "bak"),
 	MIHON_TACHIBK("Mihon / Tachiyomi Protobuf (.tachibk)", "tachibk"),
-	MIHON_JSON("Mihon / Neko Portable (.json)", "json"),
+	MIHON_JSON("Portable Backup (.json)", "json"),
 }
 
 data class BackupRestoreSummary(

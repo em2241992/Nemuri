@@ -265,7 +265,7 @@ class AiLibraryEngine(
 	}
 
 	/**
-	 * DropSauce-style "AI Fix-It":
+	 * Nemuri "Source Fix-It":
 	 * Diagnoses broken manga entries in the library (dead parser, HTTP 403/404, unmapped Mihon source ID, or 0 chapters)
 	 * and finds the highest-confidence healthy replacement across installed external extensions.
 	 */
@@ -319,7 +319,7 @@ class AiLibraryEngine(
 	}
 
 	/**
-	 * Executes DropSauce "AI Fix-It" migration on a broken manga:
+	 * Executes Nemuri "Source Fix-It" migration on a broken manga:
 	 * Swaps the dead source for the healthy extension source, rebuilds the full chapter list,
 	 * and migrates read progress and categories atomically.
 	 */

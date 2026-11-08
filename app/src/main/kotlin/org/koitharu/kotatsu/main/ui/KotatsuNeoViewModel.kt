@@ -240,7 +240,9 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 
 	val downloadQueue: StateFlow<List<ChapterDownloadTask>> = KotatsuSyncAndDownloadCoordinator.downloadQueue
 
-	private val _extensionCatalog = MutableStateFlow(extensionManager.getExtensionCatalogItems())
+	private val _extensionCatalog = MutableStateFlow(
+		extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value),
+	)
 	val extensionCatalogFlow: StateFlow<List<ExtensionCatalogManga>> = combine(
 		_extensionCatalog,
 		_debugSandboxEnabled,
@@ -248,14 +250,18 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		if (sandboxEnabled) {
 			catalog
 		} else {
-			catalog.filterNot { KotatsuLibraryRepository.isDebugMockTitle(it.title) }
+			catalog.filterNot {
+				KotatsuLibraryRepository.isDebugMockTitle(it.title) || it.url.contains(".ext/")
+			}
 		}
 	}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 	val extensionCatalog: List<ExtensionCatalogManga>
 		get() = if (_debugSandboxEnabled.value) {
 			_extensionCatalog.value
 		} else {
-			_extensionCatalog.value.filterNot { KotatsuLibraryRepository.isDebugMockTitle(it.title) }
+			_extensionCatalog.value.filterNot {
+				KotatsuLibraryRepository.isDebugMockTitle(it.title) || it.url.contains(".ext/")
+			}
 		}
 
 	val categories: StateFlow<List<FavouriteCategoryEntity>> = db.getFavouritesDao().observeCategories()
@@ -476,6 +482,9 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			}
 			val savedSandbox = prefs.getBoolean("debug_sandbox_enabled", false)
 			_debugSandboxEnabled.value = savedSandbox
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = savedSandbox)
+			org.koitharu.kotatsu.ui.components.GitHubUpdateChecker.setDebugSandboxMode(application, savedSandbox)
+			org.koitharu.kotatsu.ui.components.LanMediaServerStore.syncDebugSandboxServers(savedSandbox)
 			if (savedSandbox) {
 				_mergedSourcesByMangaId.value = getDebugMockMergedSources()
 				_repairAuditLog.value = getDebugMockRepairAuditLog()
@@ -501,7 +510,15 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			}
 		}
 		viewModelScope.launch {
-			libraryRepo.ensureSeeded(seedDebugMockData = _debugSandboxEnabled.value)
+			if (_debugSandboxEnabled.value) {
+				libraryRepo.ensureSeeded(seedDebugMockData = true)
+			} else {
+				libraryRepo.ensureSeeded(seedDebugMockData = false)
+			}
+			// Re-check in case setDebugSandboxEnabled(true) was called concurrently while purging
+			if (_debugSandboxEnabled.value) {
+				libraryRepo.seedDebugSandboxDataset()
+			}
 			org.koitharu.kotatsu.core.os.pruneOrphanedShortcutIcons(application)
 			refreshDiagnostics()
 		}
@@ -1064,7 +1081,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			val added = extensionManager.addExtensionRepository(name, url, repoType)
 			_discoveredExtensions.value = extensionManager.discoverExtensions(extensionRepos.value)
-			_extensionCatalog.value = extensionManager.getExtensionCatalogItems()
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			postBanner("Added external repository '${added.name}' (${added.extensionCount} extension manifests indexed).")
 		}
 	}
@@ -1074,7 +1091,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			db.getAuxiliaryDao().deleteExtensionRepo(repoId)
 			extensionManager.deleteCachedRepoIndex(repoId)
 			_discoveredExtensions.value = extensionManager.discoverExtensions(extensionRepos.value)
-			_extensionCatalog.value = extensionManager.getExtensionCatalogItems()
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			postBanner("Removed extension repository and cleared cached index.")
 		}
 	}
@@ -1083,7 +1100,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		viewModelScope.launch {
 			val repos = extensionRepos.value
 			_discoveredExtensions.value = extensionManager.discoverExtensions(repos)
-			_extensionCatalog.value = extensionManager.getExtensionCatalogItems()
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			val updatesCount = _discoveredExtensions.value.count { it.hasUpdate }
 			postBanner(
 				"Synced ${repos.size.coerceAtLeast(1)} repo(s): ${_discoveredExtensions.value.size} extensions indexed ($updatesCount update(s) available).",
@@ -1099,7 +1116,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			}
 			_extensionInstallTasks.update { it + (ext.pkgName to completedTask) }
 			_discoveredExtensions.value = extensionManager.discoverExtensions(extensionRepos.value)
-			_extensionCatalog.value = extensionManager.getExtensionCatalogItems()
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			val targetVer = ext.latestVersionName ?: ext.versionName
 			val actionLabel = if (wasUpdate) "Updated" else "Installed & activated"
 			postBanner(
@@ -1113,7 +1130,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			extensionManager.uninstallExtension(ext)
 			_extensionInstallTasks.update { it - ext.pkgName }
 			_discoveredExtensions.value = extensionManager.discoverExtensions(extensionRepos.value)
-			_extensionCatalog.value = extensionManager.getExtensionCatalogItems()
+			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			postBanner("Uninstalled '${ext.name.removePrefix("EXT:")}' (${ext.pkgName}).")
 		}
 	}
@@ -1182,7 +1199,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 						runCatching { app.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) } }
 					}
 					_lastExportedPreview.value = format to json.take(600) + if (json.length > 600) "\n… (${json.length} chars total)" else ""
-					postBanner("Exported Mihon/Neko portable .json backup (${json.length / 1024} KB).")
+					postBanner("Exported portable .json backup (${json.length / 1024} KB).")
 				}
 			}
 		}
@@ -1518,6 +1535,9 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	fun setDebugSandboxEnabled(enabled: Boolean) {
 		_debugSandboxEnabled.value = enabled
 		prefs.edit().putBoolean("debug_sandbox_enabled", enabled).apply()
+		_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = enabled)
+		org.koitharu.kotatsu.ui.components.GitHubUpdateChecker.setDebugSandboxMode(getApplication(), enabled)
+		org.koitharu.kotatsu.ui.components.LanMediaServerStore.syncDebugSandboxServers(enabled)
 		viewModelScope.launch {
 			if (enabled) {
 				libraryRepo.seedDebugSandboxDataset()
@@ -1556,6 +1576,9 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 
 	fun purgeLegacyCacheAndResetMockState() {
 		_debugSandboxEnabled.value = false
+		_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = false)
+		org.koitharu.kotatsu.ui.components.GitHubUpdateChecker.setDebugSandboxMode(getApplication(), false)
+		org.koitharu.kotatsu.ui.components.LanMediaServerStore.syncDebugSandboxServers(false)
 		val cleanedBookmarks = _bookmarkedPageKeys.value.filterNot { key ->
 			val mId = key.substringBefore('_').toLongOrNull()
 			mId != null && mId in KotatsuLibraryRepository.DEBUG_MOCK_MANGA_IDS

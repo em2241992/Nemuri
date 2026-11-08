@@ -1055,9 +1055,11 @@ class ExternalExtensionManager(
 	/**
 	 * Provides catalog series from enabled external extensions so users can test browsing,
 	 * Check-and-Swap on Add (including titles that intentionally match existing library entries),
-	 * and AI Fix-It healthy source replacement.
+	 * and AI Fix-It healthy source replacement when Debug Sandbox Mode is enabled.
 	 */
-	fun getExtensionCatalogItems(): List<ExtensionCatalogManga> = listOf(
+	fun getExtensionCatalogItems(includeDebugMock: Boolean = true): List<ExtensionCatalogManga> {
+		if (!includeDebugMock) return emptyList()
+		return listOf(
 		// Matches "Sousou no Frieren" in the library -> triggers Check & Swap on Add!
 		ExtensionCatalogManga(
 			title = "Frieren: Beyond Journey's End (Sousou no Frieren)",
@@ -1168,6 +1170,7 @@ class ExternalExtensionManager(
 			rating = 0.99f,
 		),
 	) + buildDynamicInstalledCatalogItems()
+	}
 
 	private fun buildDynamicInstalledCatalogItems(): List<ExtensionCatalogManga> {
 		val (installedMap, uninstalledSet) = loadInstalledRegistry()

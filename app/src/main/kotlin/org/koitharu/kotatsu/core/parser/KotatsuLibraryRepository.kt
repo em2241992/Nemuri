@@ -83,6 +83,7 @@ class KotatsuLibraryRepository(
 			"chainsaw man",
 			"berserk",
 			"solo leveling",
+			"solo leveling ragnarok",
 			"omniscient readers viewpoint",
 			"jujutsu kaisen",
 			"vagabond",
@@ -90,7 +91,20 @@ class KotatsuLibraryRepository(
 			"sakamoto days",
 			"monster",
 			"vinland saga",
+			"one piece",
+			"akira",
 			"akira 35th anniversary box set cbz",
+			"kagurabachi",
+			"the apothecary diaries",
+			"kusuriya no hitorigoto",
+			"villainess level 99",
+			"the greatest estate developer",
+			"witch hat atelier",
+			"tongari boushi no atelier",
+			"dungeon odyssey",
+			"sss class suicide hunter",
+			"tower of god",
+			"lone wolf and cub",
 		)
 
 		fun isDebugMockTitle(rawTitle: String): Boolean {
@@ -101,8 +115,11 @@ class KotatsuLibraryRepository(
 
 		fun isDebugMockEntity(manga: MangaEntity): Boolean {
 			if (manga.id in DEBUG_MOCK_MANGA_IDS) return true
-			if (manga.url.startsWith("https://ext.kotatsuneo.app/manga/")) return true
-			if (manga.coverUrl.startsWith("studio_cover://") && isDebugMockTitle(manga.title)) return true
+			if (manga.url.startsWith("https://ext.kotatsuneo.app/")) return true
+			if (manga.url.contains(".ext/")) return true
+			if (manga.url.contains("mihon.backup")) return true
+			if (manga.coverUrl.startsWith("studio_cover://")) return true
+			if (isDebugMockTitle(manga.title)) return true
 			return false
 		}
 	}
@@ -431,6 +448,7 @@ class KotatsuLibraryRepository(
 				db.getFavouritesDao().deleteForManga(id)
 				db.getChaptersDao().deleteByMangaId(id)
 				db.getHistoryDao().deleteByMangaId(id)
+				db.getChaptersHistoryDao().deleteByMangaId(id)
 				db.getAuxiliaryDao().deleteTrack(id)
 				db.getAuxiliaryDao().deleteBookmarksForManga(id)
 				db.getMangaDao().clearTagRelations(id)
@@ -1064,7 +1082,7 @@ class KotatsuLibraryRepository(
 	}
 
 	/**
-	 * Scrubs all debug/mock manga entries cached in Room without deleting real user manga.
+	 * Scrubs all debug/mock manga entries and orphaned history cached in Room without deleting real user manga.
 	 */
 	suspend fun purgeDebugMockDataset(): Int = withContext(Dispatchers.IO) {
 		val allExisting = db.getMangaDao().getAllWithTags()
@@ -1074,6 +1092,24 @@ class KotatsuLibraryRepository(
 			.map { it.id }
 			.toSet() + DEBUG_MOCK_MANGA_IDS
 		removeMangaFromLibrary(mockIds)
+
+		val remainingValidMangaIds = db.getMangaDao().getAllWithTags()
+			.map { it.manga }
+			.filterNot { isDebugMockEntity(it) }
+			.map { it.id }
+			.toSet()
+		val orphanedHistoryIds = db.getHistoryDao().getAllHistory()
+			.map { it.mangaId }
+			.filter { it !in remainingValidMangaIds }
+			.toSet()
+		if (orphanedHistoryIds.isNotEmpty()) {
+			db.withTransaction {
+				for (id in orphanedHistoryIds) {
+					db.getHistoryDao().deleteByMangaId(id)
+					db.getChaptersHistoryDao().deleteByMangaId(id)
+				}
+			}
+		}
 		mockIds.size
 	}
 

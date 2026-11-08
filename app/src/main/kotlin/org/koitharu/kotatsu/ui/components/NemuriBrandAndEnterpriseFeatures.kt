@@ -236,16 +236,20 @@ object GitHubUpdateChecker {
 	private const val KEY_INSTALLED_SHA = "installed_commit_sha"
 	private const val KEY_INSTALLED_BUILD = "installed_build_number"
 	private const val KEY_AUTO_CHECK_ENABLED = "auto_check_github_commits"
+	private const val KEY_REAL_BASELINE_SYNCED = "real_baseline_sha_synced"
 	const val DEFAULT_INSTALLED_SHA = "a4f9c21"
 	const val LATEST_MAIN_SHA = "da92d21"
+
+	private val _debugSandboxMode = MutableStateFlow(false)
+	val debugSandboxMode: StateFlow<Boolean> = _debugSandboxMode.asStateFlow()
 
 	private val _latestUpdate = MutableStateFlow<NemuriGitHubUpdateInfo?>(null)
 	val latestUpdate: StateFlow<NemuriGitHubUpdateInfo?> = _latestUpdate.asStateFlow()
 
-	private val _installedCommitShaFlow = MutableStateFlow(DEFAULT_INSTALLED_SHA)
+	private val _installedCommitShaFlow = MutableStateFlow(LATEST_MAIN_SHA)
 	val installedCommitShaFlow: StateFlow<String> = _installedCommitShaFlow.asStateFlow()
 
-	private val _installedBuildNumber = MutableStateFlow(2801)
+	private val _installedBuildNumber = MutableStateFlow(2802)
 	val installedBuildNumber: StateFlow<Int> = _installedBuildNumber.asStateFlow()
 
 	private val _dismissedForSession = MutableStateFlow(false)
@@ -263,9 +267,62 @@ object GitHubUpdateChecker {
 	private val _installToastMessage = MutableStateFlow<String?>(null)
 	val installToastMessage: StateFlow<String?> = _installToastMessage.asStateFlow()
 
+	fun setDebugSandboxMode(context: Context, enabled: Boolean) {
+		_debugSandboxMode.value = enabled
+		val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+		if (enabled) {
+			prefs.edit()
+				.putString(KEY_INSTALLED_SHA, DEFAULT_INSTALLED_SHA)
+				.putInt(KEY_INSTALLED_BUILD, 2801)
+				.apply()
+			_installedCommitShaFlow.value = DEFAULT_INSTALLED_SHA
+			_installedBuildNumber.value = 2801
+			_dismissedForSession.value = false
+			_latestUpdate.value = NemuriGitHubUpdateInfo(
+				shortSha = LATEST_MAIN_SHA,
+				fullSha = "da92d217a2d4c10f981234da92d217a2d4c10f98",
+				releaseTagOrBranch = "main",
+				commitMessage = "docs: add issue template and project configuration",
+				commitAuthor = "em2241992",
+				relativeTimestamp = "2026-11-07",
+				downloadApkUrl = "https://github.com/em2241992/Nemuri/releases/latest",
+				hasRealApkAsset = false,
+				isUpdateAvailable = true,
+			)
+		} else {
+			val savedSha = prefs.getString(KEY_INSTALLED_SHA, null)
+			val cleanSha = if (savedSha.isNullOrBlank() || savedSha.equals(DEFAULT_INSTALLED_SHA, ignoreCase = true)) {
+				LATEST_MAIN_SHA
+			} else {
+				savedSha
+			}
+			prefs.edit()
+				.putString(KEY_INSTALLED_SHA, cleanSha)
+				.putInt(KEY_INSTALLED_BUILD, 2802)
+				.apply()
+			_installedCommitShaFlow.value = cleanSha
+			_installedBuildNumber.value = 2802
+			_latestUpdate.value = _latestUpdate.value?.copy(
+				shortSha = cleanSha,
+				isUpdateAvailable = false,
+			)
+		}
+	}
+
 	fun getInstalledCommitSha(context: Context): String {
 		val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-		val sha = prefs.getString(KEY_INSTALLED_SHA, DEFAULT_INSTALLED_SHA) ?: DEFAULT_INSTALLED_SHA
+		val rawSha = prefs.getString(KEY_INSTALLED_SHA, null)
+		val sha = when {
+			_debugSandboxMode.value -> rawSha ?: DEFAULT_INSTALLED_SHA
+			rawSha.isNullOrBlank() || rawSha.equals(DEFAULT_INSTALLED_SHA, ignoreCase = true) -> {
+				prefs.edit()
+					.putString(KEY_INSTALLED_SHA, LATEST_MAIN_SHA)
+					.putInt(KEY_INSTALLED_BUILD, 2802)
+					.apply()
+				LATEST_MAIN_SHA
+			}
+			else -> rawSha
+		}
 		val build = prefs.getInt(KEY_INSTALLED_BUILD, if (sha.equals(DEFAULT_INSTALLED_SHA, ignoreCase = true)) 2801 else 2802)
 		_installedCommitShaFlow.value = sha
 		_installedBuildNumber.value = build
@@ -357,7 +414,8 @@ object GitHubUpdateChecker {
 		forceShowPrompt: Boolean = false,
 	): NemuriGitHubUpdateInfo = withContext(Dispatchers.IO) {
 		_isChecking.value = true
-		val installedSha = getInstalledCommitSha(context)
+		var installedSha = getInstalledCommitSha(context)
+		val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 		try {
 			// Ensure brief visible spinner when checking manually
 			delay(420L)
@@ -423,18 +481,39 @@ object GitHubUpdateChecker {
 			}
 
 			val effectiveShortSha = if (remoteSha.length >= 7) {
-				remoteSha.substring(0, 7)
-			} else {
+				val fetchedShort = remoteSha.substring(0, 7)
+				if (!_debugSandboxMode.value && !prefs.getBoolean(KEY_REAL_BASELINE_SYNCED, false)) {
+					// Baseline fresh install to the live main branch SHA so it doesn't show a false update banner on first boot
+					prefs.edit()
+						.putString(KEY_INSTALLED_SHA, fetchedShort)
+						.putInt(KEY_INSTALLED_BUILD, 2802)
+						.putBoolean(KEY_REAL_BASELINE_SYNCED, true)
+						.apply()
+					installedSha = fetchedShort
+					_installedCommitShaFlow.value = fetchedShort
+				}
+				fetchedShort
+			} else if (_debugSandboxMode.value) {
 				LATEST_MAIN_SHA
+			} else {
+				installedSha
 			}
 			val effectiveMsg = commitMessage.ifBlank {
-				"docs: add issue template and project configuration"
+				if (_debugSandboxMode.value) {
+					"docs: add issue template and project configuration"
+				} else {
+					"Up to date with branch $releaseTag ($effectiveShortSha)"
+				}
 			}
-			val isNewer = !effectiveShortSha.equals(installedSha, ignoreCase = true) || forceShowPrompt
+			val isNewer = if (_debugSandboxMode.value) {
+				!effectiveShortSha.equals(installedSha, ignoreCase = true) || forceShowPrompt
+			} else {
+				remoteSha.length >= 7 && !effectiveShortSha.equals(installedSha, ignoreCase = true)
+			}
 
 			val info = NemuriGitHubUpdateInfo(
 				shortSha = effectiveShortSha,
-				fullSha = remoteSha.ifBlank { "da92d217a2d4c10f981234da92d217a2d4c10f98" },
+				fullSha = remoteSha.ifBlank { effectiveShortSha },
 				releaseTagOrBranch = releaseTag,
 				commitMessage = effectiveMsg,
 				commitAuthor = authorName,
@@ -444,7 +523,7 @@ object GitHubUpdateChecker {
 				isUpdateAvailable = isNewer,
 			)
 			_latestUpdate.value = info
-			if (forceShowPrompt) {
+			if (forceShowPrompt && isNewer) {
 				_dismissedForSession.value = false
 			}
 			info
@@ -913,7 +992,7 @@ fun NemuriPrivacyAndSecurityCard(
 					modifier = Modifier.size(18.dp),
 				)
 				Spacer(modifier = Modifier.width(8.dp))
-				Text("Test Lock Screen")
+				Text("Lock App Now")
 			}
 		}
 	}
@@ -1019,16 +1098,26 @@ data class ConnectedLanServer(
 )
 
 object LanMediaServerStore {
-	val servers = mutableStateListOf(
-		ConnectedLanServer(
-			id = "komga_demo_home",
-			name = "Komga Home Server",
-			serverType = LanMediaServerType.KOMGA,
-			baseUrl = "192.168.1.50",
-			statusLabel = "Online • Zero-Copy Streaming",
-			seriesCount = 148,
-		),
+	private val debugDemoServer = ConnectedLanServer(
+		id = "komga_demo_home",
+		name = "Komga Home Server",
+		serverType = LanMediaServerType.KOMGA,
+		baseUrl = "192.168.1.50",
+		statusLabel = "Online • Zero-Copy Streaming",
+		seriesCount = 148,
 	)
+
+	val servers = mutableStateListOf<ConnectedLanServer>()
+
+	fun syncDebugSandboxServers(enabled: Boolean) {
+		if (enabled) {
+			if (servers.none { it.id == debugDemoServer.id }) {
+				servers.add(0, debugDemoServer)
+			}
+		} else {
+			servers.removeAll { it.id == debugDemoServer.id }
+		}
+	}
 }
 
 @OptIn(ExperimentalLayoutApi::class)

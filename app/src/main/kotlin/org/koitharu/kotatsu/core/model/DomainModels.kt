@@ -5,7 +5,7 @@ import org.koitharu.kotatsu.core.db.entity.MangaEntity
 import org.koitharu.kotatsu.core.db.entity.TagEntity
 
 enum class LibraryLayoutMode(val label: String, val subtitle: String) {
-	COMPACT_GRID("Compact Grid", "Neko / Mihon style • Title inside cover"),
+	COMPACT_GRID("Compact Grid", "Full-bleed cover • Title inside bottom gradient"),
 	COMFY_GRID("Comfy Grid", "Spacious grid • Title & progress below cover"),
 	COMPACT_LIST("Compact Rows", "Dense single-line rows"),
 	COMFORTABLE_LIST("Comfortable List", "Standard list with metadata"),
@@ -84,8 +84,8 @@ enum class AppColorSchemePreset(
 		surfaceSwatchHex = 0xFF132A2E,
 	),
 	NEKO_INDIGO(
-		label = "Neko Indigo",
-		subtitle = "Deep MangaDex periwinkle blue",
+		label = "Midnight Indigo",
+		subtitle = "Deep twilight periwinkle blue",
 		darkPrimaryHex = 0xFF818CF8,
 		lightPrimaryHex = 0xFF4F46E5,
 		darkContainerHex = 0xFF1E1B4B,

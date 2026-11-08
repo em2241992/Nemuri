@@ -313,6 +313,7 @@ fun BackupsAndSettingsScreen(
 	onSetDebugSandboxEnabled: (Boolean) -> Unit = {},
 	onPurgeLegacyMockData: () -> Unit = {},
 	onTestBottomCapsuleToast: () -> Unit = {},
+	onImportSampleCbz: () -> Unit = {},
 	onBackToLibrary: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
@@ -763,6 +764,7 @@ fun BackupsAndSettingsScreen(
 					periodicBackupEnabled = periodicBackupEnabled,
 					periodicBackupFrequency = periodicBackupFrequency,
 					periodicBackupFormat = periodicBackupFormat,
+					debugSandboxEnabled = debugSandboxEnabled,
 					onExportBackup = { format ->
 						pendingExportFormat = format
 						onExportBackup(format, null)
@@ -787,6 +789,8 @@ fun BackupsAndSettingsScreen(
 					onSetDebugSandboxEnabled = onSetDebugSandboxEnabled,
 					onPurgeLegacyMockData = onPurgeLegacyMockData,
 					onTestBottomCapsuleToast = onTestBottomCapsuleToast,
+					onSimulateRestoreSample = onSimulateRestoreSample,
+					onImportSampleCbz = onImportSampleCbz,
 				)
 			}
 
@@ -4055,6 +4059,7 @@ private fun BackupAndRestoreSettingsSubScreen(
 	periodicBackupEnabled: Boolean,
 	periodicBackupFrequency: String,
 	periodicBackupFormat: String,
+	debugSandboxEnabled: Boolean = false,
 	onExportBackup: (BackupFormat) -> Unit,
 	onSaveBackupToDevice: (BackupFormat) -> Unit,
 	onOpenRestoreFilePicker: () -> Unit,
@@ -4138,13 +4143,15 @@ private fun BackupAndRestoreSettingsSubScreen(
 							Spacer(modifier = Modifier.width(6.dp))
 							Text("Restore Kotatsu .bak", fontSize = 12.sp)
 						}
-						FilledTonalButton(
-							onClick = { onSimulateRestoreSample(BackupFormat.KOTATSU_BAK) },
-							modifier = Modifier
-								.weight(1f)
-								.testTag("test_restore_kotatsu_bak_button"),
-						) {
-							Text("Test Sample .bak", fontSize = 12.sp)
+						if (debugSandboxEnabled) {
+							FilledTonalButton(
+								onClick = { onSimulateRestoreSample(BackupFormat.KOTATSU_BAK) },
+								modifier = Modifier
+									.weight(1f)
+									.testTag("test_restore_kotatsu_bak_button"),
+							) {
+								Text("Test Sample .bak", fontSize = 12.sp)
+							}
 						}
 					}
 				}
@@ -4178,7 +4185,7 @@ private fun BackupAndRestoreSettingsSubScreen(
 								fontWeight = FontWeight.Bold,
 							)
 							Text(
-								text = "Cross-app GZIP Protobuf (.tachibk / .proto.gz) and Neko/Mihon (.json) with automatic source mapping & Check-and-Swap deduplication",
+								text = "Cross-app GZIP Protobuf (.tachibk / .proto.gz) and Portable (.json) with automatic source mapping & Check-and-Swap deduplication",
 								style = MaterialTheme.typography.bodySmall,
 								color = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
@@ -4225,13 +4232,15 @@ private fun BackupAndRestoreSettingsSubScreen(
 							Spacer(modifier = Modifier.width(6.dp))
 							Text("Select .tachibk / .bak", fontSize = 12.sp)
 						}
-						FilledTonalButton(
-							onClick = { onSimulateRestoreSample(BackupFormat.MIHON_TACHIBK) },
-							modifier = Modifier
-								.weight(1f)
-								.testTag("test_restore_mihon_tachibk_button"),
-						) {
-							Text("Test Sample .tachibk", fontSize = 12.sp)
+						if (debugSandboxEnabled) {
+							FilledTonalButton(
+								onClick = { onSimulateRestoreSample(BackupFormat.MIHON_TACHIBK) },
+								modifier = Modifier
+									.weight(1f)
+									.testTag("test_restore_mihon_tachibk_button"),
+							) {
+								Text("Test Sample .tachibk", fontSize = 12.sp)
+							}
 						}
 					}
 				}
@@ -4463,7 +4472,7 @@ private fun AboutSettingsSubScreen(
 					}
 
 					Text(
-						text = "Unified Manga Reader combining Kotatsu's ergonomics, Neko's discovery feed, and Mihon's extension & source migration ecosystem.",
+						text = "Unified Android Manga Reader with multi-source extensions, discovery feeds, and smart source migration.",
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
@@ -4621,6 +4630,8 @@ private fun AdvancedAndDebugSettingsSubScreen(
 	onSetDebugSandboxEnabled: (Boolean) -> Unit,
 	onPurgeLegacyMockData: () -> Unit,
 	onTestBottomCapsuleToast: () -> Unit,
+	onSimulateRestoreSample: (BackupFormat) -> Unit = {},
+	onImportSampleCbz: () -> Unit = {},
 ) {
 	LazyColumn(
 		contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 144.dp),
@@ -4732,6 +4743,56 @@ private fun AdvancedAndDebugSettingsSubScreen(
 						Spacer(modifier = Modifier.width(8.dp))
 						Text(
 							text = "🔔 Test Bottom Capsule Toast",
+							maxLines = 1,
+							softWrap = false,
+						)
+					}
+
+					HorizontalDivider()
+
+					Text(
+						text = "Sample Backup & Archive Diagnostics",
+						style = MaterialTheme.typography.titleSmall,
+						fontFamily = PlusJakartaDisplayFamily,
+						fontWeight = FontWeight.Bold,
+					)
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						OutlinedButton(
+							onClick = { onSimulateRestoreSample(BackupFormat.KOTATSU_BAK) },
+							modifier = Modifier
+								.weight(1f)
+								.testTag("debug_test_restore_kotatsu_bak_button"),
+						) {
+							Text("Test Sample .bak", fontSize = 12.sp, maxLines = 1, softWrap = false)
+						}
+						OutlinedButton(
+							onClick = { onSimulateRestoreSample(BackupFormat.MIHON_TACHIBK) },
+							modifier = Modifier
+								.weight(1f)
+								.testTag("debug_test_restore_mihon_tachibk_button"),
+						) {
+							Text("Test Sample .tachibk", fontSize = 12.sp, maxLines = 1, softWrap = false)
+						}
+					}
+
+					OutlinedButton(
+						onClick = onImportSampleCbz,
+						modifier = Modifier
+							.fillMaxWidth()
+							.testTag("debug_quick_import_sample_cbz_button"),
+					) {
+						Icon(
+							imageVector = Icons.Default.Backup,
+							contentDescription = null,
+							modifier = Modifier.size(18.dp),
+						)
+						Spacer(modifier = Modifier.width(8.dp))
+						Text(
+							text = "📦 Index Sample .CBZ Archive",
 							maxLines = 1,
 							softWrap = false,
 						)

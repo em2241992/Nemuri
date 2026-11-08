@@ -1425,7 +1425,7 @@ fun FeedScreen(
 				}
 
 				Text(
-					text = "NEKO DENSE GALLERY COLUMNS (3 / 4 / 5)",
+					text = "DENSE GALLERY COLUMNS (3 / 4 / 5)",
 					style = MaterialTheme.typography.labelSmall,
 					color = MaterialTheme.colorScheme.primary,
 				)
@@ -1437,7 +1437,7 @@ fun FeedScreen(
 						FilterChip(
 							selected = nekoGalleryColumns == cols,
 							onClick = { nekoGalleryColumns = cols },
-							label = { Text(if (cols == 5) "5 Columns (Neko Default)" else "$cols Columns") },
+							label = { Text(if (cols == 5) "5 Columns (Default)" else "$cols Columns") },
 							modifier = Modifier.testTag("tune_neko_gallery_cols_$cols"),
 						)
 					}
@@ -2121,18 +2121,30 @@ private fun NekoReadingSummaryView(
 	val overallCompletion = (totalChaptersRead.toFloat() / totalChaptersAll.toFloat()).coerceIn(0f, 1f)
 
 	val weeklyActivity = remember(totalChaptersRead) {
-		listOf(
-			"Mon" to ((totalChaptersRead * 2) % 9 + 2),
-			"Tue" to ((totalChaptersRead * 3) % 11 + 3),
-			"Wed" to ((totalChaptersRead + 4) % 8 + 1),
-			"Thu" to ((totalChaptersRead * 5) % 12 + 4),
-			"Fri" to ((totalChaptersRead + 7) % 10 + 3),
-			"Sat" to ((totalChaptersRead * 4) % 15 + 6),
-			"Sun" to ((totalChaptersRead * 3) % 14 + 5),
-		)
+		if (totalChaptersRead == 0) {
+			listOf(
+				"Mon" to 0,
+				"Tue" to 0,
+				"Wed" to 0,
+				"Thu" to 0,
+				"Fri" to 0,
+				"Sat" to 0,
+				"Sun" to 0,
+			)
+		} else {
+			listOf(
+				"Mon" to ((totalChaptersRead * 2) % 9 + 1),
+				"Tue" to ((totalChaptersRead * 3) % 11 + 1),
+				"Wed" to ((totalChaptersRead + 4) % 8 + 1),
+				"Thu" to ((totalChaptersRead * 5) % 12 + 1),
+				"Fri" to ((totalChaptersRead + 7) % 10 + 1),
+				"Sat" to ((totalChaptersRead * 4) % 15 + 1),
+				"Sun" to ((totalChaptersRead * 3) % 14 + 1),
+			)
+		}
 	}
 	val maxWeeklyDay = remember(weeklyActivity) {
-		weeklyActivity.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 10
+		weeklyActivity.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
 	}
 
 	val genreCounts = remember(libraryItems) {
@@ -2173,7 +2185,7 @@ private fun NekoReadingSummaryView(
 						)
 						Column {
 							Text(
-								text = "Neko Reading Summary & Activity",
+								text = "Reading Summary & Activity",
 								style = MaterialTheme.typography.titleMedium,
 								fontFamily = PlusJakartaDisplayFamily,
 								fontWeight = FontWeight.Bold,
@@ -2258,12 +2270,13 @@ private fun NekoReadingSummaryView(
 							style = MaterialTheme.typography.labelSmall,
 							color = MaterialTheme.colorScheme.primary,
 						)
+						val activeDaysCount = weeklyActivity.count { it.second > 0 }
 						Text(
-							text = "Streak: 7 Days",
+							text = "Streak: $activeDaysCount ${if (activeDaysCount == 1) "Day" else "Days"}",
 							fontFamily = JetBrainsMonoFamily,
 							fontWeight = FontWeight.Bold,
 							fontSize = 11.sp,
-							color = Color(0xFF10B981),
+							color = if (activeDaysCount > 0) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
 						)
 					}
 
@@ -2275,7 +2288,11 @@ private fun NekoReadingSummaryView(
 						verticalAlignment = Alignment.Bottom,
 					) {
 						weeklyActivity.forEach { (dayLabel, count) ->
-							val barFraction = (count.toFloat() / maxWeeklyDay.toFloat()).coerceIn(0.15f, 1f)
+							val barFraction = if (count == 0) {
+								0.06f
+							} else {
+								(count.toFloat() / maxWeeklyDay.toFloat()).coerceIn(0.15f, 1f)
+							}
 							Column(
 								horizontalAlignment = Alignment.CenterHorizontally,
 								verticalArrangement = Arrangement.Bottom,
@@ -2514,9 +2531,45 @@ private fun FeedDedicatedSuggestionsView(
 							fontWeight = FontWeight.Bold,
 						)
 						Text(
-							text = "Matched against your top genres: ${topLibraryTags.joinToString(", ")}",
+							text = if (topLibraryTags.isNotEmpty()) {
+								"Matched against your top genres: ${topLibraryTags.joinToString(", ")}"
+							} else {
+								"Add series to your Library to generate personalized genre matches"
+							},
 							style = MaterialTheme.typography.bodySmall,
 							color = MaterialTheme.colorScheme.onSurfaceVariant,
+						)
+					}
+				}
+			}
+		}
+
+		if (suggestions.isEmpty()) {
+			item(key = "ded_sug_empty_state") {
+				Card(
+					colors = CardDefaults.cardColors(
+						containerColor = MaterialTheme.colorScheme.surface,
+					),
+					shape = RoundedCornerShape(14.dp),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(24.dp),
+						horizontalAlignment = Alignment.CenterHorizontally,
+						verticalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						Text(
+							text = "No suggestions yet",
+							style = MaterialTheme.typography.titleMedium,
+							fontWeight = FontWeight.Bold,
+						)
+						Text(
+							text = "Add series to your Library or browse extensions in Explore to unlock personalized suggestions.",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+							textAlign = TextAlign.Center,
 						)
 					}
 				}

@@ -3,7 +3,7 @@ package org.koitharu.kotatsu.reader.domain
 import android.graphics.Bitmap
 
 /**
- * DropSauce v1.1.1 / v1.1.2 Wide-Page / Double-Spread Splitter:
+ * Nemuri Wide-Page / Double-Spread Splitter:
  * Detects landscape double-page spreads (`width > height * aspectThreshold`) and splits them
  * into ordered single pages according to the reader's reading direction (RTL Manga vs LTR Comic).
  */

@@ -301,7 +301,7 @@ class SmartFeedSyncCoordinator @Inject constructor(
 		runCatching {
 			val request = Request.Builder()
 				.url(url)
-				.header("User-Agent", "Nemuri/10.0 (Android; Neko-Batch-Sync)")
+				.header("User-Agent", "Nemuri/1.2 (Android; Batch-Sync)")
 				.get()
 				.build()
 			loaderContext.httpClient.newCall(request).execute().use { response ->

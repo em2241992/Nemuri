@@ -396,7 +396,7 @@ fun buildHybridFeedEntries(
 			topCommentPreview = topComments[(idx + 2) % topComments.size],
 			topCommentAuthor = commentAuthors[(idx + 2) % commentAuthors.size],
 		)
-	}.filter { it.mangaId == null || it.mangaId !in existingIds }
+	}
 
 	val combined = (fromUpdates + fromCatalog)
 	return if (searchQuery.isBlank()) {
@@ -1620,13 +1620,15 @@ private fun HybridRedditReleaseCardFeed(
 			.fillMaxSize()
 			.testTag("hybrid_reddit_card_list"),
 	) {
-		// 1. Top Horizontal "Stories" Quick Updates Bar
-		item(key = "reddit_stories_quick_updates_header") {
-			FeedStoriesQuickUpdatesBar(
-				feedUpdates = feedUpdates,
-				libraryItems = libraryItems,
-				onOpenReader = onOpenStoryReader,
-			)
+		// 1. Top Horizontal "Stories" Quick Updates Bar (only when active drops exist)
+		if (feedUpdates.isNotEmpty() || libraryItems.isNotEmpty()) {
+			item(key = "reddit_stories_quick_updates_header") {
+				FeedStoriesQuickUpdatesBar(
+					feedUpdates = feedUpdates,
+					libraryItems = libraryItems,
+					onOpenReader = onOpenStoryReader,
+				)
+			}
 		}
 
 		// 2. Compact Sort Filter Pills
@@ -1659,6 +1661,43 @@ private fun HybridRedditReleaseCardFeed(
 								MaterialTheme.colorScheme.onSurfaceVariant
 							},
 							modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+						)
+					}
+				}
+			}
+		}
+
+		if (entries.isEmpty()) {
+			item(key = "reddit_stream_empty_state") {
+				Card(
+					shape = RoundedCornerShape(20.dp),
+					colors = CardDefaults.cardColors(
+						containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
+					),
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(top = 12.dp)
+						.testTag("reddit_feed_empty_card"),
+				) {
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(24.dp),
+						horizontalAlignment = Alignment.CenterHorizontally,
+						verticalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						Text(
+							text = "No chapter releases yet",
+							style = MaterialTheme.typography.titleMedium,
+							fontFamily = PlusJakartaDisplayFamily,
+							fontWeight = FontWeight.Bold,
+							color = MaterialTheme.colorScheme.onSurface,
+						)
+						Text(
+							text = "Add series from Explore or import a local .CBZ archive to see chronological chapter drops here.",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+							textAlign = TextAlign.Center,
 						)
 					}
 				}

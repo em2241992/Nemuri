@@ -312,6 +312,34 @@ fun NekoBrowseHubView(
 			onSelectFilter = onSelectFilter,
 		)
 
+		if (filteredPool.isEmpty()) {
+			Box(
+				modifier = Modifier
+					.fillMaxSize()
+					.padding(32.dp)
+					.testTag("neko_hub_empty_state"),
+				contentAlignment = Alignment.Center,
+			) {
+				Column(
+					horizontalAlignment = Alignment.CenterHorizontally,
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "No series in Hub yet",
+						style = MaterialTheme.typography.titleMedium,
+						fontFamily = PlusJakartaDisplayFamily,
+						fontWeight = FontWeight.Bold,
+						color = MaterialTheme.colorScheme.onSurface,
+					)
+					Text(
+						text = "Add manga to your Library or install sources in Explore to populate Feed updates, Popular new titles, and Latest uploads.",
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						textAlign = TextAlign.Center,
+					)
+				}
+			}
+		} else {
 		LazyColumn(
 			contentPadding = PaddingValues(top = 6.dp, bottom = 120.dp),
 			verticalArrangement = Arrangement.spacedBy(22.dp),
@@ -423,6 +451,7 @@ fun NekoBrowseHubView(
 					}
 				}
 			}
+		}
 		}
 	}
 

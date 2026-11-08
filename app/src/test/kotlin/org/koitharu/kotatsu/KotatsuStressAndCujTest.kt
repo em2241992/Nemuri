@@ -306,9 +306,15 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestDualModeHybridFeedAndGeminiSettingsSections() = runBlocking {
-		libraryRepo.ensureSeeded()
 		val vm = KotatsuNeoViewModel(app)
-		val items = libraryRepo.observeLibraryItems().first()
+		// Default end-user mode (debugSandboxEnabled = false) must have zero dummy catalog data
+		assertFalse(vm.debugSandboxEnabled.value)
+		assertTrue("Default end-user catalogue must contain zero dummy items", vm.extensionCatalog.isEmpty())
+
+		// Enable Debug Sandbox Mode to test hybrid feed & catalog discovery
+		vm.setDebugSandboxEnabled(true)
+		libraryRepo.seedDebugSandboxDataset()
+		val items = libraryRepo.observeLibraryItems().first { it.size >= 8 }
 		val feedUpdates = vm.feedUpdates.value
 		val catalog = vm.extensionCatalog
 		val normalizedSet = items.map { TitleNormalizer.normalize(it.manga.title) }.toSet()
@@ -337,7 +343,7 @@ class KotatsuStressAndCujTest {
 		assertTrue("1-Column Reddit [DISC] stream entries should have scanlator and top comment previews", hybridEntries.all { it.scanlatorGroup.isNotBlank() && it.topCommentPreview.isNotBlank() })
 
 		val settingsSections = org.koitharu.kotatsu.ui.screens.SettingsCategorySection.entries
-		assertEquals(9, settingsSections.size)
+		assertEquals(11, settingsSections.size)
 	}
 
 	@Test
