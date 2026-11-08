@@ -100,7 +100,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 // =========================================================================
-// TASK 1: "NEMURI CRESCENT MANGA SLUMBER" (2 SLEEPING EYES) SVG BRAND ICON
+// TASK 1: "KOTATSU NEKO SLUMBER" (2 SLEEPING EYES) SVG BRAND ICON
 // Exact 512x512 vector geometry from the specification
 // =========================================================================
 @Composable
@@ -109,27 +109,24 @@ fun NemuriBrandLogo(
 ) {
 	val moonPath = remember {
 		PathParser().parsePathString(
-			"M 318 96 A 158 158 0 1 0 398 338 A 132 132 0 1 1 318 96 Z"
+			"M 188 98 A 56 56 0 1 0 242 168 A 46 46 0 1 1 188 98 Z"
 		).toPath()
 	}
-	val leftPagePath = remember {
+	val sleepingCatPath = remember {
 		PathParser().parsePathString(
-			"M 256 226 C 214 202, 160 206, 126 228 L 126 352 C 160 330, 214 326, 256 354 Z"
-		).toPath()
-	}
-	val rightPagePath = remember {
-		PathParser().parsePathString(
-			"M 256 226 C 298 202, 352 206, 386 228 L 386 352 C 352 330, 298 326, 256 354 Z"
+			"M 168 292 C 168 228, 224 196, 286 204 L 304 168 L 328 202 L 354 172 L 366 218 C 386 242, 382 278, 358 292 Z"
 		).toPath()
 	}
 	val leftEyePath = remember {
-		PathParser().parsePathString("M 164 282 Q 192 302 220 282").toPath()
+		PathParser().parsePathString("M 292 244 Q 306 256 320 244").toPath()
 	}
 	val rightEyePath = remember {
-		PathParser().parsePathString("M 292 282 Q 320 302 348 282").toPath()
+		PathParser().parsePathString("M 332 244 Q 346 256 360 244").toPath()
 	}
-	val ribbonPath = remember {
-		PathParser().parsePathString("M 246 348 L 266 348 L 266 414 L 256 398 L 246 414 Z").toPath()
+	val openBookBasePath = remember {
+		PathParser().parsePathString(
+			"M 96 312 Q 176 284 256 318 Q 336 284 416 312 L 402 384 Q 330 358 256 392 Q 182 358 110 384 Z"
+		).toPath()
 	}
 
 	Canvas(
@@ -139,46 +136,25 @@ fun NemuriBrandLogo(
 		val scaleY = size.height / 512f
 		val s = minOf(scaleX, scaleY)
 
-		val nemuriBg = Brush.linearGradient(
-			0.0f to Color(0xFF0F141E),
-			0.55f to Color(0xFF090C12),
-			1.0f to Color(0xFF131124),
+		val bgAlt = Brush.linearGradient(
+			0.0f to Color(0xFF0B0F17),
+			1.0f to Color(0xFF141829),
 			start = Offset.Zero,
 			end = Offset(size.width, size.height),
 		)
-		val moonCyan = Brush.linearGradient(
+		val cyanGrad = Brush.linearGradient(
 			0.0f to Color(0xFF5CE1E6),
-			0.60f to Color(0xFF64B5F6),
-			1.0f to Color(0xFF9575CD),
-			start = Offset(100f * scaleX, 80f * scaleY),
-			end = Offset(400f * scaleX, 380f * scaleY),
-		)
-		val pageGlow = Brush.linearGradient(
-			0.0f to Color(0xFF1E293B),
-			1.0f to Color(0xFF5CE1E6).copy(alpha = 0.88f),
-			start = Offset(256f * scaleX, 354f * scaleY),
-			end = Offset(386f * scaleX, 206f * scaleY),
-		)
-		val ribbonAccent = Brush.linearGradient(
-			0.0f to Color(0xFFFF6B8B),
-			1.0f to Color(0xFFC850C0),
-			start = Offset(256f * scaleX, 348f * scaleY),
-			end = Offset(256f * scaleX, 414f * scaleY),
+			1.0f to Color(0xFF7F7FD5),
+			start = Offset.Zero,
+			end = Offset(size.width, size.height),
 		)
 
-		// Background rounded rect (rx=116)
+		// Rounded App Icon Base (width=512, height=512, rx=116, fill=url(#bgAlt))
 		drawRoundRect(
-			brush = nemuriBg,
+			brush = bgAlt,
 			topLeft = Offset.Zero,
 			size = Size(size.width, size.height),
 			cornerRadius = CornerRadius(116f * scaleX, 116f * scaleY),
-		)
-
-		// Ambient cyan halo circle (cx=256, cy=248, r=168, opacity=0.06)
-		drawCircle(
-			color = Color(0xFF5CE1E6).copy(alpha = 0.06f),
-			radius = 168f * s,
-			center = Offset(256f * scaleX, 248f * scaleY),
 		)
 
 		// Scale matrix for 512x512 SVG paths
@@ -193,119 +169,49 @@ fun NemuriBrandLogo(
 			}
 		}
 
-		// Crescent Moon
+		// Upper Left Crescent Moon (fill="#5CE1E6")
 		drawPath(
 			path = scaledPath(moonPath),
-			brush = moonCyan,
-		)
-
-		// Left Open Manga Page
-		val leftScaled = scaledPath(leftPagePath)
-		drawPath(
-			path = leftScaled,
-			color = Color(0xFF151C28),
-		)
-		drawPath(
-			path = leftScaled,
 			color = Color(0xFF5CE1E6),
-			style = Stroke(width = 6f * s, join = StrokeJoin.Round, cap = StrokeCap.Round),
 		)
 
-		// Right Open Manga Page
-		val rightScaled = scaledPath(rightPagePath)
+		// Minimalist Sleeping Cat Curled Over the Book (fill="#1E2638", stroke="url(#cyanGrad)", stroke-width="8", stroke-linejoin="round")
+		val catScaled = scaledPath(sleepingCatPath)
 		drawPath(
-			path = rightScaled,
-			brush = pageGlow,
+			path = catScaled,
+			color = Color(0xFF1E2638),
 		)
 		drawPath(
-			path = rightScaled,
-			color = Color(0xFF8AB4F8),
-			style = Stroke(width = 6f * s, join = StrokeJoin.Round, cap = StrokeCap.Round),
+			path = catScaled,
+			brush = cyanGrad,
+			style = Stroke(width = 8f * s, join = StrokeJoin.Round, cap = StrokeCap.Round),
 		)
 
-		// Subtle Manga Panel Framing on Right Page
-		drawLine(
-			color = Color(0xFF090C12).copy(alpha = 0.45f),
-			start = Offset(282f * scaleX, 248f * scaleY),
-			end = Offset(360f * scaleX, 238f * scaleY),
-			strokeWidth = 5f * s,
-			cap = StrokeCap.Round,
-		)
-		drawLine(
-			color = Color(0xFF090C12).copy(alpha = 0.45f),
-			start = Offset(282f * scaleX, 322f * scaleY),
-			end = Offset(360f * scaleX, 312f * scaleY),
-			strokeWidth = 5f * s,
-			cap = StrokeCap.Round,
-		)
-
-		// Left Sleeping Eye (Left Page) + 3 Eyelashes
+		// Two Peaceful Sleeping Eyes (⌣ ⌣) (stroke="#5CE1E6", stroke-width="5", stroke-linecap="round")
 		drawPath(
 			path = scaledPath(leftEyePath),
 			color = Color(0xFF5CE1E6),
-			style = Stroke(width = 6f * s, cap = StrokeCap.Round),
+			style = Stroke(width = 5f * s, cap = StrokeCap.Round),
 		)
-		drawLine(
-			color = Color(0xFF5CE1E6),
-			start = Offset(176f * scaleX, 293f * scaleY),
-			end = Offset(171f * scaleX, 303f * scaleY),
-			strokeWidth = 4f * s,
-			cap = StrokeCap.Round,
-		)
-		drawLine(
-			color = Color(0xFF5CE1E6),
-			start = Offset(192f * scaleX, 296f * scaleY),
-			end = Offset(192f * scaleX, 308f * scaleY),
-			strokeWidth = 4f * s,
-			cap = StrokeCap.Round,
-		)
-		drawLine(
-			color = Color(0xFF5CE1E6),
-			start = Offset(208f * scaleX, 293f * scaleY),
-			end = Offset(213f * scaleX, 303f * scaleY),
-			strokeWidth = 4f * s,
-			cap = StrokeCap.Round,
-		)
-
-		// Right Sleeping Eye (Right Page) + 3 Eyelashes
 		drawPath(
 			path = scaledPath(rightEyePath),
-			color = Color(0xFF090C12),
-			style = Stroke(width = 6f * s, cap = StrokeCap.Round),
-		)
-		drawLine(
-			color = Color(0xFF090C12),
-			start = Offset(304f * scaleX, 293f * scaleY),
-			end = Offset(299f * scaleX, 303f * scaleY),
-			strokeWidth = 4f * s,
-			cap = StrokeCap.Round,
-		)
-		drawLine(
-			color = Color(0xFF090C12),
-			start = Offset(320f * scaleX, 296f * scaleY),
-			end = Offset(320f * scaleX, 308f * scaleY),
-			strokeWidth = 4f * s,
-			cap = StrokeCap.Round,
-		)
-		drawLine(
-			color = Color(0xFF090C12),
-			start = Offset(336f * scaleX, 293f * scaleY),
-			end = Offset(341f * scaleX, 303f * scaleY),
-			strokeWidth = 4f * s,
-			cap = StrokeCap.Round,
+			color = Color(0xFF5CE1E6),
+			style = Stroke(width = 5f * s, cap = StrokeCap.Round),
 		)
 
-		// Center Spine & Bookmark Ribbon
-		drawLine(
-			color = Color.White,
-			start = Offset(256f * scaleX, 222f * scaleY),
-			end = Offset(256f * scaleX, 358f * scaleY),
-			strokeWidth = 6f * s,
-			cap = StrokeCap.Round,
-		)
+		// Open Glowing Manga Book Base (fill="url(#cyanGrad)")
 		drawPath(
-			path = scaledPath(ribbonPath),
-			brush = ribbonAccent,
+			path = scaledPath(openBookBasePath),
+			brush = cyanGrad,
+		)
+
+		// Book Spine (M 256 318 L 256 392, stroke="#0B0F17", stroke-width="8", stroke-linecap="round")
+		drawLine(
+			color = Color(0xFF0B0F17),
+			start = Offset(256f * scaleX, 318f * scaleY),
+			end = Offset(256f * scaleX, 392f * scaleY),
+			strokeWidth = 8f * s,
+			cap = StrokeCap.Round,
 		)
 	}
 }

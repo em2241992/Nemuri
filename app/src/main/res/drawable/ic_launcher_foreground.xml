@@ -10,98 +10,62 @@
         android:pivotY="256"
         android:scaleX="0.68"
         android:scaleY="0.68">
-        <!-- Ambient cyan glow -->
+        <!-- Upper Left Crescent Moon -->
         <path
-            android:fillColor="#105CE1E6"
-            android:pathData="M256,80a168,168 0,1 0,0 336a168,168 0,1 0,0 -336z" />
-        <!-- Crescent Moon -->
-        <path android:pathData="M 318 96 A 158 158 0 1 0 398 338 A 132 132 0 1 1 318 96 Z">
-            <aapt:attr name="android:fillColor">
+            android:fillColor="#FF5CE1E6"
+            android:pathData="M 188 98 A 56 56 0 1 0 242 168 A 46 46 0 1 1 188 98 Z" />
+
+        <!-- Minimalist Sleeping Cat Curled Over the Book -->
+        <path
+            android:fillColor="#FF1E2638"
+            android:strokeLineJoin="round"
+            android:strokeWidth="8"
+            android:pathData="M 168 292 C 168 228, 224 196, 286 204 L 304 168 L 328 202 L 354 172 L 366 218 C 386 242, 382 278, 358 292 Z">
+            <aapt:attr name="android:strokeColor">
                 <gradient
-                    android:startX="120"
-                    android:startY="96"
-                    android:endX="398"
-                    android:endY="380"
+                    android:startX="168"
+                    android:startY="168"
+                    android:endX="386"
+                    android:endY="292"
                     android:type="linear">
                     <item android:offset="0.0" android:color="#FF5CE1E6" />
-                    <item android:offset="0.6" android:color="#FF64B5F6" />
-                    <item android:offset="1.0" android:color="#FF9575CD" />
+                    <item android:offset="1.0" android:color="#FF7F7FD5" />
                 </gradient>
             </aapt:attr>
         </path>
-        <!-- Left Manga Page -->
+
+        <!-- Two Peaceful Sleeping Eyes (⌣ ⌣) -->
         <path
-            android:fillColor="#FF151C28"
+            android:fillColor="#00000000"
             android:strokeColor="#FF5CE1E6"
-            android:strokeLineJoin="round"
-            android:strokeWidth="6"
-            android:pathData="M 256 226 C 214 202, 160 206, 126 228 L 126 352 C 160 330, 214 326, 256 354 Z" />
-        <!-- Right Manga Page -->
-        <path
-            android:strokeColor="#FF8AB4F8"
-            android:strokeLineJoin="round"
-            android:strokeWidth="6"
-            android:pathData="M 256 226 C 298 202, 352 206, 386 228 L 386 352 C 352 330, 298 326, 256 354 Z">
-            <aapt:attr name="android:fillColor">
-                <gradient
-                    android:startX="256"
-                    android:startY="354"
-                    android:endX="386"
-                    android:endY="206"
-                    android:type="linear">
-                    <item android:offset="0.0" android:color="#FF1E293B" />
-                    <item android:offset="1.0" android:color="#E05CE1E6" />
-                </gradient>
-            </aapt:attr>
-        </path>
-        <!-- Subtle Manga Panel Framing on Right Page -->
-        <path
-            android:strokeColor="#73090C12"
             android:strokeLineCap="round"
             android:strokeWidth="5"
-            android:pathData="M 282 248 L 360 238 M 282 322 L 360 312" />
-        <!-- Left Sleeping Eye + Eyelashes -->
+            android:pathData="M 292 244 Q 306 256 320 244" />
         <path
             android:fillColor="#00000000"
             android:strokeColor="#FF5CE1E6"
             android:strokeLineCap="round"
-            android:strokeWidth="6"
-            android:pathData="M 164 282 Q 192 302 220 282" />
-        <path
-            android:strokeColor="#FF5CE1E6"
-            android:strokeLineCap="round"
-            android:strokeWidth="4"
-            android:pathData="M 176 293 L 171 303 M 192 296 L 192 308 M 208 293 L 213 303" />
-        <!-- Right Sleeping Eye + Eyelashes -->
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FF090C12"
-            android:strokeLineCap="round"
-            android:strokeWidth="6"
-            android:pathData="M 292 282 Q 320 302 348 282" />
-        <path
-            android:strokeColor="#FF090C12"
-            android:strokeLineCap="round"
-            android:strokeWidth="4"
-            android:pathData="M 304 293 L 299 303 M 320 296 L 320 308 M 336 293 L 341 303" />
-        <!-- Center Spine & Bookmark Ribbon -->
-        <path
-            android:strokeColor="#FFFFFFFF"
-            android:strokeLineCap="round"
-            android:strokeWidth="6"
-            android:pathData="M 256 222 L 256 358" />
-        <path android:pathData="M 246 348 L 266 348 L 266 414 L 256 398 L 246 414 Z">
+            android:strokeWidth="5"
+            android:pathData="M 332 244 Q 346 256 360 244" />
+
+        <!-- Open Glowing Manga Book Base -->
+        <path android:pathData="M 96 312 Q 176 284 256 318 Q 336 284 416 312 L 402 384 Q 330 358 256 392 Q 182 358 110 384 Z">
             <aapt:attr name="android:fillColor">
                 <gradient
-                    android:startX="256"
-                    android:startY="348"
-                    android:endX="256"
-                    android:endY="414"
+                    android:startX="96"
+                    android:startY="284"
+                    android:endX="416"
+                    android:endY="392"
                     android:type="linear">
-                    <item android:offset="0.0" android:color="#FFFF6B8B" />
-                    <item android:offset="1.0" android:color="#FFC850C0" />
+                    <item android:offset="0.0" android:color="#FF5CE1E6" />
+                    <item android:offset="1.0" android:color="#FF7F7FD5" />
                 </gradient>
             </aapt:attr>
         </path>
+        <path
+            android:strokeColor="#FF0B0F17"
+            android:strokeLineCap="round"
+            android:strokeWidth="8"
+            android:pathData="M 256 318 L 256 392" />
     </group>
 </vector>
