@@ -162,6 +162,7 @@ fun MangaReaderPageCanvas(
 	greenBalance: Float = 1f,
 	blueBalance: Float = 1f,
 	decodedBitmap: android.graphics.Bitmap? = null,
+	seamlessVerticalStitch: Boolean = false,
 	modifier: Modifier = Modifier,
 ) {
 	val effectiveInvert = invertColors || colorFilterPreset == ReaderColorFilterPreset.INVERTED_NIGHT
@@ -217,7 +218,8 @@ fun MangaReaderPageCanvas(
 					)
 				}
 			}
-			val pad = w * 0.05f
+			val pad = if (seamlessVerticalStitch) w * 0.035f else w * 0.05f
+			val verticalEdgePad = if (seamlessVerticalStitch) 0f else pad
 			val strokeBase = (if (isAiEnhanced) 4.2f else 2.4f) * (0.85f + 0.15f * contrastBoost)
 			val baseAlpha = (
 				if (
@@ -233,8 +235,8 @@ fun MangaReaderPageCanvas(
 			val activeInk = (if (isAiEnhanced || effectiveNemuriBedtime) enhancedInkColor else inkColor).copy(alpha = baseAlpha)
 
 			// Panel 1: Top Wide Cinematic Manga Panel
-			val p1Top = pad
-			val p1Height = h * 0.28f
+			val p1Top = verticalEdgePad
+			val p1Height = if (seamlessVerticalStitch) h * 0.31f else h * 0.28f
 			drawRect(
 				color = activeInk,
 				topLeft = Offset(pad, p1Top),
@@ -316,7 +318,8 @@ fun MangaReaderPageCanvas(
 
 			// Panel 4: Bottom Dramatic Climax Panel
 			val p4Top = p2Top + p2Height + pad * 0.5f
-			val p4Height = (h - p4Top - pad * 1.4f).coerceAtLeast(60f)
+			val bottomPad = if (seamlessVerticalStitch) 0f else pad * 1.4f
+			val p4Height = (h - p4Top - bottomPad).coerceAtLeast(60f)
 			drawRect(
 				color = activeInk,
 				topLeft = Offset(pad, p4Top),

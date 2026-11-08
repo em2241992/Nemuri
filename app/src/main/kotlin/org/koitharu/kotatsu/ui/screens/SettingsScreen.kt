@@ -2825,6 +2825,26 @@ private fun ReaderSettingsSubScreen(
 							)
 						}
 					}
+
+					HorizontalDivider()
+
+					Text(
+						text = "VERTICAL / WEBTOON SPACING MODE",
+						style = MaterialTheme.typography.labelSmall,
+						color = MaterialTheme.colorScheme.primary,
+					)
+					FlowRow(
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						org.koitharu.kotatsu.core.model.VerticalSpacingMode.entries.forEach { spacingMode ->
+							FilterChip(
+								selected = readerConfig.verticalSpacingMode == spacingMode,
+								onClick = { onUpdateReaderConfig { it.copy(verticalSpacingMode = spacingMode) } },
+								label = { Text(spacingMode.label) },
+							)
+						}
+					}
 				}
 			}
 		}
@@ -2891,6 +2911,120 @@ private fun ReaderSettingsSubScreen(
 					}
 
 					HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Show page number overlay", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Display minimal outlined bottom-center page indicator (e.g. 2/56)",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.showPageNumberOverlay,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(showPageNumberOverlay = checked) }
+							},
+							modifier = Modifier.testTag("settings_toggle_page_number_overlay"),
+						)
+					}
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Keep screen on while reading", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Acquire Screen WakeLock so the display never dims or locks while reading",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.keepScreenOn,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(keepScreenOn = checked) }
+							},
+							modifier = Modifier.testTag("settings_toggle_keep_screen_on"),
+						)
+					}
+
+					AnimatedVisibility(visible = readerConfig.keepScreenOn) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(start = 12.dp),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text("Bedtime Sleep Guard (Release after 15m of inactivity)", style = MaterialTheme.typography.titleSmall)
+								Text(
+									"Automatically releases WakeLock after 15 minutes of zero interaction and saves a 🌙 Bedtime Auto-Bookmark",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
+							Switch(
+								checked = readerConfig.bedtimeSleepGuard,
+								onCheckedChange = { checked ->
+									onUpdateReaderConfig { it.copy(bedtimeSleepGuard = checked) }
+								},
+								modifier = Modifier.testTag("settings_toggle_bedtime_sleep_guard"),
+							)
+						}
+					}
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Show chapter transition banner", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Display finished/next chapter card and missing-chapter warnings between chapters (OFF = seamless flow)",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.showChapterTransitions,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(showChapterTransitions = checked) }
+							},
+							modifier = Modifier.testTag("settings_toggle_chapter_transitions"),
+						)
+					}
+
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text("Skip duplicate chapters when reading", style = MaterialTheme.typography.titleSmall)
+							Text(
+								"Automatically skip duplicate chapter numbers from secondary scanlators or merged sources",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
+						}
+						Switch(
+							checked = readerConfig.skipDuplicateChapters,
+							onCheckedChange = { checked ->
+								onUpdateReaderConfig { it.copy(skipDuplicateChapters = checked) }
+							},
+							modifier = Modifier.testTag("settings_toggle_skip_duplicate_chapters"),
+						)
+					}
 
 					Row(
 						modifier = Modifier.fillMaxWidth(),

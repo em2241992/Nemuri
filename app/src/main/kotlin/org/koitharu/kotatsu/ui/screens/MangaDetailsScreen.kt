@@ -1404,51 +1404,225 @@ fun MangaDetailsScreen(
 		)
 	}
 
-	// Shelf / Library Membership Picker Dialog
+	// Shelf / Library Membership Picker Dialog (Material 3 selection + explicit confirmation)
 	if (showShelfPickerDialog) {
+		val initialCategoryId = remember(item.categoryIds, categories) {
+			item.categoryIds.firstOrNull() ?: categories.firstOrNull()?.categoryId?.toLong()
+		}
+		var pendingSelectedCategoryId by remember(showShelfPickerDialog, initialCategoryId) {
+			mutableStateOf<Long?>(initialCategoryId)
+		}
+		var pendingRemoveFromLibrary by remember(showShelfPickerDialog) {
+			mutableStateOf(false)
+		}
+
 		AlertDialog(
 			onDismissRequest = { showShelfPickerDialog = false },
+			containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+			titleContentColor = MaterialTheme.colorScheme.onSurface,
+			textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+			shape = RoundedCornerShape(28.dp),
+			tonalElevation = 6.dp,
+			modifier = Modifier.testTag("library_shelf_membership_dialog"),
 			title = {
-				Text(
-					text = "Library Shelf & Membership",
-					fontFamily = PlusJakartaDisplayFamily,
-					fontWeight = FontWeight.Bold,
-				)
+				Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+					Text(
+						text = "Library Shelf & Membership",
+						fontFamily = PlusJakartaDisplayFamily,
+						style = MaterialTheme.typography.titleLarge,
+						fontWeight = FontWeight.Bold,
+						color = MaterialTheme.colorScheme.onSurface,
+					)
+					Text(
+						text = "Select a shelf for '$cleanTitle' or choose removal, then tap Confirm.",
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+					)
+				}
 			},
 			text = {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					Text(
-						text = "Assign '$cleanTitle' to a shelf category or remove from library:",
-						style = MaterialTheme.typography.bodySmall,
-					)
+				Column(
+					verticalArrangement = Arrangement.spacedBy(10.dp),
+					modifier = Modifier.fillMaxWidth(),
+				) {
 					categories.forEach { cat ->
-						FilledTonalButton(
+						val catIdLong = cat.categoryId.toLong()
+						val isSelected = !pendingRemoveFromLibrary && pendingSelectedCategoryId == catIdLong
+						val isCurrentSaved = item.categoryIds.contains(catIdLong)
+						Surface(
 							onClick = {
-								onToggleLibraryMembership(cat.categoryId.toLong())
-								showShelfPickerDialog = false
+								pendingSelectedCategoryId = catIdLong
+								pendingRemoveFromLibrary = false
 							},
-							modifier = Modifier.fillMaxWidth(),
+							color = if (isSelected) {
+								MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+							} else {
+								MaterialTheme.colorScheme.surfaceContainerLow
+							},
+							shape = RoundedCornerShape(16.dp),
+							border = BorderStroke(
+								width = if (isSelected) 1.5.dp else 1.dp,
+								color = if (isSelected) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+								},
+							),
+							modifier = Modifier
+								.fillMaxWidth()
+								.testTag("shelf_option_${cat.categoryId}"),
 						) {
-							Text("Move to '${cat.title}'")
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(horizontal = 14.dp, vertical = 12.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween,
+							) {
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp),
+								) {
+									Text(
+										text = cat.title,
+										style = MaterialTheme.typography.bodyLarge,
+										fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+										color = if (isSelected) {
+											MaterialTheme.colorScheme.primary
+										} else {
+											MaterialTheme.colorScheme.onSurface
+										},
+									)
+									Text(
+										text = if (isCurrentSaved) "Current shelf" else "Move to '${cat.title}'",
+										style = MaterialTheme.typography.labelSmall,
+										color = if (isSelected) {
+											MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+										} else {
+											MaterialTheme.colorScheme.onSurfaceVariant
+										},
+									)
+								}
+								androidx.compose.material3.RadioButton(
+									selected = isSelected,
+									onClick = null,
+									colors = androidx.compose.material3.RadioButtonDefaults.colors(
+										selectedColor = MaterialTheme.colorScheme.primary,
+										unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+									),
+								)
+							}
 						}
 					}
-					OutlinedButton(
+
+					HorizontalDivider(
+						color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+						modifier = Modifier.padding(vertical = 2.dp),
+					)
+
+					// Selectable "Remove from Library" option
+					Surface(
 						onClick = {
-							onToggleLibraryMembership(null)
-							showShelfPickerDialog = false
+							pendingRemoveFromLibrary = true
 						},
-						colors = ButtonDefaults.outlinedButtonColors(
-							contentColor = MaterialTheme.colorScheme.error,
+						color = if (pendingRemoveFromLibrary) {
+							MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+						} else {
+							MaterialTheme.colorScheme.surfaceContainerLow
+						},
+						shape = RoundedCornerShape(16.dp),
+						border = BorderStroke(
+							width = if (pendingRemoveFromLibrary) 1.5.dp else 1.dp,
+							color = if (pendingRemoveFromLibrary) {
+								MaterialTheme.colorScheme.error
+							} else {
+								MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+							},
 						),
-						modifier = Modifier.fillMaxWidth(),
+						modifier = Modifier
+							.fillMaxWidth()
+							.testTag("shelf_option_remove_from_library"),
 					) {
-						Text("Remove from Library")
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 14.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(
+								modifier = Modifier.weight(1f),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = "Remove from Library",
+									style = MaterialTheme.typography.bodyLarge,
+									fontWeight = if (pendingRemoveFromLibrary) FontWeight.Bold else FontWeight.Medium,
+									color = if (pendingRemoveFromLibrary) {
+										MaterialTheme.colorScheme.error
+									} else {
+										MaterialTheme.colorScheme.onSurface
+									},
+								)
+								Text(
+									text = "Unbookmark series from all shelves",
+									style = MaterialTheme.typography.labelSmall,
+									color = if (pendingRemoveFromLibrary) {
+										MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+								)
+							}
+							androidx.compose.material3.RadioButton(
+								selected = pendingRemoveFromLibrary,
+								onClick = null,
+								colors = androidx.compose.material3.RadioButtonDefaults.colors(
+									selectedColor = MaterialTheme.colorScheme.error,
+									unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+								),
+							)
+						}
 					}
 				}
 			},
+			dismissButton = {
+				TextButton(
+					onClick = { showShelfPickerDialog = false },
+					modifier = Modifier.testTag("shelf_membership_cancel_button"),
+				) {
+					Text("Cancel")
+				}
+			},
 			confirmButton = {
-				TextButton(onClick = { showShelfPickerDialog = false }) {
-					Text("Done")
+				Button(
+					onClick = {
+						if (pendingRemoveFromLibrary) {
+							onToggleLibraryMembership(null)
+						} else {
+							onToggleLibraryMembership(pendingSelectedCategoryId)
+						}
+						showShelfPickerDialog = false
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = if (pendingRemoveFromLibrary) {
+							MaterialTheme.colorScheme.error
+						} else {
+							MaterialTheme.colorScheme.primary
+						},
+						contentColor = if (pendingRemoveFromLibrary) {
+							MaterialTheme.colorScheme.onError
+						} else {
+							MaterialTheme.colorScheme.onPrimary
+						},
+					),
+					shape = RoundedCornerShape(12.dp),
+					modifier = Modifier.testTag("shelf_membership_confirm_button"),
+				) {
+					Text(
+						text = if (pendingRemoveFromLibrary) "Confirm Removal" else "Confirm",
+						fontWeight = FontWeight.Bold,
+					)
 				}
 			},
 		)

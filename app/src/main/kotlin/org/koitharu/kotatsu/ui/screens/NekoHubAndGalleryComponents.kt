@@ -504,7 +504,6 @@ private fun NekoCarouselCard(
 	Column(
 		modifier = modifier
 			.width(165.dp)
-			.clip(RoundedCornerShape(12.dp))
 			.combinedClickable(
 				onClick = onClick,
 				onLongClick = onLongClick,
@@ -513,8 +512,8 @@ private fun NekoCarouselCard(
 		Box(
 			modifier = Modifier
 				.size(165.dp)
-				.clip(RoundedCornerShape(12.dp))
-				.border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
+				.clip(RoundedCornerShape(14.dp))
+				.border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
 		) {
 			MangaCoverArtwork(
 				title = title,
@@ -525,40 +524,48 @@ private fun NekoCarouselCard(
 			if (inLibrary) {
 				Surface(
 					color = Color(0xFF5CE1E6),
-					shape = RoundedCornerShape(topStart = 12.dp, bottomEnd = 10.dp),
-					modifier = Modifier.align(Alignment.TopStart),
+					shape = RoundedCornerShape(6.dp),
+					modifier = Modifier
+						.align(Alignment.TopStart)
+						.padding(top = 8.dp, start = 8.dp),
 				) {
 					Text(
 						text = "In Library",
 						style = MaterialTheme.typography.labelSmall,
 						fontWeight = FontWeight.Bold,
 						color = Color(0xFF0F1419),
+						maxLines = 1,
+						softWrap = false,
 						modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
 					)
 				}
 			}
 		}
 
-		Spacer(modifier = Modifier.height(6.dp))
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+		) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.Bold,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
 
-		Text(
-			text = title,
-			style = MaterialTheme.typography.bodyMedium,
-			fontWeight = FontWeight.Bold,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 2,
-			overflow = TextOverflow.Ellipsis,
-		)
+			Spacer(modifier = Modifier.height(2.dp))
 
-		Spacer(modifier = Modifier.height(2.dp))
-
-		Text(
-			text = subtitle,
-			style = MaterialTheme.typography.labelSmall,
-			color = Color(0xFF9EA4B0),
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-		)
+			Text(
+				text = subtitle,
+				style = MaterialTheme.typography.labelSmall,
+				color = Color(0xFF9EA4B0),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
 	}
 }
 
@@ -763,19 +770,23 @@ fun NekoDenseGalleryGrid(
 						modifier = Modifier.fillMaxSize(),
 					)
 
-					// 2. Top-Left Badge: Compact "In Library" pill flush with top-left corner
+					// 2. Top-Left Badge: Compact "In Library" pill inset cleanly from top-left corner
 					if (inLib) {
 						Surface(
 							color = Color(0xFF5CE1E6),
-							shape = RoundedCornerShape(topStart = 8.dp, bottomEnd = 6.dp),
-							modifier = Modifier.align(Alignment.TopStart),
+							shape = RoundedCornerShape(5.dp),
+							modifier = Modifier
+								.align(Alignment.TopStart)
+								.padding(top = 6.dp, start = 6.dp),
 						) {
 							Text(
 								text = "In Library",
 								fontSize = 9.sp,
 								fontWeight = FontWeight.Bold,
 								color = Color(0xFF0F1419),
-								modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+								maxLines = 1,
+								softWrap = false,
+								modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
 							)
 						}
 					}
@@ -796,12 +807,12 @@ fun NekoDenseGalleryGrid(
 							),
 					)
 
-					// 4. Bottom Text Block (padding(4.dp)): Title + Subtitle Footer
+					// 4. Bottom Text Block: Title + Subtitle Footer with generous corner clearance
 					Column(
 						modifier = Modifier
 							.align(Alignment.BottomStart)
 							.fillMaxWidth()
-							.padding(4.dp),
+							.padding(horizontal = 6.dp, vertical = 5.dp),
 						verticalArrangement = Arrangement.spacedBy(1.dp),
 					) {
 						Text(

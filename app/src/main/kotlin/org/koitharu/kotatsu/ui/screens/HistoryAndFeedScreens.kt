@@ -1914,31 +1914,35 @@ private fun CatalogueTallCoverCard(
 				modifier = Modifier.fillMaxSize(),
 			)
 
-			// Top-Left "In Library" Pill Badge (matches Screenshot 3)
+			// Top-Left "In Library" Pill Badge inset cleanly from corner
 			if (inLibrary) {
 				Surface(
-					color = Color(0xFFD8E2FF).copy(alpha = 0.92f),
-					shape = RoundedCornerShape(bottomEnd = 10.dp, topStart = 12.dp),
-					modifier = Modifier.align(Alignment.TopStart),
+					color = Color(0xFF5CE1E6),
+					shape = RoundedCornerShape(6.dp),
+					modifier = Modifier
+						.align(Alignment.TopStart)
+						.padding(top = 8.dp, start = 8.dp),
 				) {
 					Text(
 						text = "In Library",
 						style = MaterialTheme.typography.labelSmall,
-						fontWeight = FontWeight.SemiBold,
-						color = Color(0xFF111827),
-						modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+						fontWeight = FontWeight.Bold,
+						color = Color(0xFF0F1419),
+						maxLines = 1,
+						softWrap = false,
+						modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
 					)
 				}
 			}
 
-			// Optional Unread Pill Badge on Middle-Left (like Screenshot 3's '20' pill)
+			// Optional Unread Pill Badge on Middle-Left
 			if (unreadCountBadge != null && unreadCountBadge > 0) {
 				Surface(
 					color = Color(0xFFD8E2FF).copy(alpha = 0.92f),
 					shape = RoundedCornerShape(8.dp),
 					modifier = Modifier
 						.align(Alignment.CenterStart)
-						.padding(start = 6.dp),
+						.padding(start = 8.dp),
 				) {
 					Text(
 						text = "$unreadCountBadge",
@@ -1952,24 +1956,28 @@ private fun CatalogueTallCoverCard(
 			}
 		}
 
-		Spacer(modifier = Modifier.height(6.dp))
-
-		Text(
-			text = title,
-			style = MaterialTheme.typography.bodyMedium,
-			fontWeight = FontWeight.SemiBold,
-			color = MaterialTheme.colorScheme.onBackground,
-			maxLines = 2,
-			overflow = TextOverflow.Ellipsis,
-		)
-		Spacer(modifier = Modifier.height(2.dp))
-		Text(
-			text = subtitle,
-			style = MaterialTheme.typography.bodySmall,
-			color = MaterialTheme.colorScheme.onSurfaceVariant,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-		)
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+		) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.SemiBold,
+				color = MaterialTheme.colorScheme.onBackground,
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
+			Spacer(modifier = Modifier.height(2.dp))
+			Text(
+				text = subtitle,
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
 	}
 }
 
@@ -2808,20 +2816,27 @@ private fun CompactSectionGridCard(
 		}
 
 		if (!isCompactGrid) {
-			Spacer(modifier = Modifier.height(4.dp))
-			Text(
-				text = title,
-				style = MaterialTheme.typography.labelLarge,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-			Text(
-				text = subtitle,
-				fontFamily = JetBrainsMonoFamily,
-				fontSize = 10.sp,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 1,
-			)
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+			) {
+				Text(
+					text = title,
+					style = MaterialTheme.typography.labelLarge,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+				Spacer(modifier = Modifier.height(2.dp))
+				Text(
+					text = subtitle,
+					fontFamily = JetBrainsMonoFamily,
+					fontSize = 10.sp,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+			}
 		}
 	}
 }

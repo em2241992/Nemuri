@@ -298,6 +298,12 @@ enum class NekoWideSpreadMode(val label: String) {
 	AUTO_ROTATE_90("Rotate 90°"),
 }
 
+enum class VerticalSpacingMode(val label: String, val subtitle: String) {
+	GAPLESS("Gapless (0px Seamless)", "Zero gap between all pages/strips"),
+	SMART_SEAM_AUTO_STITCH("Smart Seam Auto-Stitch", "Recommended • 0px on sliced panels, 8px between standalone pages"),
+	PAGED_GAP("Paged Gap (12px)", "Traditional spacing between full pages"),
+}
+
 data class ReaderCustomizationConfig(
 	val readingMode: ReaderStyleMode = ReaderStyleMode.PAGER_RTL,
 	val scaleMode: ReaderScaleMode = ReaderScaleMode.FIT_WIDTH,
@@ -307,6 +313,7 @@ data class ReaderCustomizationConfig(
 	val rotationMode: NekoRotationMode = NekoRotationMode.DEFAULT,
 	val backgroundColorMode: NekoBackgroundColorMode = NekoBackgroundColorMode.SMART_BY_PAGE,
 	val wideSpreadMode: NekoWideSpreadMode = NekoWideSpreadMode.SPLIT_INTO_TWO,
+	val verticalSpacingMode: VerticalSpacingMode = VerticalSpacingMode.SMART_SEAM_AUTO_STITCH,
 	val webtoonSidePaddingPercent: Int = 0,
 	val aiUpscaleMode: AiUpscaleMode = AiUpscaleMode.FAST_CRISP_INK_1_5X,
 	val showBeforeAfterSplit: Boolean = false,
@@ -330,6 +337,11 @@ data class ReaderCustomizationConfig(
 	val switchPagesWithVolumeKeys: Boolean = true,
 	val invertVolumeKeys: Boolean = false,
 	val showZoomButtons: Boolean = true,
+	val showPageNumberOverlay: Boolean = true,
+	val keepScreenOn: Boolean = true,
+	val bedtimeSleepGuard: Boolean = true,
+	val showChapterTransitions: Boolean = true,
+	val skipDuplicateChapters: Boolean = true,
 	val bedtimeOneHandedTapZones: Boolean = false,
 	val autoIncognitoMatureTags: Boolean = true,
 	val twoPageOnLandscape: Boolean = true,

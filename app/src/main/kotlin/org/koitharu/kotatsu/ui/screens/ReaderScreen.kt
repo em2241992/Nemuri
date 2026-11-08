@@ -1,8 +1,11 @@
 package org.koitharu.kotatsu.ui.screens
 
+import android.app.Activity
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -22,6 +25,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -68,6 +73,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -81,11 +87,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -105,6 +114,7 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
@@ -112,13 +122,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import android.graphics.BitmapFactory
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -139,12 +149,15 @@ import org.koitharu.kotatsu.core.model.ReaderCustomizationConfig
 import org.koitharu.kotatsu.core.model.ReaderScaleMode
 import org.koitharu.kotatsu.core.model.ReaderStyleMode
 import org.koitharu.kotatsu.core.model.SliderPosition
+import org.koitharu.kotatsu.core.model.VerticalSpacingMode
 import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import org.koitharu.kotatsu.reader.domain.WidePageProcessor
 import org.koitharu.kotatsu.ui.components.MangaReaderPageCanvas
+import org.koitharu.kotatsu.ui.components.NemuriBrandLogo
 import java.io.File
 import java.util.zip.ZipFile
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 private enum class NekoBottomSheetTab(val title: String) {
@@ -191,6 +204,19 @@ fun ReaderScreen(
 	var showColorCorrectionPanel by remember { mutableStateOf(false) }
 	var showThreeTabDrawer by remember { mutableStateOf(false) }
 	var activeThreeTabDrawerTab by remember { mutableStateOf(ReaderDrawerTab.PAGE_GRID) }
+	var longPressedPageIndex by remember(chapterIndex) { mutableStateOf<Int?>(null) }
+	var pendingChapterTransitionTarget by remember(chapterIndex) { mutableStateOf<Int?>(null) }
+	var lastSkippedDuplicateNotice by remember(chapterIndex) { mutableStateOf<String?>(null) }
+	var readerBottomCapsuleToast by remember { mutableStateOf<String?>(null) }
+	var lastInteractionTimestampMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+	var bedtimeWakeLockReleased by remember { mutableStateOf(false) }
+
+	LaunchedEffect(readerBottomCapsuleToast) {
+		if (readerBottomCapsuleToast != null) {
+			delay(2600L)
+			readerBottomCapsuleToast = null
+		}
+	}
 
 	val bookmarkedPagesInChapter = remember(mangaItem.manga.id, chapterIndex) {
 		mutableStateListOf<Int>().apply {
@@ -200,6 +226,7 @@ fun ReaderScreen(
 
 	BackHandler {
 		when {
+			pendingChapterTransitionTarget != null -> pendingChapterTransitionTarget = null
 			showAiUpscalePreviewModal -> showAiUpscalePreviewModal = false
 			showColorCorrectionPanel -> showColorCorrectionPanel = false
 			showReadingMoreSheet -> showReadingMoreSheet = false
@@ -223,7 +250,45 @@ fun ReaderScreen(
 	}
 
 	val context = LocalContext.current
+	val haptic = LocalHapticFeedback.current
 	val coroutineScope = rememberCoroutineScope()
+
+	// TASK 3: Keep Screen On (WakeLock / FLAG_KEEP_SCREEN_ON) + Bedtime Idle Guard (15m inactivity release)
+	DisposableEffect(context, readerConfig.keepScreenOn, bedtimeWakeLockReleased) {
+		val window = (context as? Activity)?.window
+		if (readerConfig.keepScreenOn && !bedtimeWakeLockReleased) {
+			window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+		} else {
+			window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+		}
+		onDispose {
+			window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+		}
+	}
+
+	LaunchedEffect(
+		lastInteractionTimestampMillis,
+		readerConfig.keepScreenOn,
+		readerConfig.bedtimeSleepGuard,
+		pageIndex,
+	) {
+		if (readerConfig.keepScreenOn && readerConfig.bedtimeSleepGuard && !bedtimeWakeLockReleased) {
+			delay(15 * 60 * 1000L) // 15 minutes of zero interaction
+			bedtimeWakeLockReleased = true
+			if (!bookmarkedPagesInChapter.contains(pageIndex)) {
+				bookmarkedPagesInChapter.add(pageIndex)
+				onTogglePageBookmark()
+			}
+			readerBottomCapsuleToast = "🌙 Bedtime Auto-Bookmark saved on Page ${pageIndex + 1}"
+		}
+	}
+
+	val registerUserInteraction: () -> Unit = {
+		lastInteractionTimestampMillis = System.currentTimeMillis()
+		if (bedtimeWakeLockReleased) {
+			bedtimeWakeLockReleased = false
+		}
+	}
 
 	val cleanMangaTitle = remember(mangaItem.manga.title) {
 		UiSourceAndTitleFormatter.formatDisplayTitle(mangaItem.manga.title)
@@ -241,17 +306,85 @@ fun ReaderScreen(
 			"Beneath the Cherry Tree",
 			"Unspoken Words",
 		)
+		val secondaryScanlators = listOf("Asmodeus Scans", "Aqua Scans", "Bato Mirror")
 		List(totalChapters) { idx ->
 			val vol = (idx / 10) + 1
-			val chNum = if (idx % 7 == 4) "${idx + 1}.5" else "${idx + 1}"
+			// Every 5th index (idx % 5 == 2 && idx > 0) represents a secondary scanlator upload of the same chapter number
+			val isSecondaryDuplicate = idx > 0 && idx % 5 == 2
+			val logicalChInt = if (isSecondaryDuplicate) idx else idx + 1
+			val chNum = if (!isSecondaryDuplicate && idx % 7 == 4) "${logicalChInt}.5" else "$logicalChInt"
+			val scanlator = if (isSecondaryDuplicate) {
+				secondaryScanlators[idx % secondaryScanlators.size]
+			} else {
+				activeChapterSource
+			}
 			ReaderChapterEntry(
 				index = idx,
 				volumeNumber = vol,
 				chapterNumber = chNum,
-				title = chapterTitles[idx % chapterTitles.size],
+				title = chapterTitles[logicalChInt % chapterTitles.size],
 				relativeDate = relativeDates[(totalChapters - 1 - idx).coerceAtLeast(0) % relativeDates.size],
-				scanlatorOrSource = activeChapterSource,
+				scanlatorOrSource = scanlator,
 			)
+		}
+	}
+
+	// TASK 5: Chapter Deduplication Logic when advancing next/previous chapter
+	val resolveAdjacentChapter: (Int, Boolean) -> Pair<Int?, String?> = { fromIndex, forward ->
+		val currentNum = chapterEntries.getOrNull(fromIndex)?.chapterNumber?.toFloatOrNull()
+		val step = if (forward) 1 else -1
+		var probe = fromIndex + step
+		var skippedNotice: String? = null
+		var resolvedIdx: Int? = null
+
+		while (probe in 0..chapterEntries.lastIndex) {
+			val candidate = chapterEntries[probe]
+			val candidateNum = candidate.chapterNumber.toFloatOrNull()
+			if (readerConfig.skipDuplicateChapters && currentNum != null && candidateNum != null && abs(candidateNum - currentNum) < 0.001f) {
+				skippedNotice = "Skipped duplicate Ch.${candidate.chapterNumber} (${candidate.scanlatorOrSource})"
+				probe += step
+				continue
+			}
+			// Also check if multiple entries ahead share the same candidateNum: pick the one matching activeChapterSource
+			if (readerConfig.skipDuplicateChapters && candidateNum != null) {
+				val sameNumberGroup = chapterEntries.filter {
+					val n = it.chapterNumber.toFloatOrNull()
+					n != null && abs(n - candidateNum) < 0.001f
+				}
+				if (sameNumberGroup.size > 1) {
+					val preferred = sameNumberGroup.firstOrNull {
+						it.scanlatorOrSource.equals(activeChapterSource, ignoreCase = true)
+					} ?: sameNumberGroup.first()
+					if (preferred.index != candidate.index) {
+						skippedNotice = "Skipped duplicate Ch.${candidate.chapterNumber} (${candidate.scanlatorOrSource})"
+					}
+					resolvedIdx = preferred.index
+					break
+				}
+			}
+			resolvedIdx = probe
+			break
+		}
+		resolvedIdx to skippedNotice
+	}
+
+	val requestChapterAdvance: (Boolean) -> Unit = { forward ->
+		registerUserInteraction()
+		val (targetChIdx, skippedMsg) = resolveAdjacentChapter(chapterIndex, forward)
+		if (targetChIdx != null) {
+			lastSkippedDuplicateNotice = skippedMsg
+			if (readerConfig.showChapterTransitions && forward) {
+				pendingChapterTransitionTarget = targetChIdx
+			} else {
+				pendingChapterTransitionTarget = null
+				onChapterChange(targetChIdx)
+				val nextEntry = chapterEntries.getOrNull(targetChIdx)
+				readerBottomCapsuleToast = if (skippedMsg != null) {
+					"Chapter ${nextEntry?.chapterNumber ?: (targetChIdx + 1)} • $skippedMsg"
+				} else {
+					"Chapter ${nextEntry?.chapterNumber ?: (targetChIdx + 1)}"
+				}
+			}
 		}
 	}
 
@@ -413,18 +546,21 @@ fun ReaderScreen(
 					}
 
 					if (goNext) {
+						registerUserInteraction()
 						if (pageIndex < totalPages - 1) {
 							onPageChange(pageIndex + 1)
 						} else if (chapterIndex < totalChapters - 1) {
-							onChapterChange(chapterIndex + 1)
+							requestChapterAdvance(true)
 						}
 					} else if (goPrev) {
+						registerUserInteraction()
 						if (pageIndex > 0) {
 							onPageChange(pageIndex - 1)
 						} else if (chapterIndex > 0) {
-							onChapterChange(chapterIndex - 1)
+							requestChapterAdvance(false)
 						}
 					} else {
+						registerUserInteraction()
 						isHudVisible = !isHudVisible
 					}
 				}
@@ -491,16 +627,18 @@ fun ReaderScreen(
 						webtoonListState.animateScrollBy(deltaPx)
 					}
 				} else if (goNext) {
+					registerUserInteraction()
 					if (pageIndex < totalPages - 1) {
 						onPageChange(pageIndex + 1)
 					} else if (chapterIndex < totalChapters - 1) {
-						onChapterChange(chapterIndex + 1)
+						requestChapterAdvance(true)
 					}
 				} else {
+					registerUserInteraction()
 					if (pageIndex > 0) {
 						onPageChange(pageIndex - 1)
 					} else if (chapterIndex > 0) {
-						onChapterChange(chapterIndex - 1)
+						requestChapterAdvance(false)
 					}
 				}
 				true
@@ -557,22 +695,77 @@ fun ReaderScreen(
 					.pointerInput(isRtl, pageIndex, chapterIndex, isHudVisible, expandedSheetTab, readerConfig.bedtimeOneHandedTapZones) {
 						detectTapGestures(
 							onDoubleTap = {
+								registerUserInteraction()
 								zoomScale = if (zoomScale > 1.05f) 1f else 2f
 								panOffset = Offset.Zero
 							},
 							onTap = { tapOffset ->
+								registerUserInteraction()
 								handleCanvasTap(tapOffset, webtoonViewportSize)
 							},
 						)
 					}
 					.padding(horizontal = (sidePadFraction * 180).dp),
 				horizontalAlignment = Alignment.CenterHorizontally,
+				verticalArrangement = Arrangement.spacedBy(0.dp),
 			) {
 				items(totalPages, key = { "webtoon_page_$it" }) { idx ->
+					// TASK 2: Gapless (0px Seamless) vs Smart Seam Auto-Stitch vs Paged Gap (12px)
+					val isSlicedStrip = idx < totalPages - 1 && (idx % 3 != 2)
+					val bottomGapDp = when (readerConfig.verticalSpacingMode) {
+						VerticalSpacingMode.GAPLESS -> 0.dp
+						VerticalSpacingMode.SMART_SEAM_AUTO_STITCH -> if (isSlicedStrip) 0.dp else 8.dp
+						VerticalSpacingMode.PAGED_GAP -> 12.dp
+					}
+					val stitchFlush = readerConfig.verticalSpacingMode == VerticalSpacingMode.GAPLESS ||
+						(readerConfig.verticalSpacingMode == VerticalSpacingMode.SMART_SEAM_AUTO_STITCH && isSlicedStrip)
+
 					Box(
 						modifier = Modifier
 							.fillMaxWidth()
-							.aspectRatio(0.71f),
+							.padding(bottom = bottomGapDp)
+							.aspectRatio(0.71f)
+							// TASK 1: 450ms scroll-safe long-press handler with 10px movement & multi-touch guard
+							.pointerInput(idx, chapterIndex) {
+								awaitEachGesture {
+									val down = awaitFirstDown(requireUnconsumed = false)
+									val startPos = down.position
+									var movedTooFarOrMultiTouch = false
+									val longPressJob = coroutineScope.launch {
+										delay(450L)
+										if (!movedTooFarOrMultiTouch) {
+											registerUserInteraction()
+											haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+											longPressedPageIndex = idx
+											activeReadingMoreTab = ReaderOptionsSheetTab.READING
+											showReadingMoreSheet = true
+										}
+									}
+									try {
+										do {
+											val event = awaitPointerEvent()
+											if (event.changes.size > 1) {
+												movedTooFarOrMultiTouch = true
+												longPressJob.cancel()
+												break
+											}
+											val currentChange = event.changes.firstOrNull()
+											if (currentChange != null) {
+												val dx = currentChange.position.x - startPos.x
+												val dy = currentChange.position.y - startPos.y
+												if (hypot(dx, dy) > 10f) {
+													movedTooFarOrMultiTouch = true
+													longPressJob.cancel()
+													break
+												}
+											}
+										} while (event.changes.any { it.pressed })
+									} finally {
+										longPressJob.cancel()
+									}
+								}
+							}
+							.testTag("reader_webtoon_page_box_$idx"),
 					) {
 						MangaReaderPageCanvas(
 							mangaTitle = cleanMangaTitle,
@@ -594,10 +787,48 @@ fun ReaderScreen(
 							greenBalance = readerConfig.greenBalance,
 							blueBalance = readerConfig.blueBalance,
 							decodedBitmap = if (idx == pageIndex) decodedPageBitmap else null,
+							seamlessVerticalStitch = stitchFlush,
 							modifier = Modifier
 								.fillMaxSize()
-								.padding(if (effectiveAutoCrop) 0.dp else 6.dp),
+								.padding(if (stitchFlush || effectiveAutoCrop) 0.dp else 6.dp),
 						)
+					}
+				}
+
+				// TASK 4: Inline Chapter Transition Card at end of Webtoon chapter (or seamless advance button)
+				if (chapterIndex < totalChapters - 1) {
+					item(key = "webtoon_chapter_transition_footer") {
+						val (nextChIdx, skippedDuplicateMsg) = resolveAdjacentChapter(chapterIndex, true)
+						val nextEntry = nextChIdx?.let { chapterEntries.getOrNull(it) }
+						if (nextEntry != null && nextChIdx != null) {
+							if (readerConfig.showChapterTransitions) {
+								ReaderChapterTransitionBannerCard(
+									finishedChapter = currentChapterEntry,
+									nextChapter = nextEntry,
+									skippedDuplicateNotice = skippedDuplicateMsg,
+									onContinueNextChapter = {
+										onChapterChange(nextChIdx)
+										readerBottomCapsuleToast = "Chapter ${nextEntry.chapterNumber}"
+									},
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 16.dp, vertical = 20.dp),
+								)
+							} else {
+								FilledTonalButton(
+									onClick = {
+										onChapterChange(nextChIdx)
+										readerBottomCapsuleToast = "Chapter ${nextEntry.chapterNumber}"
+									},
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 24.dp, vertical = 14.dp)
+										.testTag("webtoon_seamless_next_chapter_button"),
+								) {
+									Text("Continue to Ch.${nextEntry.chapterNumber} — ${nextEntry.title}")
+								}
+							}
+						}
 					}
 				}
 			}
@@ -620,6 +851,7 @@ fun ReaderScreen(
 					.distinctUntilChanged()
 					.collect { scrolling ->
 						if (scrolling) {
+							registerUserInteraction()
 							isHudVisible = false
 							expandedSheetTab = null
 						}
@@ -631,6 +863,7 @@ fun ReaderScreen(
 					.distinctUntilChanged()
 					.collect { settledPage ->
 						if (settledPage != pageIndex) {
+							registerUserInteraction()
 							isHudVisible = false
 							expandedSheetTab = null
 							onPageChange(settledPage)
@@ -641,23 +874,70 @@ fun ReaderScreen(
 			var pagerViewportSize by remember { mutableStateOf(IntSize.Zero) }
 
 			val pageContent: @Composable (Int) -> Unit = { pageIdx ->
+				val stitchVerticalPage = isVerticalPager && (
+					readerConfig.verticalSpacingMode == VerticalSpacingMode.GAPLESS ||
+						(readerConfig.verticalSpacingMode == VerticalSpacingMode.SMART_SEAM_AUTO_STITCH && pageIdx % 3 != 2)
+					)
 				Box(
 					modifier = Modifier
 						.fillMaxSize()
 						.onSizeChanged { pagerViewportSize = it }
+						// TASK 1: 450ms scroll-safe long-press detector with 10px scroll & multi-touch pinch cancel guard
+						.pointerInput(pageIdx, chapterIndex) {
+							awaitEachGesture {
+								val down = awaitFirstDown(requireUnconsumed = false)
+								val startPos = down.position
+								var movedTooFarOrMultiTouch = false
+								val longPressJob = coroutineScope.launch {
+									delay(450L)
+									if (!movedTooFarOrMultiTouch) {
+										registerUserInteraction()
+										haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+										longPressedPageIndex = pageIdx
+										activeReadingMoreTab = ReaderOptionsSheetTab.READING
+										showReadingMoreSheet = true
+									}
+								}
+								try {
+									do {
+										val event = awaitPointerEvent()
+										if (event.changes.size > 1) {
+											movedTooFarOrMultiTouch = true
+											longPressJob.cancel()
+											break
+										}
+										val currentChange = event.changes.firstOrNull()
+										if (currentChange != null) {
+											val dx = currentChange.position.x - startPos.x
+											val dy = currentChange.position.y - startPos.y
+											if (hypot(dx, dy) > 10f) {
+												movedTooFarOrMultiTouch = true
+												longPressJob.cancel()
+												break
+											}
+										}
+									} while (event.changes.any { it.pressed })
+								} finally {
+									longPressJob.cancel()
+								}
+							}
+						}
 						.pointerInput(isRtl, pageIndex, chapterIndex, isHudVisible, expandedSheetTab, readerConfig.bedtimeOneHandedTapZones) {
 							detectTapGestures(
 								onDoubleTap = {
+									registerUserInteraction()
 									zoomScale = if (zoomScale > 1.05f) 1f else 2.25f
 									panOffset = Offset.Zero
 								},
 								onTap = { tapOffset ->
+									registerUserInteraction()
 									handleCanvasTap(tapOffset, pagerViewportSize)
 								},
 							)
 						}
 						.pointerInput(pageIdx) {
 							detectTransformGestures { _, pan, zoom, _ ->
+								registerUserInteraction()
 								val newScale = (zoomScale * zoom).coerceIn(1f, 3.5f)
 								zoomScale = newScale
 								panOffset = if (newScale > 1.02f) {
@@ -672,8 +952,9 @@ fun ReaderScreen(
 						}
 						.padding(
 							horizontal = if (readerConfig.scaleMode == ReaderScaleMode.FIT_HEIGHT) 16.dp else 0.dp,
-							vertical = if (readerConfig.scaleMode == ReaderScaleMode.FIT_WIDTH) 0.dp else 8.dp,
-						),
+							vertical = if (stitchVerticalPage || readerConfig.scaleMode == ReaderScaleMode.FIT_WIDTH) 0.dp else 8.dp,
+						)
+						.testTag("reader_paged_page_box_$pageIdx"),
 					contentAlignment = Alignment.Center,
 				) {
 					Box(
@@ -707,17 +988,25 @@ fun ReaderScreen(
 							greenBalance = readerConfig.greenBalance,
 							blueBalance = readerConfig.blueBalance,
 							decodedBitmap = if (pageIdx == pageIndex) decodedPageBitmap else null,
+							seamlessVerticalStitch = stitchVerticalPage,
 							modifier = Modifier
 								.fillMaxSize()
-								.padding(if (effectiveAutoCrop) 0.dp else 6.dp),
+								.padding(if (stitchVerticalPage || effectiveAutoCrop) 0.dp else 6.dp),
 						)
 					}
 				}
 			}
 
+			val verticalPagerSpacing = when (readerConfig.verticalSpacingMode) {
+				VerticalSpacingMode.GAPLESS -> 0.dp
+				VerticalSpacingMode.SMART_SEAM_AUTO_STITCH -> 0.dp
+				VerticalSpacingMode.PAGED_GAP -> 12.dp
+			}
+
 			if (isVerticalPager) {
 				VerticalPager(
 					state = pagerState,
+					pageSpacing = verticalPagerSpacing,
 					modifier = Modifier.fillMaxSize(),
 				) { pageIdx ->
 					pageContent(pageIdx)
@@ -734,19 +1023,18 @@ fun ReaderScreen(
 		}
 
 		// =========================================================================
-		// 1. FULLSCREEN READING STATE (isHudVisible == false)
-		// Render ONLY the compact page counter text ("${currentPage} /${totalPages}",
-		// 12.sp, semi-bold white with subtle drop shadow) centered at the very bottom edge.
+		// 1. FULLSCREEN READING STATE — MINIMAL OUTLINED BOTTOM-CENTER PAGE COUNTER ("2/56")
+		// Controlled by readerConfig.showPageNumberOverlay (ON / OFF)
 		// =========================================================================
-		if (!isHudVisible) {
+		if (!isHudVisible && readerConfig.showPageNumberOverlay) {
 			Text(
-				text = "${pageIndex + 1} /$totalPages",
+				text = "${pageIndex + 1}/$totalPages",
 				style = TextStyle(
 					color = Color.White,
 					fontSize = 12.sp,
-					fontWeight = FontWeight.SemiBold,
+					fontWeight = FontWeight.Bold,
 					shadow = Shadow(
-						color = Color.Black.copy(alpha = 0.9f),
+						color = Color.Black.copy(alpha = 0.96f),
 						offset = Offset(0f, 1.5f),
 						blurRadius = 6f,
 					),
@@ -766,7 +1054,8 @@ fun ReaderScreen(
 			showReadingMoreSheet ||
 			showColorCorrectionPanel ||
 			showThreeTabDrawer ||
-			showAiUpscalePreviewModal
+			showAiUpscalePreviewModal ||
+			pendingChapterTransitionTarget != null
 
 		if (!anyModalOrDrawerOpen) {
 			AnimatedVisibility(
@@ -793,13 +1082,14 @@ fun ReaderScreen(
 					canGoPrevChapter = chapterIndex > 0,
 					canGoNextChapter = chapterIndex < totalChapters - 1,
 					onSelectPage = { oneBased ->
+						registerUserInteraction()
 						onPageChange((oneBased - 1).coerceIn(0, totalPages - 1))
 					},
 					onPrevChapter = {
-						if (chapterIndex > 0) onChapterChange(chapterIndex - 1)
+						if (chapterIndex > 0) requestChapterAdvance(false)
 					},
 					onNextChapter = {
-						if (chapterIndex < totalChapters - 1) onChapterChange(chapterIndex + 1)
+						if (chapterIndex < totalChapters - 1) requestChapterAdvance(true)
 					},
 					onRepositionByDrag = { rawScreenOffset ->
 						val newPos = resolveSliderPositionFromDrag(
@@ -964,6 +1254,8 @@ fun ReaderScreen(
 							.size(40.dp)
 							.clip(CircleShape)
 							.clickable {
+								registerUserInteraction()
+								longPressedPageIndex = null
 								activeReadingMoreTab = ReaderOptionsSheetTab.READING
 								showReadingMoreSheet = true
 							}
@@ -1009,19 +1301,21 @@ fun ReaderScreen(
 						canGoPrevChapter = chapterIndex > 0,
 						canGoNextChapter = chapterIndex < totalChapters - 1,
 						onSelectPage = { oneBased ->
+							registerUserInteraction()
 							onPageChange((oneBased - 1).coerceIn(0, totalPages - 1))
 						},
 						onPrevChapter = {
-							if (chapterIndex > 0) onChapterChange(chapterIndex - 1)
+							if (chapterIndex > 0) requestChapterAdvance(false)
 						},
 						onNextChapter = {
-							if (chapterIndex < totalChapters - 1) onChapterChange(chapterIndex + 1)
+							if (chapterIndex < totalChapters - 1) requestChapterAdvance(true)
 						},
 						onOpenThreeTabDrawer = {
 							activeThreeTabDrawerTab = ReaderDrawerTab.PAGE_GRID
 							showThreeTabDrawer = true
 						},
 						onSwipeUpOpenOptions = {
+							longPressedPageIndex = null
 							activeReadingMoreTab = ReaderOptionsSheetTab.READING
 							showReadingMoreSheet = true
 						},
@@ -1221,22 +1515,25 @@ fun ReaderScreen(
 		// TASK 3: TWO-TAB READER OPTIONS SHEET (Reading | More)
 		// =========================================================================
 		if (showReadingMoreSheet) {
+			val targetPageIdx = (longPressedPageIndex ?: pageIndex).coerceIn(0, totalPages - 1)
 			ReaderTwoTabOptionsSheet(
 				activeTab = activeReadingMoreTab,
 				onSelectTab = { activeReadingMoreTab = it },
 				readerConfig = readerConfig,
-				isPageBookmarked = isPageBookmarked || bookmarkedPagesInChapter.contains(pageIndex),
+				isPageBookmarked = isPageBookmarked || bookmarkedPagesInChapter.contains(targetPageIdx),
 				mangaTitle = cleanMangaTitle,
 				chapterNumber = currentChapterEntry.chapterNumber,
-				pageNumber = pageIndex + 1,
+				pageNumber = targetPageIdx + 1,
 				onUpdateReaderConfig = onUpdateReaderConfig,
 				onTogglePageBookmark = {
-					if (bookmarkedPagesInChapter.contains(pageIndex)) {
-						bookmarkedPagesInChapter.remove(pageIndex)
+					if (bookmarkedPagesInChapter.contains(targetPageIdx)) {
+						bookmarkedPagesInChapter.remove(targetPageIdx)
 					} else {
-						bookmarkedPagesInChapter.add(pageIndex)
+						bookmarkedPagesInChapter.add(targetPageIdx)
 					}
-					onTogglePageBookmark()
+					if (targetPageIdx == pageIndex) {
+						onTogglePageBookmark()
+					}
 				},
 				onOpenColorCorrection = {
 					showReadingMoreSheet = false
@@ -1245,9 +1542,13 @@ fun ReaderScreen(
 				onOpenAdvancedReaderSettings = {
 					showReadingMoreSheet = false
 					isHudVisible = true
+					settingsSubTab = NekoSettingsSubTab.GENERAL
 					expandedSheetTab = NekoBottomSheetTab.SETTINGS
 				},
-				onDismiss = { showReadingMoreSheet = false },
+				onDismiss = {
+					showReadingMoreSheet = false
+					longPressedPageIndex = null
+				},
 			)
 		}
 
@@ -1303,6 +1604,76 @@ fun ReaderScreen(
 				onUpdateReaderConfig = onUpdateReaderConfig,
 				onDismiss = { showAiUpscalePreviewModal = false },
 			)
+		}
+
+		// =========================================================================
+		// TASK 4: CHAPTER TRANSITION INTERSTITIAL BANNER OVERLAY (WHEN ON)
+		// =========================================================================
+		val transitionTargetIdx = pendingChapterTransitionTarget
+		if (transitionTargetIdx != null && readerConfig.showChapterTransitions) {
+			val nextEntry = chapterEntries.getOrNull(transitionTargetIdx)
+			if (nextEntry != null) {
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.background(Color.Black.copy(alpha = 0.78f))
+						.clickable { pendingChapterTransitionTarget = null }
+						.testTag("reader_chapter_transition_overlay"),
+					contentAlignment = Alignment.Center,
+				) {
+					ReaderChapterTransitionBannerCard(
+						finishedChapter = currentChapterEntry,
+						nextChapter = nextEntry,
+						skippedDuplicateNotice = lastSkippedDuplicateNotice,
+						onContinueNextChapter = {
+							pendingChapterTransitionTarget = null
+							onChapterChange(transitionTargetIdx)
+							readerBottomCapsuleToast = "Chapter ${nextEntry.chapterNumber}"
+						},
+						onDismiss = { pendingChapterTransitionTarget = null },
+						modifier = Modifier
+							.fillMaxWidth(0.90f)
+							.clickable(enabled = false) {},
+					)
+				}
+			}
+		}
+
+		// =========================================================================
+		// FLOATING BOTTOM CAPSULE TOAST ("Chapter N+1", "🌙 Bedtime Auto-Bookmark")
+		// =========================================================================
+		val activeCapsuleMsg = readerBottomCapsuleToast
+		AnimatedVisibility(
+			visible = activeCapsuleMsg != null,
+			enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
+			exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 2 },
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.padding(bottom = if (isHudVisible) 96.dp else 42.dp),
+		) {
+			Surface(
+				color = Color(0xFF232830),
+				shape = RoundedCornerShape(999.dp),
+				border = BorderStroke(1.dp, Color(0xFF5CE1E6).copy(alpha = 0.35f)),
+				shadowElevation = 12.dp,
+				modifier = Modifier.testTag("reader_bottom_capsule_toast"),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(10.dp),
+				) {
+					NemuriBrandLogo(modifier = Modifier.size(20.dp))
+					Text(
+						text = activeCapsuleMsg ?: "",
+						style = MaterialTheme.typography.labelLarge,
+						fontWeight = FontWeight.SemiBold,
+						color = Color.White,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
 		}
 	}
 }
@@ -2323,50 +2694,133 @@ private fun NekoSettingsTabContent(
 						}
 					}
 
-					// 5. Show Zoom Buttons (🔍+ / 🔍-): ON / OFF toggle switch
-					Surface(
-						color = Color(0xFF21232C),
-						shape = RoundedCornerShape(14.dp),
-						modifier = Modifier
-							.fillMaxWidth()
-							.testTag("reader_settings_show_zoom_buttons_row"),
-					) {
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(horizontal = 14.dp, vertical = 10.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.SpaceBetween,
-						) {
-							Column(
-								modifier = Modifier.weight(1f),
-								verticalArrangement = Arrangement.spacedBy(2.dp),
-							) {
-								Text(
-									text = "Show Zoom Buttons (🔍+ / 🔍-)",
-									style = MaterialTheme.typography.bodyMedium,
-									fontWeight = FontWeight.SemiBold,
-									color = Color.White,
-								)
-								Text(
-									text = "Floating zoom pill aligned beneath vertical page scrubber",
-									style = MaterialTheme.typography.labelSmall,
-									color = Color(0xFF9EA4B0),
-								)
-							}
-							Switch(
-								checked = readerConfig.showZoomButtons,
-								onCheckedChange = { enabled ->
-									onUpdateReaderConfig { it.copy(showZoomButtons = enabled) }
-								},
-								colors = SwitchDefaults.colors(
-									checkedThumbColor = Color(0xFF0A1014),
-									checkedTrackColor = accentCyan,
+					// 5. Vertical / Webtoon Spacing Mode Selector (Gapless | Smart Seam Auto-Stitch | Paged Gap)
+					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+						Text(
+							text = "Vertical / Webtoon Spacing",
+							style = MaterialTheme.typography.labelLarge,
+							color = Color(0xFFD5DAE5),
+						)
+						VerticalSpacingMode.entries.forEach { spacingMode ->
+							val selected = readerConfig.verticalSpacingMode == spacingMode
+							Surface(
+								color = if (selected) accentCyan.copy(alpha = 0.16f) else Color(0xFF21232C),
+								shape = RoundedCornerShape(14.dp),
+								border = BorderStroke(
+									width = 1.dp,
+									color = if (selected) accentCyan else Color.White.copy(alpha = 0.08f),
 								),
-								modifier = Modifier.testTag("reader_sheet_toggle_zoom_buttons_switch"),
-							)
+								modifier = Modifier
+									.fillMaxWidth()
+									.clip(RoundedCornerShape(14.dp))
+									.clickable {
+										onUpdateReaderConfig { it.copy(verticalSpacingMode = spacingMode) }
+									}
+									.testTag("reader_vertical_spacing_${spacingMode.name.lowercase()}"),
+							) {
+								Row(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(horizontal = 14.dp, vertical = 10.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.SpaceBetween,
+								) {
+									Column(
+										modifier = Modifier.weight(1f),
+										verticalArrangement = Arrangement.spacedBy(2.dp),
+									) {
+										Text(
+											text = spacingMode.label,
+											style = MaterialTheme.typography.bodyMedium,
+											fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+											color = if (selected) accentCyan else Color.White,
+										)
+										Text(
+											text = spacingMode.subtitle,
+											style = MaterialTheme.typography.labelSmall,
+											color = Color(0xFF9EA4B0),
+										)
+									}
+									if (selected) {
+										Icon(
+											imageVector = Icons.Default.CheckCircle,
+											contentDescription = null,
+											tint = accentCyan,
+											modifier = Modifier.size(18.dp),
+										)
+									}
+								}
+							}
 						}
 					}
+
+					// 6. Show page number overlay (2/56 bottom-center counter)
+					ReaderAdvancedToggleRow(
+						title = "Show page number overlay",
+						subtitle = "Minimal outlined bottom-center page indicator (e.g. 2/56)",
+						checked = readerConfig.showPageNumberOverlay,
+						onCheckedChange = { enabled ->
+							onUpdateReaderConfig { it.copy(showPageNumberOverlay = enabled) }
+						},
+						testTag = "reader_toggle_page_number_overlay",
+					)
+
+					// 7. Keep screen on while reading (WakeLock) + Bedtime Sleep Guard sub-toggle
+					ReaderAdvancedToggleRow(
+						title = "Keep screen on while reading",
+						subtitle = "Acquire Screen WakeLock so the display never dims or locks while reading",
+						checked = readerConfig.keepScreenOn,
+						onCheckedChange = { enabled ->
+							onUpdateReaderConfig { it.copy(keepScreenOn = enabled) }
+						},
+						testTag = "reader_toggle_keep_screen_on",
+					)
+
+					AnimatedVisibility(visible = readerConfig.keepScreenOn) {
+						ReaderAdvancedToggleRow(
+							title = "Bedtime Sleep Guard (Release after 15m of inactivity)",
+							subtitle = "Releases WakeLock after 15m of zero touch/scroll and saves a 🌙 Bedtime Auto-Bookmark",
+							checked = readerConfig.bedtimeSleepGuard,
+							onCheckedChange = { enabled ->
+								onUpdateReaderConfig { it.copy(bedtimeSleepGuard = enabled) }
+							},
+							testTag = "reader_toggle_bedtime_sleep_guard",
+							modifier = Modifier.padding(start = 12.dp),
+						)
+					}
+
+					// 8. Show chapter transition banner (ON / OFF)
+					ReaderAdvancedToggleRow(
+						title = "Show chapter transition banner",
+						subtitle = "Show finished/next chapter card and gap warnings between chapters (OFF = seamless flow)",
+						checked = readerConfig.showChapterTransitions,
+						onCheckedChange = { enabled ->
+							onUpdateReaderConfig { it.copy(showChapterTransitions = enabled) }
+						},
+						testTag = "reader_toggle_chapter_transitions",
+					)
+
+					// 9. Skip duplicate chapters when reading (ON / OFF)
+					ReaderAdvancedToggleRow(
+						title = "Skip duplicate chapters when reading",
+						subtitle = "Automatically skip duplicate chapter numbers from secondary scanlators or merged sources",
+						checked = readerConfig.skipDuplicateChapters,
+						onCheckedChange = { enabled ->
+							onUpdateReaderConfig { it.copy(skipDuplicateChapters = enabled) }
+						},
+						testTag = "reader_toggle_skip_duplicate_chapters",
+					)
+
+					// 10. Show Zoom Buttons (🔍+ / 🔍-): ON / OFF toggle switch
+					ReaderAdvancedToggleRow(
+						title = "Show Zoom Buttons (🔍+ / 🔍-)",
+						subtitle = "Floating zoom pill aligned beneath vertical page scrubber",
+						checked = readerConfig.showZoomButtons,
+						onCheckedChange = { enabled ->
+							onUpdateReaderConfig { it.copy(showZoomButtons = enabled) }
+						},
+						testTag = "reader_sheet_toggle_zoom_buttons_switch",
+					)
 				}
 
 				NekoSettingsSubTab.PAGED -> {
@@ -2737,4 +3191,170 @@ private fun buildReaderColorFilter(config: ReaderCustomizationConfig): ColorFilt
 	matrix.timesAssign(scaleMatrix)
 	return ColorFilter.colorMatrix(matrix)
 }
+
+@Composable
+private fun ReaderAdvancedToggleRow(
+	title: String,
+	subtitle: String,
+	checked: Boolean,
+	onCheckedChange: (Boolean) -> Unit,
+	testTag: String,
+	modifier: Modifier = Modifier,
+) {
+	val accentCyan = Color(0xFF5CE1E6)
+	Surface(
+		color = Color(0xFF21232C),
+		shape = RoundedCornerShape(14.dp),
+		modifier = modifier.fillMaxWidth(),
+	) {
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 14.dp, vertical = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.SpaceBetween,
+		) {
+			Column(
+				modifier = Modifier
+					.weight(1f)
+					.padding(end = 10.dp),
+				verticalArrangement = Arrangement.spacedBy(2.dp),
+			) {
+				Text(
+					text = title,
+					style = MaterialTheme.typography.bodyMedium,
+					fontWeight = FontWeight.SemiBold,
+					color = Color.White,
+				)
+				Text(
+					text = subtitle,
+					style = MaterialTheme.typography.labelSmall,
+					color = Color(0xFF9EA4B0),
+				)
+			}
+			Switch(
+				checked = checked,
+				onCheckedChange = onCheckedChange,
+				colors = SwitchDefaults.colors(
+					checkedThumbColor = Color(0xFF0A1014),
+					checkedTrackColor = accentCyan,
+				),
+				modifier = Modifier.testTag(testTag),
+			)
+		}
+	}
+}
+
+@Composable
+internal fun ReaderChapterTransitionBannerCard(
+	finishedChapter: ReaderChapterEntry,
+	nextChapter: ReaderChapterEntry,
+	skippedDuplicateNotice: String?,
+	onContinueNextChapter: () -> Unit,
+	onDismiss: (() -> Unit)? = null,
+	modifier: Modifier = Modifier,
+) {
+	val accentCyan = Color(0xFF5CE1E6)
+	val finishedNum = finishedChapter.chapterNumber.toFloatOrNull()
+	val nextNum = nextChapter.chapterNumber.toFloatOrNull()
+	val missingGapWarning = if (finishedNum != null && nextNum != null && (nextNum - finishedNum) > 1.5f) {
+		"⚠ Missing Ch. ${(finishedNum.toInt() + 1)}"
+	} else {
+		null
+	}
+
+	Surface(
+		color = Color(0xFF141822),
+		shape = RoundedCornerShape(22.dp),
+		border = BorderStroke(1.dp, accentCyan.copy(alpha = 0.35f)),
+		shadowElevation = 18.dp,
+		modifier = modifier.testTag("reader_chapter_transition_banner"),
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(20.dp),
+			verticalArrangement = Arrangement.spacedBy(12.dp),
+		) {
+			Text(
+				text = "✓ Finished: Vol.${finishedChapter.volumeNumber} Ch.${finishedChapter.chapterNumber} — ${finishedChapter.title}",
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.Bold,
+				color = Color(0xFF10B981),
+			)
+
+			if (missingGapWarning != null) {
+				Surface(
+					color = Color(0xFFF59E0B).copy(alpha = 0.16f),
+					shape = RoundedCornerShape(10.dp),
+					border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.45f)),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Text(
+						text = missingGapWarning,
+						style = MaterialTheme.typography.labelMedium,
+						fontWeight = FontWeight.Bold,
+						color = Color(0xFFFBBF24),
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+					)
+				}
+			}
+
+			if (!skippedDuplicateNotice.isNullOrBlank()) {
+				Surface(
+					color = accentCyan.copy(alpha = 0.12f),
+					shape = RoundedCornerShape(10.dp),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Text(
+						text = "⏭ $skippedDuplicateNotice",
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.Medium,
+						color = accentCyan,
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+					)
+				}
+			}
+
+			Text(
+				text = "⬇ Next: Vol.${nextChapter.volumeNumber} Ch.${nextChapter.chapterNumber} — ${nextChapter.title} (${nextChapter.scanlatorOrSource})",
+				style = MaterialTheme.typography.titleSmall,
+				fontWeight = FontWeight.Bold,
+				color = Color.White,
+			)
+
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(10.dp),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				if (onDismiss != null) {
+					TextButton(
+						onClick = onDismiss,
+						modifier = Modifier.weight(0.4f),
+					) {
+						Text("Stay on Page", color = Color(0xFF9EA4B0))
+					}
+				}
+				Button(
+					onClick = onContinueNextChapter,
+					colors = ButtonDefaults.buttonColors(
+						containerColor = accentCyan,
+						contentColor = Color(0xFF071318),
+					),
+					shape = RoundedCornerShape(14.dp),
+					modifier = Modifier
+						.weight(1f)
+						.testTag("reader_transition_continue_button"),
+				) {
+					Text(
+						text = "Continue to Ch.${nextChapter.chapterNumber}",
+						fontWeight = FontWeight.Bold,
+					)
+				}
+			}
+		}
+	}
+}
+
 
