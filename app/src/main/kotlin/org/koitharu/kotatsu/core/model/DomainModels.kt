@@ -83,7 +83,7 @@ enum class AppColorSchemePreset(
 		secondarySwatchHex = 0xFF2DD4BF,
 		surfaceSwatchHex = 0xFF132A2E,
 	),
-	NEKO_INDIGO(
+	MIDNIGHT_INDIGO(
 		label = "Midnight Indigo",
 		subtitle = "Deep twilight periwinkle blue",
 		darkPrimaryHex = 0xFF818CF8,
@@ -275,7 +275,7 @@ enum class SliderPosition(val label: String) {
 	RIGHT_ALIGN("Right Align"),
 }
 
-enum class NekoRotationMode(val label: String) {
+enum class ReaderRotationMode(val label: String) {
 	DEFAULT("Default"),
 	FREE("Free"),
 	PORTRAIT("Portrait"),
@@ -284,7 +284,7 @@ enum class NekoRotationMode(val label: String) {
 	LOCKED_LANDSCAPE("Locked landscape"),
 }
 
-enum class NekoBackgroundColorMode(val label: String) {
+enum class ReaderBackgroundColorMode(val label: String) {
 	WHITE("White"),
 	BLACK("Black"),
 	SMART_BY_PAGE("Smart (by page)"),
@@ -292,7 +292,7 @@ enum class NekoBackgroundColorMode(val label: String) {
 	SMART_BY_THEME_BLACK("Smart (by theme but black)"),
 }
 
-enum class NekoWideSpreadMode(val label: String) {
+enum class ReaderWideSpreadMode(val label: String) {
 	NONE("None"),
 	SPLIT_INTO_TWO("Split 2-Page"),
 	AUTO_ROTATE_90("Rotate 90°"),
@@ -310,9 +310,9 @@ data class ReaderCustomizationConfig(
 	val progressBarPlacement: HudBarPlacement = HudBarPlacement.BOTTOM,
 	val scrollbarPlacement: HudBarPlacement = HudBarPlacement.RIGHT,
 	val sliderPosition: SliderPosition = SliderPosition.RIGHT_ALIGN,
-	val rotationMode: NekoRotationMode = NekoRotationMode.DEFAULT,
-	val backgroundColorMode: NekoBackgroundColorMode = NekoBackgroundColorMode.SMART_BY_PAGE,
-	val wideSpreadMode: NekoWideSpreadMode = NekoWideSpreadMode.SPLIT_INTO_TWO,
+	val rotationMode: ReaderRotationMode = ReaderRotationMode.DEFAULT,
+	val backgroundColorMode: ReaderBackgroundColorMode = ReaderBackgroundColorMode.SMART_BY_PAGE,
+	val wideSpreadMode: ReaderWideSpreadMode = ReaderWideSpreadMode.SPLIT_INTO_TWO,
 	val verticalSpacingMode: VerticalSpacingMode = VerticalSpacingMode.SMART_SEAM_AUTO_STITCH,
 	val webtoonSidePaddingPercent: Int = 0,
 	val aiUpscaleMode: AiUpscaleMode = AiUpscaleMode.FAST_CRISP_INK_1_5X,

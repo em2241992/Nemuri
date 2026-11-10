@@ -110,8 +110,8 @@ import kotlin.math.abs
  */
 enum class HybridFeedPrimaryMode(val label: String) {
 	UPDATES_AND_BROWSE("Updates"),
-	NEKO_HUB("Hub"),
-	NEKO_GALLERY("Gallery"),
+	BROWSE_HUB("Hub"),
+	DENSE_GALLERY("Gallery"),
 	DISCOVERY_FOR_YOU("For You"),
 }
 
@@ -182,10 +182,7 @@ private fun getExpandedDiscoveryCatalogPool(
 	extensionCatalog: List<ExtensionCatalogManga>,
 ): List<ExtensionCatalogManga> {
 	if (extensionCatalog.isEmpty()) return emptyList()
-	val hasDebugSandboxItems = extensionCatalog.any {
-		it.title.contains("Frieren", ignoreCase = true) ||
-			it.title.contains("Berserk", ignoreCase = true)
-	}
+	val hasDebugSandboxItems = extensionCatalog.any { it.isDebugMock }
 	if (!hasDebugSandboxItems) return extensionCatalog
 	val extraSeries = listOf(
 		ExtensionCatalogManga(
@@ -200,6 +197,7 @@ private fun getExpandedDiscoveryCatalogPool(
 			tags = listOf("Fantasy", "Adventure", "Seinen", "Magic"),
 			totalChapters = 82,
 			rating = 0.99f,
+			isDebugMock = true,
 		),
 		ExtensionCatalogManga(
 			title = "Dandadan",
@@ -213,6 +211,7 @@ private fun getExpandedDiscoveryCatalogPool(
 			tags = listOf("Action", "Supernatural", "Sci-Fi", "Comedy"),
 			totalChapters = 176,
 			rating = 0.98f,
+			isDebugMock = true,
 		),
 		ExtensionCatalogManga(
 			title = "Sakamoto Days",
@@ -226,6 +225,7 @@ private fun getExpandedDiscoveryCatalogPool(
 			tags = listOf("Action", "Comedy", "Martial Arts", "Shounen"),
 			totalChapters = 192,
 			rating = 0.97f,
+			isDebugMock = true,
 		),
 		ExtensionCatalogManga(
 			title = "Dungeon Odyssey",
@@ -239,10 +239,23 @@ private fun getExpandedDiscoveryCatalogPool(
 			tags = listOf("Dark Fantasy", "Action", "Strategy", "Webtoon"),
 			totalChapters = 114,
 			rating = 0.96f,
+			isDebugMock = true,
 		),
 	)
 	val existingUrls = extensionCatalog.map { it.url }.toSet()
 	return extensionCatalog + extraSeries.filter { it.url !in existingUrls }
+}
+
+private fun formatRelativeFeedTimestamp(timestampMillis: Long): String {
+	if (timestampMillis <= 0L) return "Recent"
+	val diffMinutes = ((System.currentTimeMillis() - timestampMillis) / 60_000L).coerceAtLeast(0L)
+	return when {
+		diffMinutes < 2L -> "Just now"
+		diffMinutes < 60L -> "${diffMinutes}m ago"
+		diffMinutes < 1440L -> "${diffMinutes / 60L}h ago"
+		diffMinutes < 2880L -> "Yesterday"
+		else -> "${diffMinutes / 1440L}d ago"
+	}
 }
 
 /**
@@ -257,23 +270,6 @@ fun buildHybridFeedEntries(
 	searchQuery: String,
 ): List<HybridFeedEntry> {
 	val aspectPool = listOf(0.62f, 0.75f, 0.57f, 0.71f, 0.60f, 0.78f)
-	val hookQuotes = listOf(
-		"\"When the hero's party disbands, the real journey through time begins.\"",
-		"\"Rule #1 of the dungeon: eat or be eaten—literally.\"",
-		"\"Every devil contract demands a price no human should pay.\"",
-		"\"He was the weakest hunter in the world until the double dungeon altar awoke.\"",
-		"\"Behind the spotlight, entertainment is a ruthless battlefield of lies.\"",
-		"\"A cursed blade forged in vengeance cuts through the underworld.\"",
-	)
-	val scanlators = listOf(
-		"Solaris Simulpub",
-		"Kirei Cake Scans",
-		"Asura Scans HD",
-		"MangaDex Official",
-		"Team Fallen Angels",
-		"Hokazono Ink Guild",
-	)
-	val timeLabels = listOf("18m ago", "1h ago", "3h ago", "5h ago", "Yesterday", "2d ago")
 	val topComments = listOf(
 		"That double-page spread on page 14 gave me chills! The linework this arc is 10/10.",
 		"Anyone else catch the callback to Chapter 1 in the background panel? Pure genius.",
@@ -301,21 +297,22 @@ fun buildHybridFeedEntries(
 				mangaItem = item,
 				chapter = ch,
 				chapterIndex = (item.chapters.size - 1).coerceAtLeast(0),
-				timestampMillis = System.currentTimeMillis() - idx * 3600_000L,
+				timestampMillis = ch.uploadDate.takeIf { it > 0L } ?: (System.currentTimeMillis() - idx * 3600_000L),
 				dateBucketLabel = if (idx < 3) "Today" else "Yesterday",
-				isNewRelease = idx < 4,
+				isNewRelease = item.unreadCount > 0,
 			)
 		}
 	}
 
 	val fromUpdates = effectiveUpdates.mapIndexed { idx, upd ->
 		val m = upd.mangaItem.manga
+		val isMock = upd.mangaItem.isDebugMock
 		val cleanTitle = UiSourceAndTitleFormatter.formatDisplayTitle(m.title)
 		val cleanSource = UiSourceAndTitleFormatter.formatSourceName(m.source)
 		val hash = abs(cleanTitle.hashCode())
 		val chNum = upd.chapter.number.toInt().coerceAtLeast(1)
 		val rawSynopsis = m.description?.takeIf { it.isNotBlank() }
-			?: "New chapter release for $cleanTitle (${upd.chapter.title.ifBlank { "Chapter $chNum" }})."
+			?: "Chapter $chNum release for $cleanTitle."
 		val ownSynopsis = rawSynopsis
 			.replace("Duplicate entry from EXT:", "Merged with ")
 			.replace("EXT:", "")
@@ -324,14 +321,14 @@ fun buildHybridFeedEntries(
 		val cleanScanlator = if (rawScanlator != null) {
 			UiSourceAndTitleFormatter.formatSourceName(rawScanlator)
 		} else {
-			scanlators[idx % scanlators.size]
+			cleanSource
 		}
 		HybridFeedEntry(
 			id = "hybrid_upd_${m.id}",
 			mangaId = m.id,
 			catalogRef = null,
 			title = cleanTitle,
-			author = m.authors ?: "Studio Creator",
+			author = m.authors?.takeIf { it.isNotBlank() } ?: cleanSource,
 			coverUrl = m.coverUrl,
 			sourceName = cleanSource,
 			chapterNumber = chNum,
@@ -339,25 +336,27 @@ fun buildHybridFeedEntries(
 			chapterTitle = upd.chapter.title.ifBlank { "Chapter $chNum" },
 			isNewDrop = upd.isNewRelease,
 			inLibrary = true,
-			genres = upd.mangaItem.tags.map { it.title }.ifEmpty { listOf("Manga", "Action", "Fantasy") },
-			baseHeatScore = 640 + (hash % 1850),
-			baseCommentCount = 84 + (hash % 260),
+			genres = upd.mangaItem.tags.map { it.title }.ifEmpty { listOf("Manga") },
+			baseHeatScore = if (isMock) 640 + (hash % 1850) else upd.mangaItem.totalChapters * 10,
+			baseCommentCount = if (isMock) 84 + (hash % 260) else 0,
 			aspectRatio = aspectPool[idx % aspectPool.size],
 			hookQuote = ownHookQuote,
 			synopsis = ownSynopsis,
-			matchPercent = (m.rating * 100f).toInt().coerceIn(88, 99),
+			matchPercent = (m.rating * 100f).toInt().coerceIn(85, 99),
 			totalChapters = upd.mangaItem.totalChapters.coerceAtLeast(chNum),
-			releaseTimeLabel = timeLabels[idx % timeLabels.size],
-			releaseDateBucket = if (idx < 3) "TODAY'S SIMULPUB DROPS" else "YESTERDAY'S RELEASES",
+			releaseTimeLabel = formatRelativeFeedTimestamp(upd.timestampMillis),
+			releaseDateBucket = upd.dateBucketLabel.uppercase(),
 			scanlatorGroup = cleanScanlator,
-			topCommentPreview = topComments[idx % topComments.size],
-			topCommentAuthor = commentAuthors[idx % commentAuthors.size],
+			topCommentPreview = if (isMock) topComments[idx % topComments.size] else "",
+			topCommentAuthor = if (isMock) commentAuthors[idx % commentAuthors.size] else "",
 		)
 	}
 
-	val existingIds = fromUpdates.mapNotNull { it.mangaId }.toSet()
+	val existingNormTitles = fromUpdates.map { TitleNormalizer.normalize(it.title) }.toSet()
 	val expandedCatalog = getExpandedDiscoveryCatalogPool(extensionCatalog)
+		.filterNot { TitleNormalizer.normalize(it.title) in existingNormTitles }
 	val fromCatalog = expandedCatalog.mapIndexed { idx, cat ->
+		val isMock = cat.isDebugMock
 		val cleanTitle = UiSourceAndTitleFormatter.formatDisplayTitle(cat.title)
 		val cleanSource = UiSourceAndTitleFormatter.formatSourceName(cat.sourceName)
 		val norm = TitleNormalizer.normalize(cat.title)
@@ -374,27 +373,27 @@ fun buildHybridFeedEntries(
 			mangaId = matchedLib?.manga?.id,
 			catalogRef = cat,
 			title = cleanTitle,
-			author = cat.author,
+			author = cat.author.ifBlank { cleanSource },
 			coverUrl = cat.coverSeed,
 			sourceName = cleanSource,
 			chapterNumber = chNum,
 			chapterIndex = ((matchedLib?.chapters?.size ?: 1) - 1).coerceAtLeast(0),
-			chapterTitle = "Ch. $chNum • Latest Release",
-			isNewDrop = idx % 2 == 0,
-			inLibrary = norm in libraryNormalizedTitles,
-			genres = cat.tags.ifEmpty { listOf("Action", "Seinen") },
-			baseHeatScore = 420 + (hash % 1400),
-			baseCommentCount = 52 + (hash % 190),
+			chapterTitle = if (matchedLib != null) "Ch. $chNum • In Library" else "$chNum Chapters • $cleanSource",
+			isNewDrop = matchedLib?.unreadCount?.let { it > 0 } ?: (idx < 6),
+			inLibrary = norm in libraryNormalizedTitles || matchedLib != null,
+			genres = cat.tags.ifEmpty { listOf("Manga") },
+			baseHeatScore = if (isMock) 420 + (hash % 1400) else (cat.rating * 1000).toInt(),
+			baseCommentCount = if (isMock) 52 + (hash % 190) else 0,
 			aspectRatio = aspectPool[(idx + 2) % aspectPool.size],
 			hookQuote = ownHookQuote,
 			synopsis = ownSynopsis,
-			matchPercent = (cat.rating * 100f).toInt().coerceIn(89, 99),
+			matchPercent = (cat.rating * 100f).toInt().coerceIn(85, 99),
 			totalChapters = chNum,
-			releaseTimeLabel = timeLabels[(idx + 2) % timeLabels.size],
-			releaseDateBucket = if (idx % 2 == 0) "TRENDING COMMUNITY THREADS" else "THIS WEEK'S TOP [DISC]",
-			scanlatorGroup = scanlators[(idx + 1) % scanlators.size],
-			topCommentPreview = topComments[(idx + 2) % topComments.size],
-			topCommentAuthor = commentAuthors[(idx + 2) % commentAuthors.size],
+			releaseTimeLabel = cat.lang.uppercase(),
+			releaseDateBucket = "DISCOVER IN ${cleanSource.uppercase()}",
+			scanlatorGroup = cleanSource,
+			topCommentPreview = if (isMock) topComments[(idx + 2) % topComments.size] else "",
+			topCommentAuthor = if (isMock) commentAuthors[(idx + 2) % commentAuthors.size] else "",
 		)
 	}
 
@@ -448,8 +447,8 @@ fun DualModeHybridFeedHomeView(
 	extensionCatalog: List<ExtensionCatalogManga>,
 	libraryNormalizedTitles: Set<String>,
 	searchQuery: String,
-	nekoGalleryColumns: Int = 5,
-	onSelectNekoGalleryColumns: (Int) -> Unit = {},
+	hubGalleryColumns: Int = 5,
+	onSelectHubGalleryColumns: (Int) -> Unit = {},
 	onRequestFocusTopSearch: () -> Unit = {},
 	onSelectDefaultSource: (String) -> Unit,
 	onNavigateToSubCategory: (FeedSectionCategory) -> Unit,
@@ -467,8 +466,8 @@ fun DualModeHybridFeedHomeView(
 	var masonrySortMode by rememberSaveable { mutableStateOf(MasonryDiscoverySortMode.AI_MATCH) }
 	var includeLibraryInCatalogGrid by rememberSaveable { mutableStateOf(false) }
 	var redditStreamSortMode by rememberSaveable { mutableStateOf(RedditStreamSortMode.HOT_DISCUSSIONS) }
-	var nekoFilter by rememberSaveable { mutableStateOf(NekoHubAndGalleryFilter.ALL) }
-	var gallerySectionFilter by rememberSaveable { mutableStateOf<NekoHubSectionCategory?>(null) }
+	var hubFilter by rememberSaveable { mutableStateOf(FeedHubAndGalleryFilter.ALL) }
+	var gallerySectionFilter by rememberSaveable { mutableStateOf<FeedHubSectionCategory?>(null) }
 
 	// Interactive state for bookmarks, read status, upvotes, comments, and "More Like This" similarity filtering
 	val bookmarkedEntryIds = remember { mutableStateMapOf<String, Boolean>() }
@@ -542,11 +541,14 @@ fun DualModeHybridFeedHomeView(
 		}
 	}
 
-	// 1-Column Reddit [DISC] Dataset: Dedicated to Chapter Releases & Community Discussions
-	val redditStreamEntries = remember(displayedEntries, redditStreamSortMode, upvotedEntryIds, customCommentsByEntry) {
-		val basePool = when (redditStreamSortMode) {
-			RedditStreamSortMode.LIBRARY_ONLY -> displayedEntries.filter { it.inLibrary }.ifEmpty { displayedEntries }
-			else -> displayedEntries
+	// 1-Column Updates Dataset: Dedicated to Library Chapter Releases (or full stream in Debug Sandbox mode)
+	val hasMockLibraryItems = remember(libraryItems) { libraryItems.any { it.isDebugMock } }
+	val redditStreamEntries = remember(displayedEntries, redditStreamSortMode, upvotedEntryIds, customCommentsByEntry, hasMockLibraryItems) {
+		val libraryOnlyPool = displayedEntries.filter { it.inLibrary && it.mangaId != null }
+		val basePool = when {
+			redditStreamSortMode == RedditStreamSortMode.LIBRARY_ONLY -> libraryOnlyPool
+			hasMockLibraryItems -> displayedEntries
+			else -> libraryOnlyPool
 		}
 		when (redditStreamSortMode) {
 			RedditStreamSortMode.HOT_DISCUSSIONS -> basePool.sortedByDescending {
@@ -572,9 +574,18 @@ fun DualModeHybridFeedHomeView(
 	}
 
 	val onLaunchEntryReader: (HybridFeedEntry, Boolean) -> Unit = { entry, startFromChapterOne ->
-		val targetMangaId = entry.mangaId ?: libraryItems.firstOrNull()?.manga?.id ?: 1001L
-		val targetChapterIdx = if (startFromChapterOne) 0 else entry.chapterIndex.coerceAtLeast(0)
-		onOpenReader(targetMangaId, targetChapterIdx)
+		val targetMangaId = entry.mangaId
+		if (targetMangaId != null) {
+			val targetChapterIdx = if (startFromChapterOne) 0 else entry.chapterIndex.coerceAtLeast(0)
+			onOpenReader(targetMangaId, targetChapterIdx)
+		} else if (entry.catalogRef != null) {
+			onRequestAddCatalogManga(entry.catalogRef)
+		} else {
+			val fallbackId = libraryItems.firstOrNull()?.manga?.id
+			if (fallbackId != null) {
+				onOpenReader(fallbackId, 0)
+			}
+		}
 	}
 
 	Column(
@@ -606,21 +617,21 @@ fun DualModeHybridFeedHomeView(
 						val isSelected = primaryMode == mode
 						val mappedDefaultMode = when (mode) {
 							HybridFeedPrimaryMode.UPDATES_AND_BROWSE -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.UPDATES
-							HybridFeedPrimaryMode.NEKO_HUB -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.HUB
-							HybridFeedPrimaryMode.NEKO_GALLERY -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.GALLERY
+							HybridFeedPrimaryMode.BROWSE_HUB -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.HUB
+							HybridFeedPrimaryMode.DENSE_GALLERY -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.GALLERY
 							HybridFeedPrimaryMode.DISCOVERY_FOR_YOU -> org.koitharu.kotatsu.core.model.DefaultFeedViewMode.FOR_YOU
 						}
 						val isDefaultMode = defaultFeedView == mappedDefaultMode
 						val tag = when (mode) {
 							HybridFeedPrimaryMode.UPDATES_AND_BROWSE -> "hybrid_feed_mode_updates_browse"
-							HybridFeedPrimaryMode.NEKO_HUB -> "hybrid_feed_mode_neko_hub"
-							HybridFeedPrimaryMode.NEKO_GALLERY -> "hybrid_feed_mode_neko_gallery"
+							HybridFeedPrimaryMode.BROWSE_HUB -> "hybrid_feed_mode_hub"
+							HybridFeedPrimaryMode.DENSE_GALLERY -> "hybrid_feed_mode_gallery"
 							HybridFeedPrimaryMode.DISCOVERY_FOR_YOU -> "hybrid_feed_mode_discovery"
 						}
 						val modeIcon = when (mode) {
 							HybridFeedPrimaryMode.UPDATES_AND_BROWSE -> Icons.Default.ViewAgenda
-							HybridFeedPrimaryMode.NEKO_HUB -> Icons.Default.ViewCarousel
-							HybridFeedPrimaryMode.NEKO_GALLERY -> Icons.Default.GridView
+							HybridFeedPrimaryMode.BROWSE_HUB -> Icons.Default.ViewCarousel
+							HybridFeedPrimaryMode.DENSE_GALLERY -> Icons.Default.GridView
 							HybridFeedPrimaryMode.DISCOVERY_FOR_YOU -> Icons.Default.AutoAwesome
 						}
 						Surface(
@@ -636,7 +647,7 @@ fun DualModeHybridFeedHomeView(
 								.clip(RoundedCornerShape(17.dp))
 								.combinedClickable(
 									onClick = {
-										if (mode == HybridFeedPrimaryMode.NEKO_HUB) {
+										if (mode == HybridFeedPrimaryMode.BROWSE_HUB) {
 											gallerySectionFilter = null
 										}
 										primaryMode = mode
@@ -764,18 +775,18 @@ fun DualModeHybridFeedHomeView(
 				)
 			}
 
-			HybridFeedPrimaryMode.NEKO_HUB -> {
-				NekoBrowseHubView(
+			HybridFeedPrimaryMode.BROWSE_HUB -> {
+				FeedBrowseHubView(
 					entries = displayedEntries,
 					libraryItems = libraryItems,
-					activeFilter = nekoFilter,
-					onSelectFilter = { nekoFilter = it },
+					activeFilter = hubFilter,
+					onSelectFilter = { hubFilter = it },
 					onSelectSectionForGallery = { section ->
 						gallerySectionFilter = section
-						primaryMode = HybridFeedPrimaryMode.NEKO_GALLERY
+						primaryMode = HybridFeedPrimaryMode.DENSE_GALLERY
 					},
-					galleryColumns = nekoGalleryColumns,
-					onSelectGalleryColumns = onSelectNekoGalleryColumns,
+					galleryColumns = hubGalleryColumns,
+					onSelectGalleryColumns = onSelectHubGalleryColumns,
 					isBookmarked = isEntryBookmarked,
 					onToggleBookmark = onToggleEntryBookmark,
 					onOpenReader = { entry -> onLaunchEntryReader(entry, false) },
@@ -790,25 +801,25 @@ fun DualModeHybridFeedHomeView(
 				)
 			}
 
-			HybridFeedPrimaryMode.NEKO_GALLERY -> {
-				NekoDenseGalleryGrid(
+			HybridFeedPrimaryMode.DENSE_GALLERY -> {
+				FeedDenseGalleryGrid(
 					title = gallerySectionFilter?.headerTitle ?: "Dense Gallery",
 					entries = displayedEntries,
 					libraryItems = libraryItems,
-					activeFilter = nekoFilter,
-					onSelectFilter = { nekoFilter = it },
+					activeFilter = hubFilter,
+					onSelectFilter = { hubFilter = it },
 					activeSectionFilter = gallerySectionFilter,
 					onClearSectionFilter = if (gallerySectionFilter != null) {
 						{
 							gallerySectionFilter = null
-							primaryMode = HybridFeedPrimaryMode.NEKO_HUB
+							primaryMode = HybridFeedPrimaryMode.BROWSE_HUB
 						}
 					} else {
 						null
 					},
-					galleryColumns = nekoGalleryColumns,
-					showRankFooter = gallerySectionFilter == null || gallerySectionFilter == NekoHubSectionCategory.POPULAR_NEW_TITLES,
-					onSelectGalleryColumns = onSelectNekoGalleryColumns,
+					galleryColumns = hubGalleryColumns,
+					showRankFooter = gallerySectionFilter == null || gallerySectionFilter == FeedHubSectionCategory.POPULAR_NEW_TITLES,
+					onSelectGalleryColumns = onSelectHubGalleryColumns,
 					isBookmarked = isEntryBookmarked,
 					onToggleBookmark = onToggleEntryBookmark,
 					onOpenReader = { entry -> onLaunchEntryReader(entry, false) },
@@ -843,31 +854,36 @@ fun DualModeHybridFeedHomeView(
 	if (commentTarget != null) {
 		var draftComment by remember { mutableStateOf("") }
 		val userAdded = customCommentsByEntry.getOrPut(commentTarget.id) { mutableStateListOf() }
-		val seededComments = remember(commentTarget.id) {
-			listOf(
-				ChapterDiscussionComment(
-					id = "c1",
-					authorHandle = "u/SakuraInkReader",
-					timeAgo = "42m ago",
-					body = "That double-page spread in ${commentTarget.chapterTitle} gave me chills! The pacing this arc is 10/10.",
-					likes = 128,
-					isTopComment = true,
-				),
-				ChapterDiscussionComment(
-					id = "c2",
-					authorHandle = "u/TankobonCollector",
-					timeAgo = "2h ago",
-					body = "Anyone else notice the foreshadowing on page 3? Connects directly back to Chapter 1!",
-					likes = 64,
-				),
-				ChapterDiscussionComment(
-					id = "c3",
-					authorHandle = "u/MihonMigrator",
-					timeAgo = "4h ago",
-					body = "Reading this with the AI 1.5x Crisp Ink filter makes the halftone shading pop like print.",
-					likes = 39,
-				),
-			)
+		val isTargetDebugMock = commentTarget.catalogRef?.isDebugMock == true || hasMockLibraryItems
+		val seededComments = remember(commentTarget.id, isTargetDebugMock) {
+			if (!isTargetDebugMock) {
+				emptyList()
+			} else {
+				listOf(
+					ChapterDiscussionComment(
+						id = "c1",
+						authorHandle = "u/SakuraInkReader",
+						timeAgo = "42m ago",
+						body = "That double-page spread in ${commentTarget.chapterTitle} gave me chills! The pacing this arc is 10/10.",
+						likes = 128,
+						isTopComment = true,
+					),
+					ChapterDiscussionComment(
+						id = "c2",
+						authorHandle = "u/TankobonCollector",
+						timeAgo = "2h ago",
+						body = "Anyone else notice the foreshadowing on page 3? Connects directly back to Chapter 1!",
+						likes = 64,
+					),
+					ChapterDiscussionComment(
+						id = "c3",
+						authorHandle = "u/MihonMigrator",
+						timeAgo = "4h ago",
+						body = "Reading this with the AI 1.5x Crisp Ink filter makes the halftone shading pop like print.",
+						likes = 39,
+					),
+				)
+			}
 		}
 
 		ModalBottomSheet(

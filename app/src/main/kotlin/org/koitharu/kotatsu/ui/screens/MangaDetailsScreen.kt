@@ -194,8 +194,8 @@ fun MangaDetailsScreen(
 				}
 			}
 			else -> raw
-				.replace("DropSauce 'AI Fix-It'", "Source Fix-It")
-				.replace("DropSauce AI Fix-It", "Source Fix-It")
+				.replace("'AI Fix-It'", "Source Fix-It")
+				.replace("AI Fix-It", "Source Fix-It")
 		}
 	}
 

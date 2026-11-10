@@ -210,7 +210,7 @@ class KotatsuStressAndCujTest {
 		assertNotNull(frierenWinner)
 		assertTrue(frierenWinner!!.categoryIds.containsAll(setOf(1L, 2L)))
 
-		// 3. Diagnose and repair broken series via DropSauce AI Fix-It
+		// 3. Diagnose and repair broken series via Source Fix-It
 		val brokenProposals = aiEngine.diagnoseBrokenLibraryItems(afterDedupItems)
 		assertEquals("Should detect 2 broken seeded series (Berserk & ORV)", 2, brokenProposals.size)
 
@@ -602,7 +602,11 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestExtensionDownloaderFileProviderAndDynamicCatalog(): Unit = runBlocking {
-		val initialCatalogSize = extensionManager.getExtensionCatalogItems().size
+		assertTrue(
+			"Default end-user catalog (includeDebugMock = false) must have zero dummy items",
+			extensionManager.getExtensionCatalogItems(includeDebugMock = false).isEmpty(),
+		)
+		val initialCatalogSize = extensionManager.getExtensionCatalogItems(includeDebugMock = true).size
 		val initialDiscovered = extensionManager.discoverExtensions(emptyList())
 		val installedCountBefore = initialDiscovered.count { it.isInstalled }
 		val availableCountBefore = initialDiscovered.count { !it.isInstalled }
@@ -634,7 +638,7 @@ class KotatsuStressAndCujTest {
 		val asuraAfter = afterInstallDiscovered.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.asurascans" }!!
 		assertTrue("Asura Scans must be marked installed after downloadAndInstallExtension", asuraAfter.isInstalled)
 
-		val expandedCatalog = extensionManager.getExtensionCatalogItems()
+		val expandedCatalog = extensionManager.getExtensionCatalogItems(includeDebugMock = true)
 		assertTrue("Installing Asura Scans must dynamically expand catalog items", expandedCatalog.size > initialCatalogSize)
 		assertTrue(
 			"Expanded catalog must include Asura Scans series",
@@ -697,7 +701,7 @@ class KotatsuStressAndCujTest {
 	}
 
 	@Test
-	fun stressTestPhase1To3NemuriHardeningMergeEngineAndDropSauceParity(): Unit = runBlocking {
+	fun stressTestPhase1To3NemuriHardeningMergeEngineAndExtensionParity(): Unit = runBlocking {
 		libraryRepo.ensureSeeded()
 
 		// 1. Phase 1.1: TitleNormalizer.toNormalizedSlug & toCanonicalChapterKey
@@ -737,7 +741,7 @@ class KotatsuStressAndCujTest {
 		factory.evictSource(mihonSource.name)
 		assertEquals("Evicted source must be removed from cache", null, factory.getOrCreateFast(mihonSource))
 
-		// 4. Phase 2.2: MergedChapterAggregator (Neko-style Multi-Source Chapter Merge & Deduplicator)
+		// 4. Phase 2.2: MergedChapterAggregator (Multi-Source Chapter Merge & Deduplicator)
 		val primaryChapters = listOf(
 			org.koitharu.kotatsu.parsers.model.MangaChapter(
 				id = 101L,
@@ -1248,7 +1252,121 @@ class KotatsuStressAndCujTest {
 			com.google.mlkit.genai.prompt.Generation.customModelOverride = null
 		}
 	}
+
+	@Test
+	fun stressTestExtensionStoreRepoParserAndSourceBridges(): Unit = runBlocking {
+		// 1. Verify Extension Store URL normalization (GitHub blob, tree, shorthand owner/repo@branch)
+		val normBlob = org.koitharu.kotatsu.extensions.store.normalizeExtensionStoreUrl(
+			"https://github.com/keiyoushi/extensions/blob/repo/index.min.json",
+		)
+		assertEquals("https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json", normBlob)
+
+		val normShorthand = org.koitharu.kotatsu.extensions.store.normalizeExtensionStoreUrl(
+			"keiyoushi/extensions@repo",
+		)
+		assertEquals("https://raw.githubusercontent.com/keiyoushi/extensions/repo", normShorthand)
+
+		// 2. Verify ExtensionRepoRepository parses Mihon index.min.json & LNReader .js plugin arrays
+		val repoRepository = extensionManager.repoRepository
+		val mihonJson = """
+			[
+			  {
+			    "name": "Tachiyomi: MangaDex",
+			    "pkg": "eu.kanade.tachiyomi.extension.en.mangadex",
+			    "apk": "tachiyomi-en.mangadex-v1.4.205.apk",
+			    "lang": "en",
+			    "code": 205,
+			    "version": "1.4.205",
+			    "nsfw": 0,
+			    "sources": [
+			      {"name": "MangaDex", "lang": "en", "id": "2499283573021220255", "baseUrl": "https://mangadex.org"}
+			    ]
+			  }
+			]
+		""".trimIndent()
+		val mihonEntries = repoRepository.parseJsonArrayEntries(
+			mihonJson,
+			"https://raw.githubusercontent.com/keiyoushi/extensions/repo",
+		)
+		assertEquals(1, mihonEntries.size)
+		assertEquals("MangaDex", org.koitharu.kotatsu.extensions.store.extensionDisplayName(mihonEntries.first()))
+		assertEquals(
+			"https://raw.githubusercontent.com/keiyoushi/extensions/repo/apk/tachiyomi-en.mangadex-v1.4.205.apk",
+			repoRepository.resolveApkUrl("https://raw.githubusercontent.com/keiyoushi/extensions/repo", mihonEntries.first()),
+		)
+
+		val lnReaderJson = """
+			[
+			  {
+			    "id": "royalroad",
+			    "name": "RoyalRoad",
+			    "site": "https://www.royalroad.com",
+			    "lang": "English",
+			    "version": "1.1.2",
+			    "url": "https://raw.githubusercontent.com/LNReader/lnreader-plugins/plugins/v3.0.0/.js/src/plugins/english/royalroad.js",
+			    "iconUrl": "https://raw.githubusercontent.com/LNReader/lnreader-plugins/plugins/v3.0.0/icons/royalroad.png"
+			  }
+			]
+		""".trimIndent()
+		val lnEntries = repoRepository.parseJsonArrayEntries(
+			lnReaderJson,
+			"https://raw.githubusercontent.com/LNReader/lnreader-plugins/plugins/v3.0.0/.dist",
+		)
+		assertEquals(1, lnEntries.size)
+		assertTrue(lnEntries.first().pkg.startsWith("lnreader.plugin."))
+		assertEquals("en", lnEntries.first().lang)
+
+		// 3. Verify language display & autonym resolvers + SourceCatalogItem models
+		assertEquals("English", org.koitharu.kotatsu.extensions.store.getExternalExtensionLanguageDisplayName("en"))
+		assertEquals("日本語", org.koitharu.kotatsu.extensions.store.getExternalExtensionLanguageAutonym("ja"))
+		assertEquals(
+			"en",
+			org.koitharu.kotatsu.extensions.store.resolveActiveMihonLanguage(
+				setOf("en", "ja"),
+				java.util.Locale.ENGLISH,
+			),
+		)
+
+		// 4. Verify HybridMangaRepositoryFactory bridges (NativeKotatsuRepository, MihonExtensionBridge, LnReaderPluginBridge)
+		val factory = org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory()
+		val nativeRepo = factory.getOrCreateAsync(org.koitharu.kotatsu.core.model.MangaSource("MANGADEX_EN"))
+		val mihonRepo = factory.getOrCreateAsync(org.koitharu.kotatsu.core.model.MangaSource("MIHON_2499283573021220255"))
+		val lnRepo = factory.getOrCreateAsync(org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory().let { org.koitharu.kotatsu.core.model.MangaSource("LNREADER_ROYALROAD") })
+		assertEquals("MANGADEX_EN", nativeRepo.source.name)
+		assertEquals("MIHON_2499283573021220255", mihonRepo.source.name)
+		assertEquals("LNREADER_ROYALROAD", lnRepo.source.name)
+
+		// 5. Verify deprecated Keiyoushi index.min.json 2-item stub ("Outdated App" & "Update to Mihon 0.20.1+") is rejected
+		val deprecatedStubJson = """
+			[
+			  {
+			    "name": "Tachiyomi: Outdated App",
+			    "pkg": "eu.kanade.tachiyomi.extension.all.keiyoushi",
+			    "apk": "tachiyomi-all.keiyoushi-v1.4.1.apk",
+			    "lang": "all",
+			    "code": 1,
+			    "version": "1.4.1",
+			    "nsfw": 1
+			  },
+			  {
+			    "name": "Tachiyomi: Update to Mihon 0.20.1+",
+			    "pkg": "eu.kanade.tachiyomi.extension.all.mihon",
+			    "apk": "tachiyomi-all.mihon-v1.4.1.apk",
+			    "lang": "all",
+			    "code": 1,
+			    "version": "1.4.1",
+			    "nsfw": 1
+			  }
+			]
+		""".trimIndent()
+		val stubParsed = repoRepository.parseJsonArrayEntries(
+			deprecatedStubJson,
+			"https://raw.githubusercontent.com/keiyoushi/extensions/repo",
+		)
+		assertTrue("Deprecated 2-item Keiyoushi stub must be completely filtered out", stubParsed.isEmpty())
+	}
 }
+
 
 
 

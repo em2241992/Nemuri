@@ -92,7 +92,7 @@ class SmartFeedSyncCoordinator @Inject constructor(
 	/**
 	 * Executes a Smart Cadence Feed Sync across the library:
 	 * - Filters out completed/abandoned, high-unread, and slow-cadence series unless `isManualForceRefresh == true`.
-	 * - Polls MangaDex series in Neko-style chunks of 100 UUIDs per request.
+	 * - Polls MangaDex series in batched chunks of 100 UUIDs per request.
 	 * - Polls non-MangaDex sources with bounded per-host concurrency (`Semaphore(2)` inside `limitedParallelism(6)`).
 	 * - Commits discovered chapters and updates `library_fast_view` in chunked `@Transaction` blocks of 25 manga.
 	 */
@@ -138,7 +138,7 @@ class SmartFeedSyncCoordinator @Inject constructor(
 		val discoveredUpdates = ConcurrentHashMap<Long, List<MangaChapter>>()
 		var mangaDexBatches = 0
 
-		// 2. Neko-Style MangaDex Batch Polling (100 UUIDs per Request)
+		// 2. MangaDex Batch Polling (100 UUIDs per Request)
 		if (mangaDexList.isNotEmpty()) {
 			val chunks = mangaDexList.chunked(100)
 			mangaDexBatches = chunks.size

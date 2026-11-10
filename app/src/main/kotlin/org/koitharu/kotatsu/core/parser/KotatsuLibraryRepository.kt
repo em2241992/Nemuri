@@ -118,8 +118,7 @@ class KotatsuLibraryRepository(
 			if (manga.url.startsWith("https://ext.kotatsuneo.app/")) return true
 			if (manga.url.contains(".ext/")) return true
 			if (manga.url.contains("mihon.backup")) return true
-			if (manga.coverUrl.startsWith("studio_cover://")) return true
-			if (isDebugMockTitle(manga.title)) return true
+			if (manga.coverUrl.startsWith("studio_cover://") && !manga.url.startsWith("cbz://")) return true
 			return false
 		}
 	}
@@ -464,6 +463,22 @@ class KotatsuLibraryRepository(
 		categoryId: Long = 1L,
 		swapExistingMangaId: Long? = null,
 	): Long = withContext(Dispatchers.IO) {
+		val liveFetchedChapters = if (
+			item.url.startsWith("http") &&
+			!item.url.contains("example.org") &&
+			!item.url.contains("nemuri.app/debug")
+		) {
+			runCatching {
+				LiveSourceParsers.fetchChaptersForManga(
+					mangaUrl = item.url,
+					mangaTitle = item.title,
+					sourceId = item.sourceName,
+				)
+			}.getOrDefault(emptyList())
+		} else {
+			emptyList()
+		}
+
 		var resultId = 0L
 		db.withTransaction {
 			if (swapExistingMangaId != null) {
@@ -494,23 +509,44 @@ class KotatsuLibraryRepository(
 						)
 					}
 					db.getMangaDao().upsert(updatedEntity, tags)
-					val totalCh = item.totalChapters.coerceIn(12, 36)
-					val newChList = (1..totalCh).map { n ->
-						ChapterEntity(
-							chapterId = swapExistingMangaId * 1000L + n,
-							mangaId = swapExistingMangaId,
-							title = "Chapter $n",
-							number = n.toFloat(),
-							volume = (n - 1) / 10 + 1,
-							url = "${item.url}/ch-$n",
-							scanlator = item.sourceName.removePrefix("EXT:"),
-							uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
-							branch = null,
-							index = n - 1,
-							isRead = n <= readCount,
-							isDownloaded = n <= 2,
-							lastPageRead = if (n <= readCount) 18 else 0,
-						)
+					val newChList = if (liveFetchedChapters.isNotEmpty()) {
+						liveFetchedChapters.mapIndexed { idx, ch ->
+							val n = idx + 1
+							ChapterEntity(
+								chapterId = swapExistingMangaId * 1000L + n,
+								mangaId = swapExistingMangaId,
+								title = ch.title ?: "Chapter ${ch.number}",
+								number = ch.number,
+								volume = ch.volume,
+								url = ch.url,
+								scanlator = ch.scanlator ?: item.sourceName.removePrefix("EXT:"),
+								uploadDate = ch.uploadDate,
+								branch = ch.branch,
+								index = idx,
+								isRead = n <= readCount,
+								isDownloaded = n <= 2,
+								lastPageRead = if (n <= readCount) 18 else 0,
+							)
+						}
+					} else {
+						val totalCh = item.totalChapters.coerceIn(12, 36)
+						(1..totalCh).map { n ->
+							ChapterEntity(
+								chapterId = swapExistingMangaId * 1000L + n,
+								mangaId = swapExistingMangaId,
+								title = "Chapter $n",
+								number = n.toFloat(),
+								volume = (n - 1) / 10 + 1,
+								url = "${item.url}/ch-$n",
+								scanlator = item.sourceName.removePrefix("EXT:"),
+								uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
+								branch = null,
+								index = n - 1,
+								isRead = n <= readCount,
+								isDownloaded = n <= 2,
+								lastPageRead = if (n <= readCount) 18 else 0,
+							)
+						}
 					}
 					db.getChaptersDao().deleteByMangaId(swapExistingMangaId)
 					db.getChaptersDao().upsertAll(newChList)
@@ -553,31 +589,52 @@ class KotatsuLibraryRepository(
 						createdAt = System.currentTimeMillis(),
 					),
 				)
-				val totalCh = item.totalChapters.coerceIn(10, 30)
-				val chapters = (1..totalCh).map { n ->
-					ChapterEntity(
-						chapterId = newId * 1000L + n,
-						mangaId = newId,
-						title = "Chapter $n",
-						number = n.toFloat(),
-						volume = (n - 1) / 10 + 1,
-						url = "${item.url}/ch-$n",
-						scanlator = item.sourceName.removePrefix("EXT:"),
-						uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
-						branch = null,
-						index = n - 1,
-						isRead = false,
-						isDownloaded = n == 1,
-						lastPageRead = 0,
-					)
+				val chapters = if (liveFetchedChapters.isNotEmpty()) {
+					liveFetchedChapters.mapIndexed { idx, ch ->
+						val n = idx + 1
+						ChapterEntity(
+							chapterId = newId * 1000L + n,
+							mangaId = newId,
+							title = ch.title ?: "Chapter ${ch.number}",
+							number = ch.number,
+							volume = ch.volume,
+							url = ch.url,
+							scanlator = ch.scanlator ?: item.sourceName.removePrefix("EXT:"),
+							uploadDate = ch.uploadDate,
+							branch = ch.branch,
+							index = idx,
+							isRead = false,
+							isDownloaded = n == 1,
+							lastPageRead = 0,
+						)
+					}
+				} else {
+					val totalCh = item.totalChapters.coerceIn(10, 30)
+					(1..totalCh).map { n ->
+						ChapterEntity(
+							chapterId = newId * 1000L + n,
+							mangaId = newId,
+							title = "Chapter $n",
+							number = n.toFloat(),
+							volume = (n - 1) / 10 + 1,
+							url = "${item.url}/ch-$n",
+							scanlator = item.sourceName.removePrefix("EXT:"),
+							uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
+							branch = null,
+							index = n - 1,
+							isRead = false,
+							isDownloaded = n == 1,
+							lastPageRead = 0,
+						)
+					}
 				}
 				db.getChaptersDao().upsertAll(chapters)
 				db.getAuxiliaryDao().upsertTrack(
 					TrackEntity(
 						mangaId = newId,
-						totalChapters = totalCh,
+						totalChapters = chapters.size,
 						lastChapterId = chapters.last().chapterId,
-						newChapters = totalCh,
+						newChapters = chapters.size,
 						lastCheckTime = System.currentTimeMillis(),
 						lastChapterDate = System.currentTimeMillis(),
 					),
@@ -886,39 +943,27 @@ class KotatsuLibraryRepository(
 			)
 			db.getFavouritesDao().upsertCategories(categories)
 
-			db.getAuxiliaryDao().upsertExtensionRepo(
-				ExtensionRepoEntity(
-					repoId = 1L,
-					name = "Keiyoushi / Mihon Official Extension Index",
-					baseUrl = "https://raw.githubusercontent.com/keiyoushi/extensions/repo",
-					repoType = "MIHON_JSON",
-					isEnabled = true,
-					extensionCount = 1488,
-					lastSyncedAt = now,
-				),
-			)
-			db.getAuxiliaryDao().upsertExtensionRepo(
-				ExtensionRepoEntity(
-					repoId = 2L,
-					name = "Kotatsu External ContentProvider IPC Bridge",
-					baseUrl = "content://app.kotatsu.parser.external",
-					repoType = "KOTATSU_PLUGIN",
-					isEnabled = true,
-					extensionCount = 1,
-					lastSyncedAt = now,
-				),
-			)
-			db.getAuxiliaryDao().upsertExtensionRepo(
-				ExtensionRepoEntity(
-					repoId = 3L,
-					name = "Local CBZ / ZIP Archive Indexer",
-					baseUrl = "file:///storage/emulated/0/KotatsuNeo/CBZ",
-					repoType = "LOCAL_CBZ",
-					isEnabled = true,
-					extensionCount = 1,
-					lastSyncedAt = now,
-				),
-			)
+			// Remove legacy dummy repo entries (repoId 2 and 3) if present from older builds
+			val existingRepos = db.getAuxiliaryDao().getExtensionRepos()
+			existingRepos.filter {
+				it.baseUrl.startsWith("content://") || it.baseUrl.startsWith("file://")
+			}.forEach { legacyRepo ->
+				db.getAuxiliaryDao().deleteExtensionRepo(legacyRepo.repoId)
+			}
+
+			if (db.getAuxiliaryDao().getExtensionRepos().isEmpty()) {
+				db.getAuxiliaryDao().upsertExtensionRepo(
+					ExtensionRepoEntity(
+						repoId = 1L,
+						name = "Keiyoushi / Mihon Official Extension Index",
+						baseUrl = "https://raw.githubusercontent.com/keiyoushi/extensions/repo",
+						repoType = "MIHON_JSON",
+						isEnabled = true,
+						extensionCount = 1488,
+						lastSyncedAt = now,
+					),
+				)
+			}
 		}
 	}
 

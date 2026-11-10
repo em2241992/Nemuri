@@ -2112,7 +2112,7 @@ private fun MangaSourcesSettingsSubScreen(
 										color = Color(0xFFF59E0B),
 									)
 									Text(
-										text = "Update directly from Keiyoushi index.min.json & cache via FileProvider",
+										text = "Update directly from Keiyoushi index.pb / index.min.json & cache via FileProvider",
 										style = MaterialTheme.typography.bodySmall,
 										fontSize = 11.sp,
 										color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2127,6 +2127,46 @@ private fun MangaSourcesSettingsSubScreen(
 									Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
 									Spacer(modifier = Modifier.width(6.dp))
 									Text("Update All", fontSize = 12.sp)
+								}
+							}
+						}
+					}
+				}
+
+				if (installedList.isEmpty()) {
+					item {
+						Card(
+							colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+							shape = RoundedCornerShape(16.dp),
+							modifier = Modifier.fillMaxWidth(),
+						) {
+							Column(
+								modifier = Modifier
+									.fillMaxWidth()
+									.padding(20.dp),
+								horizontalAlignment = Alignment.CenterHorizontally,
+								verticalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								Icon(
+									imageVector = Icons.Default.Extension,
+									contentDescription = null,
+									tint = MaterialTheme.colorScheme.primary,
+								)
+								Text(
+									text = "No extensions installed yet",
+									style = MaterialTheme.typography.titleSmall,
+									fontWeight = FontWeight.Bold,
+								)
+								Text(
+									text = "Switch to the Available tab (${availableList.size} extensions indexed) to download and install Mihon or LNReader source extensions.",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+								Button(
+									onClick = { selectedTab = ExtensionManagerTab.AVAILABLE },
+									modifier = Modifier.testTag("installed_empty_browse_available_button"),
+								) {
+									Text("Browse Available (${availableList.size})")
 								}
 							}
 						}
@@ -2190,13 +2230,14 @@ private fun MangaSourcesSettingsSubScreen(
 			}
 
 			ExtensionManagerTab.MIGRATE -> {
-				val targetSources = listOf(
-					"Kotatsu Native",
-					"MangaDex (EN)",
-					"Bato.to Mirror",
-					"ComicK Mirror",
-					"Asura Scans",
-				)
+				val targetSources = installedList.map {
+					it.name
+						.removePrefix("EXT:")
+						.removePrefix("Tachiyomi: ")
+						.removePrefix("Mihon: ")
+						.substringBefore(" (Mihon")
+						.trim()
+				}.distinct().ifEmpty { listOf("MangaDex (EN)") }
 				item {
 					Card(
 						colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -2417,6 +2458,7 @@ private fun MangaSourcesSettingsSubScreen(
 						) {
 							Column(modifier = Modifier.weight(1f)) {
 								Row(
+									modifier = Modifier.fillMaxWidth(),
 									verticalAlignment = Alignment.CenterVertically,
 									horizontalArrangement = Arrangement.spacedBy(8.dp),
 								) {
@@ -2424,6 +2466,9 @@ private fun MangaSourcesSettingsSubScreen(
 										text = repo.name,
 										style = MaterialTheme.typography.titleSmall,
 										fontWeight = FontWeight.Bold,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+										modifier = Modifier.weight(1f, fill = false),
 									)
 									Surface(
 										color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
@@ -2433,6 +2478,8 @@ private fun MangaSourcesSettingsSubScreen(
 											text = repo.repoType,
 											fontFamily = JetBrainsMonoFamily,
 											fontSize = 9.sp,
+											maxLines = 1,
+											softWrap = false,
 											color = MaterialTheme.colorScheme.primary,
 											modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
 										)
@@ -2447,7 +2494,7 @@ private fun MangaSourcesSettingsSubScreen(
 									overflow = TextOverflow.Ellipsis,
 								)
 								Text(
-									text = "${repo.extensionCount} extensions indexed",
+									text = "${maxOf(repo.extensionCount, discoveredExtensions.size)} extensions indexed",
 									style = MaterialTheme.typography.labelSmall,
 									color = Color(0xFF10B981),
 								)
@@ -2482,7 +2529,14 @@ private fun KotatsuExtensionItemCard(
 	onShareFileProvider: () -> Unit,
 	onLaunchApkPackageInstaller: () -> Unit = {},
 ) {
-	val cleanName = ext.name.removePrefix("EXT:")
+	val cleanName = remember(ext.name) {
+		ext.name
+			.removePrefix("EXT:")
+			.removePrefix("Tachiyomi: ")
+			.removePrefix("Mihon: ")
+			.substringBefore(" (Mihon")
+			.trim()
+	}
 	val isCoreSeeded = ext.pkgName in setOf(
 		"eu.kanade.tachiyomi.extension.all.mangadex",
 		"eu.kanade.tachiyomi.extension.en.mangadex",
@@ -2539,7 +2593,10 @@ private fun KotatsuExtensionItemCard(
 						)
 					}
 
-					Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+					Column(
+						modifier = Modifier.weight(1f),
+						verticalArrangement = Arrangement.spacedBy(2.dp),
+					) {
 						Row(
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2550,6 +2607,7 @@ private fun KotatsuExtensionItemCard(
 								fontWeight = FontWeight.Bold,
 								maxLines = 1,
 								overflow = TextOverflow.Ellipsis,
+								modifier = Modifier.weight(1f, fill = false),
 							)
 							Surface(
 								color = MaterialTheme.colorScheme.secondaryContainer,
@@ -2560,6 +2618,8 @@ private fun KotatsuExtensionItemCard(
 									fontFamily = JetBrainsMonoFamily,
 									fontSize = 9.sp,
 									fontWeight = FontWeight.Bold,
+									maxLines = 1,
+									softWrap = false,
 									color = MaterialTheme.colorScheme.onSecondaryContainer,
 									modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
 								)
@@ -2574,6 +2634,8 @@ private fun KotatsuExtensionItemCard(
 										fontFamily = JetBrainsMonoFamily,
 										fontSize = 9.sp,
 										fontWeight = FontWeight.Bold,
+										maxLines = 1,
+										softWrap = false,
 										color = MaterialTheme.colorScheme.onErrorContainer,
 										modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
 									)

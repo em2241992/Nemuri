@@ -32,7 +32,7 @@ class MigrationNemuriFastLibrary(
 		)
 		db.execSQL("CREATE INDEX IF NOT EXISTS index_manga_aliases_manga_id ON manga_aliases(manga_id)")
 
-		// 3. Neko-style Sidecar Merge Links table
+		// 3. Sidecar Merge Links table
 		db.execSQL(
 			"""
 			CREATE TABLE IF NOT EXISTS manga_merge_links (

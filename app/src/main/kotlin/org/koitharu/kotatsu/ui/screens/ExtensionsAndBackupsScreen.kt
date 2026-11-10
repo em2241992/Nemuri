@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Extension
@@ -182,6 +183,8 @@ fun ExploreScreen(
 	isAiActive: Boolean = true,
 	onInstallOrUpdateExtension: (ExternalExtensionInfo) -> Unit = {},
 	onUninstallExtension: (ExternalExtensionInfo) -> Unit = {},
+	onSyncAllRepositories: () -> Unit = {},
+	onQuerySourceCatalog: (String, String) -> Unit = { _, _ -> },
 	debugSandboxEnabled: Boolean = false,
 	extensionInstallTasks: Map<String, ExtensionInstallTask> = emptyMap(),
 	modifier: Modifier = Modifier,
@@ -195,6 +198,13 @@ fun ExploreScreen(
 	var showAddRepoDialog by remember { mutableStateOf(false) }
 	var pinnedSourceIds by rememberSaveable { mutableStateOf(setOf("mangadex", "comick")) }
 	var activeSourceCategoryFilter by rememberSaveable { mutableStateOf(SourceCategoryFilter.ALL) }
+
+	androidx.compose.runtime.LaunchedEffect(currentSubView, selectedSourceKey, catalogSearchQuery) {
+		if (currentSubView == ExploreSubView.SOURCE_BROWSE || (currentSubView == ExploreSubView.HOME && catalogSearchQuery.length >= 2)) {
+			kotlinx.coroutines.delay(if (catalogSearchQuery.isNotBlank()) 250L else 0L)
+			onQuerySourceCatalog(selectedSourceKey ?: "MangaDex", catalogSearchQuery)
+		}
+	}
 
 	if (currentSubView != ExploreSubView.HOME || catalogSearchQuery.isNotBlank()) {
 		BackHandler {
@@ -216,81 +226,57 @@ fun ExploreScreen(
 		}
 	}
 
-	val baseSourceTiles = remember {
-		listOf(
-			KotatsuSourceTileModel(
-				id = "mangadex",
-				displayName = "MangaDex",
-				sourceMatchKey = "MangaDex",
-				subtitle = "Kotatsu Native • Simulpub",
-				tileType = SourceTileVisual.MANGADEX_CAT,
-				isNativeKotatsu = true,
-			),
-			KotatsuSourceTileModel(
-				id = "comick",
-				displayName = "ComicK",
-				sourceMatchKey = "ComicK",
-				subtitle = "Kotatsu Native • HD",
-				tileType = SourceTileVisual.COMICK_BADGE,
-				isNativeKotatsu = true,
-			),
-			KotatsuSourceTileModel(
-				id = "batoto",
-				displayName = "Bato.to",
-				sourceMatchKey = "Bato.to",
-				subtitle = "Kotatsu Native • Scans",
-				tileType = SourceTileVisual.BATOTO_BADGE,
-				isNativeKotatsu = true,
-			),
-			KotatsuSourceTileModel(
-				id = "aquamanga",
-				displayName = "Aqua Manga",
-				sourceMatchKey = "Aqua Manga",
-				subtitle = "Mihon EN • Webtoon",
-				tileType = SourceTileVisual.AQUA_MANGA_A,
-				isNativeKotatsu = false,
-			),
-			KotatsuSourceTileModel(
-				id = "weebcentral",
-				displayName = "WeebCentral",
-				sourceMatchKey = "WeebCentral",
-				subtitle = "Kotatsu Native • EN",
-				tileType = SourceTileVisual.MONOGRAM_BADGE,
-				isNativeKotatsu = true,
-				monogramText = "WC",
-				brandColor = Color(0xFF5CE1E6),
-			),
-			KotatsuSourceTileModel(
-				id = "asurascans",
-				displayName = "Asura Scans",
-				sourceMatchKey = "Asura Scans",
-				subtitle = "Mihon EN • Action",
-				tileType = SourceTileVisual.MONOGRAM_BADGE,
-				isNativeKotatsu = false,
-				monogramText = "AS",
-				brandColor = Color(0xFFA855F7),
-			),
-			KotatsuSourceTileModel(
-				id = "flamecomics",
-				displayName = "Flame Comics",
-				sourceMatchKey = "Flame Comics",
-				subtitle = "Mihon EN • Fantasy",
-				tileType = SourceTileVisual.MONOGRAM_BADGE,
-				isNativeKotatsu = false,
-				monogramText = "FC",
-				brandColor = Color(0xFFF97316),
-			),
-			KotatsuSourceTileModel(
-				id = "shonenjumpplus",
-				displayName = "Shonen Jump+",
-				sourceMatchKey = "Shonen Jump+",
-				subtitle = "Kotatsu Native • Simulpub",
-				tileType = SourceTileVisual.MONOGRAM_BADGE,
-				isNativeKotatsu = true,
-				monogramText = "SJ",
-				brandColor = Color(0xFFEF4444),
-			),
-		)
+	val baseSourceTiles = remember(debugSandboxEnabled) {
+		if (!debugSandboxEnabled) {
+			emptyList()
+		} else {
+			listOf(
+				KotatsuSourceTileModel(
+					id = "mangadex",
+					displayName = "MangaDex",
+					sourceMatchKey = "MangaDex",
+					subtitle = "Kotatsu Native • Simulpub",
+					tileType = SourceTileVisual.MANGADEX_CAT,
+					isNativeKotatsu = true,
+				),
+				KotatsuSourceTileModel(
+					id = "comick",
+					displayName = "ComicK",
+					sourceMatchKey = "ComicK",
+					subtitle = "Kotatsu Native • HD",
+					tileType = SourceTileVisual.COMICK_BADGE,
+					isNativeKotatsu = true,
+				),
+				KotatsuSourceTileModel(
+					id = "batoto",
+					displayName = "Bato.to",
+					sourceMatchKey = "Bato.to",
+					subtitle = "Kotatsu Native • Scans",
+					tileType = SourceTileVisual.BATOTO_BADGE,
+					isNativeKotatsu = true,
+				),
+				KotatsuSourceTileModel(
+					id = "weebcentral",
+					displayName = "WeebCentral",
+					sourceMatchKey = "WeebCentral",
+					subtitle = "Kotatsu Native • EN",
+					tileType = SourceTileVisual.MONOGRAM_BADGE,
+					isNativeKotatsu = true,
+					monogramText = "WC",
+					brandColor = Color(0xFF5CE1E6),
+				),
+				KotatsuSourceTileModel(
+					id = "shonenjumpplus",
+					displayName = "Shonen Jump+",
+					sourceMatchKey = "Shonen Jump+",
+					subtitle = "Kotatsu Native • Simulpub",
+					tileType = SourceTileVisual.MONOGRAM_BADGE,
+					isNativeKotatsu = true,
+					monogramText = "SJ",
+					brandColor = Color(0xFFEF4444),
+				),
+			)
+		}
 	}
 
 	val lanServers = org.koitharu.kotatsu.ui.components.LanMediaServerStore.servers
@@ -333,6 +319,7 @@ fun ExploreScreen(
 			}
 			.map { ext ->
 				val cleanName = org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(ext.name)
+				val isAqua = cleanName.contains("Aqua Manga", ignoreCase = true)
 				val words = cleanName.split(" ").filter { it.isNotBlank() }
 				val monogram = if (words.size >= 2) {
 					"${words[0].first().uppercaseChar()}${words[1].first().uppercaseChar()}"
@@ -340,14 +327,18 @@ fun ExploreScreen(
 					cleanName.take(2).uppercase()
 				}
 				KotatsuSourceTileModel(
-					id = ext.id,
+					id = if (isAqua) "aquamanga" else ext.id,
 					displayName = cleanName,
 					sourceMatchKey = cleanName,
 					subtitle = "Mihon ${ext.lang.uppercase()} • v${ext.versionName}",
-					tileType = SourceTileVisual.MONOGRAM_BADGE,
+					tileType = if (isAqua) SourceTileVisual.AQUA_MANGA_A else SourceTileVisual.MONOGRAM_BADGE,
 					isNativeKotatsu = false,
 					monogramText = monogram,
-					brandColor = Color(0xFFC084FC),
+					brandColor = when {
+						cleanName.contains("Asura", ignoreCase = true) -> Color(0xFFA855F7)
+						cleanName.contains("Flame", ignoreCase = true) -> Color(0xFFF97316)
+						else -> Color(0xFFC084FC)
+					},
 				)
 			}
 		(baseSourceTiles + lanTiles + extraInstalledTiles).sortedByDescending { it.id in pinnedSourceIds }
@@ -373,8 +364,11 @@ fun ExploreScreen(
 				item.title.contains(catalogSearchQuery, ignoreCase = true) ||
 				item.altTitle?.contains(catalogSearchQuery, ignoreCase = true) == true ||
 				item.author.contains(catalogSearchQuery, ignoreCase = true)
+			val cleanItemSource = org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(item.sourceName)
 			val matchesSrc = selectedSourceKey == null ||
-				item.sourceName.contains(selectedSourceKey!!, ignoreCase = true)
+				item.sourceName.contains(selectedSourceKey!!, ignoreCase = true) ||
+				cleanItemSource.contains(selectedSourceKey!!, ignoreCase = true) ||
+				selectedSourceKey!!.contains(cleanItemSource, ignoreCase = true)
 			val matchesGenre = selectedGenre == null || selectedGenre in item.tags
 			matchesQuery && matchesSrc && matchesGenre
 		}
@@ -651,29 +645,95 @@ fun ExploreScreen(
 
 					// Deduplicated Square Rounded Source Tiles Grid with KT / EXT Engine Badges & Pin/Star toggle
 					item {
-						FlowRow(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(18.dp),
-							verticalArrangement = Arrangement.spacedBy(18.dp),
-						) {
-							displayedSourceTiles.forEach { tile ->
-								val isPinned = tile.id in pinnedSourceIds
-								KotatsuMangaSourceTile(
-									tile = tile,
-									isPinned = isPinned,
-									onTogglePin = {
-										pinnedSourceIds = if (isPinned) {
-											pinnedSourceIds - tile.id
-										} else {
-											pinnedSourceIds + tile.id
+						if (displayedSourceTiles.isEmpty()) {
+							Card(
+								colors = CardDefaults.cardColors(
+									containerColor = MaterialTheme.colorScheme.surface,
+								),
+								shape = RoundedCornerShape(16.dp),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Column(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(18.dp),
+									verticalArrangement = Arrangement.spacedBy(10.dp),
+								) {
+									Row(
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(8.dp),
+									) {
+										Icon(
+											imageVector = Icons.Default.Extension,
+											contentDescription = null,
+											tint = MaterialTheme.colorScheme.primary,
+										)
+										Text(
+											text = "No manga sources installed yet",
+											style = MaterialTheme.typography.titleSmall,
+											fontWeight = FontWeight.Bold,
+										)
+									}
+									Text(
+										text = "Sources are loaded dynamically from your configured extension repositories (${discoveredExtensions.size} extensions indexed). Open the Extension Catalog to install sources.",
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+									FlowRow(
+										horizontalArrangement = Arrangement.spacedBy(8.dp),
+										verticalArrangement = Arrangement.spacedBy(8.dp),
+									) {
+										Button(
+											onClick = { currentSubView = ExploreSubView.CATALOG_AND_REPOS },
+											modifier = Modifier.testTag("explore_empty_open_catalog_button"),
+										) {
+											Icon(
+												imageVector = Icons.Default.Extension,
+												contentDescription = null,
+												modifier = Modifier.size(16.dp),
+											)
+											Spacer(modifier = Modifier.width(6.dp))
+											Text("Browse Extension Catalog (${discoveredExtensions.size})")
 										}
-									},
-									onClick = {
-										selectedSourceKey = tile.sourceMatchKey
-										selectedSourceDisplayName = tile.displayName
-										currentSubView = ExploreSubView.SOURCE_BROWSE
-									},
-								)
+										FilledTonalButton(
+											onClick = onSyncAllRepositories,
+										) {
+											Icon(
+												imageVector = Icons.Default.Refresh,
+												contentDescription = null,
+												modifier = Modifier.size(16.dp),
+											)
+											Spacer(modifier = Modifier.width(6.dp))
+											Text("Sync Repos")
+										}
+									}
+								}
+							}
+						} else {
+							FlowRow(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(18.dp),
+								verticalArrangement = Arrangement.spacedBy(18.dp),
+							) {
+								displayedSourceTiles.forEach { tile ->
+									val isPinned = tile.id in pinnedSourceIds
+									KotatsuMangaSourceTile(
+										tile = tile,
+										isPinned = isPinned,
+										onTogglePin = {
+											pinnedSourceIds = if (isPinned) {
+												pinnedSourceIds - tile.id
+											} else {
+												pinnedSourceIds + tile.id
+											}
+										},
+										onClick = {
+											selectedSourceKey = tile.sourceMatchKey
+											selectedSourceDisplayName = tile.displayName
+											currentSubView = ExploreSubView.SOURCE_BROWSE
+										},
+									)
+								}
 							}
 						}
 					}
@@ -754,9 +814,11 @@ fun ExploreScreen(
 						}
 						sourceTiles.forEach { srcTile ->
 							val matchesForSource = filteredCatalog.filter {
-								it.sourceName.contains(srcTile.sourceMatchKey, ignoreCase = true)
-							}.ifEmpty {
-								filteredCatalog.take(3)
+								val cleanItemSource = org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(it.sourceName)
+								it.sourceName.contains(srcTile.sourceMatchKey, ignoreCase = true) ||
+									cleanItemSource.contains(srcTile.sourceMatchKey, ignoreCase = true)
+							}.let { realMatches ->
+								if (realMatches.isEmpty() && debugSandboxEnabled) filteredCatalog.take(3) else realMatches
 							}
 							if (matchesForSource.isNotEmpty()) {
 								item(key = "multisrc_${srcTile.id}") {
@@ -838,6 +900,57 @@ fun ExploreScreen(
 												}
 											}
 										}
+									}
+								}
+							}
+						}
+					}
+
+					if (filteredCatalog.isEmpty()) {
+						item {
+							Card(
+								colors = CardDefaults.cardColors(
+									containerColor = MaterialTheme.colorScheme.surface,
+								),
+								shape = RoundedCornerShape(14.dp),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Column(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(20.dp),
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(8.dp),
+								) {
+									Text(
+										text = if (selectedSourceKey != null) {
+											"Fetching live catalog from $selectedSourceDisplayName..."
+										} else {
+											"No catalog entries match the active filters"
+										},
+										style = MaterialTheme.typography.titleSmall,
+										fontWeight = FontWeight.Bold,
+									)
+									Text(
+										text = "Tap Refresh below to query ${selectedSourceDisplayName ?: "all active parsers"} directly.",
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+									FilledTonalButton(
+										onClick = {
+											onQuerySourceCatalog(
+												selectedSourceKey ?: "MangaDex",
+												catalogSearchQuery,
+											)
+										},
+									) {
+										Icon(
+											imageVector = Icons.Default.Refresh,
+											contentDescription = null,
+											modifier = Modifier.size(16.dp),
+										)
+										Spacer(modifier = Modifier.width(6.dp))
+										Text("Refresh Source Catalog")
 									}
 								}
 							}
@@ -1095,11 +1208,15 @@ fun ExploreScreen(
 									)
 								}
 								Text(
-									text = "Zero built-in scrapers are bundled by default. Sources are loaded dynamically from user-configured Mihon index.min.json repositories, Kotatsu ContentProvider plugins (app.kotatsu.parser.PROVIDE_MANGA), and local CBZ/ZIP archives.",
+									text = "Zero built-in scrapers are bundled by default. Sources are loaded dynamically from user-configured Mihon repo.json / index.pb (Protobuf) & index.min.json repositories, LNReader plugins, and local CBZ/ZIP archives.",
 									style = MaterialTheme.typography.bodySmall,
 									color = MaterialTheme.colorScheme.onSurfaceVariant,
 								)
-								Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+								FlowRow(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(8.dp),
+									verticalArrangement = Arrangement.spacedBy(8.dp),
+								) {
 									Button(
 										onClick = { showAddRepoDialog = true },
 										modifier = Modifier.testTag("add_extension_repo_button"),
@@ -1113,10 +1230,22 @@ fun ExploreScreen(
 										Text("Add Repo URL")
 									}
 									FilledTonalButton(
+										onClick = onSyncAllRepositories,
+										modifier = Modifier.testTag("explore_sync_repos_button"),
+									) {
+										Icon(
+											imageVector = Icons.Default.Refresh,
+											contentDescription = null,
+											modifier = Modifier.size(16.dp),
+										)
+										Spacer(modifier = Modifier.width(4.dp))
+										Text("Sync Repos")
+									}
+									FilledTonalButton(
 										onClick = { currentSubView = ExploreSubView.SOURCE_BROWSE },
 										modifier = Modifier.testTag("explore_subtab_browse"),
 									) {
-										Text("Browse All Series (${extensionCatalog.size})")
+										Text("Browse (${extensionCatalog.size})")
 									}
 								}
 							}
@@ -1132,6 +1261,10 @@ fun ExploreScreen(
 					}
 
 					items(repos, key = { it.repoId }) { repo ->
+						val indexedForRepo = maxOf(
+							repo.extensionCount,
+							discoveredExtensions.size,
+						)
 						Card(
 							colors = CardDefaults.cardColors(
 								containerColor = MaterialTheme.colorScheme.surface,
@@ -1145,8 +1278,12 @@ fun ExploreScreen(
 								horizontalArrangement = Arrangement.SpaceBetween,
 								verticalAlignment = Alignment.CenterVertically,
 							) {
-								Column(modifier = Modifier.weight(1f)) {
+								Column(
+									modifier = Modifier.weight(1f),
+									verticalArrangement = Arrangement.spacedBy(2.dp),
+								) {
 									Row(
+										modifier = Modifier.fillMaxWidth(),
 										verticalAlignment = Alignment.CenterVertically,
 										horizontalArrangement = Arrangement.spacedBy(8.dp),
 									) {
@@ -1154,6 +1291,9 @@ fun ExploreScreen(
 											text = repo.name,
 											style = MaterialTheme.typography.titleSmall,
 											fontWeight = FontWeight.Bold,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
+											modifier = Modifier.weight(1f, fill = false),
 										)
 										Surface(
 											color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
@@ -1163,6 +1303,8 @@ fun ExploreScreen(
 												text = repo.repoType,
 												fontFamily = JetBrainsMonoFamily,
 												fontSize = 9.sp,
+												maxLines = 1,
+												softWrap = false,
 												color = MaterialTheme.colorScheme.primary,
 												modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
 											)
@@ -1177,7 +1319,7 @@ fun ExploreScreen(
 										overflow = TextOverflow.Ellipsis,
 									)
 									Text(
-										text = "${repo.extensionCount} extensions indexed",
+										text = "$indexedForRepo extensions indexed",
 										style = MaterialTheme.typography.labelSmall,
 										color = Color(0xFF10B981),
 									)
@@ -1196,26 +1338,81 @@ fun ExploreScreen(
 						}
 					}
 
+					val filteredDiscoveredExtensions = if (catalogSearchQuery.isBlank()) {
+						discoveredExtensions
+					} else {
+						val q = catalogSearchQuery.trim()
+						discoveredExtensions.filter { ext ->
+							ext.name.contains(q, ignoreCase = true) ||
+								ext.pkgName.contains(q, ignoreCase = true) ||
+								ext.lang.contains(q, ignoreCase = true) ||
+								ext.repoName.contains(q, ignoreCase = true)
+						}
+					}
+
 					item {
 						Text(
-							text = "DISCOVERED EXTERNAL EXTENSIONS (${discoveredExtensions.size})",
+							text = "DISCOVERED EXTERNAL EXTENSIONS (${filteredDiscoveredExtensions.size} OF ${discoveredExtensions.size})",
 							style = MaterialTheme.typography.labelSmall,
 							color = MaterialTheme.colorScheme.primary,
 						)
 					}
 
-					items(discoveredExtensions, key = { it.id }) { ext ->
+					if (discoveredExtensions.isEmpty()) {
+						item {
+							Card(
+								colors = CardDefaults.cardColors(
+									containerColor = MaterialTheme.colorScheme.surface,
+								),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Column(
+									modifier = Modifier
+										.fillMaxWidth()
+										.padding(20.dp),
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(8.dp),
+								) {
+									Text(
+										text = "No extension index cached yet",
+										style = MaterialTheme.typography.titleSmall,
+										fontWeight = FontWeight.Bold,
+									)
+									Text(
+										text = "Tap Sync Repos to fetch the latest Mihon index.min.json catalog from your configured repositories.",
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+									)
+									FilledTonalButton(onClick = onSyncAllRepositories) {
+										Icon(
+											imageVector = Icons.Default.Refresh,
+											contentDescription = null,
+											modifier = Modifier.size(16.dp),
+										)
+										Spacer(modifier = Modifier.width(6.dp))
+										Text("Sync Repositories Now")
+									}
+								}
+							}
+						}
+					}
+
+					items(filteredDiscoveredExtensions.take(150), key = { it.pkgName }) { ext ->
 						val task = extensionInstallTasks[ext.pkgName]
 						val isDownloading = task?.status == ExtensionInstallStatus.DOWNLOADING || task?.status == ExtensionInstallStatus.VERIFYING
 						val isInstalled = ext.isInstalled || task?.status == ExtensionInstallStatus.INSTALLED
 						val isCoreSeeded = ext.pkgName in setOf(
-							"eu.kanade.tachiyomi.extension.all.mangadex",
-							"eu.kanade.tachiyomi.extension.en.aquamanga",
-							"eu.kanade.tachiyomi.extension.all.comick",
-							"eu.kanade.tachiyomi.extension.all.batoto",
 							"org.koitharu.kotatsu.local.cbz",
 							"org.koitharu.kotatsu.extension.bridge",
 						)
+						val displayExtName = remember(ext.name) {
+							ext.name
+								.removePrefix("EXT:")
+								.removePrefix("Tachiyomi: ")
+								.removePrefix("Mihon: ")
+								.substringBefore(" (Mihon")
+								.trim()
+						}
 						Card(
 							colors = CardDefaults.cardColors(
 								containerColor = MaterialTheme.colorScheme.surface,
@@ -1239,23 +1436,48 @@ fun ExploreScreen(
 										contentDescription = null,
 										tint = MaterialTheme.colorScheme.primary,
 									)
-									Column {
+									Column(modifier = Modifier.weight(1f)) {
+										Row(
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.spacedBy(6.dp),
+										) {
+											Text(
+												text = displayExtName,
+												style = MaterialTheme.typography.titleSmall,
+												fontWeight = FontWeight.Bold,
+												maxLines = 1,
+												overflow = TextOverflow.Ellipsis,
+												modifier = Modifier.weight(1f, fill = false),
+											)
+											Surface(
+												color = MaterialTheme.colorScheme.secondaryContainer,
+												shape = RoundedCornerShape(4.dp),
+											) {
+												Text(
+													text = ext.lang.uppercase(),
+													fontFamily = JetBrainsMonoFamily,
+													fontSize = 9.sp,
+													fontWeight = FontWeight.Bold,
+													color = MaterialTheme.colorScheme.onSecondaryContainer,
+													modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+												)
+											}
+										}
 										Text(
-											text = ext.name,
-											style = MaterialTheme.typography.titleSmall,
-											fontWeight = FontWeight.Bold,
-										)
-										Text(
-											text = "${ext.pkgName} • v${ext.versionName} • ${ext.lang}",
+											text = "${ext.pkgName} • v${ext.versionName}",
 											fontFamily = JetBrainsMonoFamily,
 											fontSize = 10.sp,
 											color = MaterialTheme.colorScheme.onSurfaceVariant,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
 										)
 										Text(
 											text = "Mihon ID: ${ext.mihonSourceId} • ${ext.extensionType}",
 											fontFamily = JetBrainsMonoFamily,
 											fontSize = 10.sp,
 											color = MaterialTheme.colorScheme.secondary,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
 										)
 									}
 								}
@@ -1325,6 +1547,27 @@ fun ExploreScreen(
 											verticalAlignment = Alignment.CenterVertically,
 											horizontalArrangement = Arrangement.spacedBy(4.dp),
 										) {
+											val cleanExtName = org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(ext.name)
+											Surface(
+												color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+												shape = RoundedCornerShape(6.dp),
+												modifier = Modifier
+													.clickable {
+														selectedSourceKey = cleanExtName
+														selectedSourceDisplayName = cleanExtName
+														currentSubView = ExploreSubView.SOURCE_BROWSE
+													}
+													.testTag("explore_browse_ext_${ext.id}"),
+											) {
+												Text(
+													text = "Browse",
+													fontFamily = JetBrainsMonoFamily,
+													fontWeight = FontWeight.Bold,
+													fontSize = 10.sp,
+													color = MaterialTheme.colorScheme.primary,
+													modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+												)
+											}
 											Surface(
 												color = Color(0xFF10B981).copy(alpha = 0.16f),
 												shape = RoundedCornerShape(6.dp),

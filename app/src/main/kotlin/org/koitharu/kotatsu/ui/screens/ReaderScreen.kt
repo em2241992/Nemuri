@@ -141,13 +141,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.core.model.AiUpscaleMode
 import org.koitharu.kotatsu.core.model.LibraryMangaItem
-import org.koitharu.kotatsu.core.model.NekoBackgroundColorMode
-import org.koitharu.kotatsu.core.model.NekoRotationMode
-import org.koitharu.kotatsu.core.model.NekoWideSpreadMode
+import org.koitharu.kotatsu.core.model.ReaderBackgroundColorMode
 import org.koitharu.kotatsu.core.model.ReaderColorFilterPreset
 import org.koitharu.kotatsu.core.model.ReaderCustomizationConfig
+import org.koitharu.kotatsu.core.model.ReaderRotationMode
 import org.koitharu.kotatsu.core.model.ReaderScaleMode
 import org.koitharu.kotatsu.core.model.ReaderStyleMode
+import org.koitharu.kotatsu.core.model.ReaderWideSpreadMode
 import org.koitharu.kotatsu.core.model.SliderPosition
 import org.koitharu.kotatsu.core.model.VerticalSpacingMode
 import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
@@ -160,13 +160,13 @@ import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-private enum class NekoBottomSheetTab(val title: String) {
+private enum class ReaderBottomSheetTab(val title: String) {
 	CHAPTERS("Chapters"),
 	AI_TOOLS("AI & Tools"),
 	SETTINGS("Settings"),
 }
 
-private enum class NekoSettingsSubTab(val title: String) {
+private enum class ReaderSettingsSubTab(val title: String) {
 	GENERAL("General"),
 	PAGED("Paged"),
 	FILTER("Filter"),
@@ -196,8 +196,8 @@ fun ReaderScreen(
 
 	// Start in clean Fullscreen Reading State (isHudVisible == false) or collapse on page turn / scroll
 	var isHudVisible by remember { mutableStateOf(false) }
-	var expandedSheetTab by remember { mutableStateOf<NekoBottomSheetTab?>(null) }
-	var settingsSubTab by remember { mutableStateOf(NekoSettingsSubTab.GENERAL) }
+	var expandedSheetTab by remember { mutableStateOf<ReaderBottomSheetTab?>(null) }
+	var settingsSubTab by remember { mutableStateOf(ReaderSettingsSubTab.GENERAL) }
 	var showAiUpscalePreviewModal by remember { mutableStateOf(false) }
 	var showReadingMoreSheet by remember { mutableStateOf(false) }
 	var activeReadingMoreTab by remember { mutableStateOf(ReaderOptionsSheetTab.READING) }
@@ -405,17 +405,25 @@ fun ReaderScreen(
 	val isVerticalPager = readerConfig.readingMode == ReaderStyleMode.PAGER_VERTICAL
 	val isWebtoon = readerConfig.readingMode == ReaderStyleMode.WEBTOON_CONTINUOUS
 
+	val activeChapterUrl = remember(mangaItem.chapters, chapterIndex) {
+		mangaItem.chapters.getOrNull(chapterIndex.coerceIn(0, (mangaItem.chapters.size - 1).coerceAtLeast(0)))?.url
+	}
+
 	val decodedPageBitmap by produceState<Bitmap?>(
 		initialValue = null,
 		mangaItem.manga.url,
+		activeChapterUrl,
 		chapterIndex,
 		pageIndex,
 		readerConfig.wideSpreadMode,
 		isRtl,
 	) {
 		value = withContext(Dispatchers.IO) {
-			decodeLocalMangaPageBitmap(
+			decodeLocalOrOnlineMangaPageBitmap(
 				mangaUrl = mangaItem.manga.url,
+				mangaTitle = cleanMangaTitle,
+				chapterUrl = activeChapterUrl,
+				chapterIndex = chapterIndex,
 				pageIndex = pageIndex,
 				wideSpreadMode = readerConfig.wideSpreadMode,
 				isRtl = isRtl,
@@ -464,11 +472,11 @@ fun ReaderScreen(
 
 	val baseBackgroundColor by animateColorAsState(
 		targetValue = when (readerConfig.backgroundColorMode) {
-			NekoBackgroundColorMode.WHITE -> Color(0xFFF6F7F9)
-			NekoBackgroundColorMode.BLACK -> Color(0xFF040507)
-			NekoBackgroundColorMode.SMART_BY_PAGE -> Color(0xFF090B10)
-			NekoBackgroundColorMode.SMART_BY_THEME -> MaterialTheme.colorScheme.background
-			NekoBackgroundColorMode.SMART_BY_THEME_BLACK -> Color(0xFF000000)
+			ReaderBackgroundColorMode.WHITE -> Color(0xFFF6F7F9)
+			ReaderBackgroundColorMode.BLACK -> Color(0xFF040507)
+			ReaderBackgroundColorMode.SMART_BY_PAGE -> Color(0xFF090B10)
+			ReaderBackgroundColorMode.SMART_BY_THEME -> MaterialTheme.colorScheme.background
+			ReaderBackgroundColorMode.SMART_BY_THEME_BLACK -> Color(0xFF000000)
 		},
 		animationSpec = tween(260),
 		label = "readerBgColor",
@@ -485,7 +493,7 @@ fun ReaderScreen(
 		val screenHeightDp = maxHeight
 
 		// Smart (by page) radial vignette ambient glow extracted from bitmap edge + series palette
-		if (readerConfig.backgroundColorMode == NekoBackgroundColorMode.SMART_BY_PAGE) {
+		if (readerConfig.backgroundColorMode == ReaderBackgroundColorMode.SMART_BY_PAGE) {
 			Canvas(modifier = Modifier.fillMaxSize()) {
 				drawRect(
 					brush = Brush.radialGradient(
@@ -499,7 +507,7 @@ fun ReaderScreen(
 					)
 				)
 			}
-		} else if (readerConfig.backgroundColorMode == NekoBackgroundColorMode.SMART_BY_THEME_BLACK) {
+		} else if (readerConfig.backgroundColorMode == ReaderBackgroundColorMode.SMART_BY_THEME_BLACK) {
 			val accentGlow = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
 			Canvas(modifier = Modifier.fillMaxSize()) {
 				drawRect(
@@ -839,7 +847,7 @@ fun ReaderScreen(
 				pageCount = { totalPages },
 			)
 
-			// Sync external pageIndex (e.g. Neko Scrubber drag) with Pager
+			// Sync external pageIndex (e.g. Scrubber drag) with Pager
 			LaunchedEffect(pageIndex) {
 				if (pagerState.currentPage != pageIndex && !pagerState.isScrollInProgress) {
 					pagerState.scrollToPage(pageIndex.coerceIn(0, totalPages - 1))
@@ -1049,7 +1057,7 @@ fun ReaderScreen(
 		}
 
 		// =========================================================================
-		// 2. MOVABLE NEKO-STYLE PAGE SCRUBBER (Left | Horizontal | Right)
+		// 2. MOVABLE PAGE SCRUBBER (Left | Horizontal | Right)
 		// Visible only when isHudVisible == true && !isBottomSheetExpanded
 		// =========================================================================
 		val anyModalOrDrawerOpen = expandedSheetTab != null ||
@@ -1078,7 +1086,7 @@ fun ReaderScreen(
 						bottom = if (readerConfig.showZoomButtons && readerConfig.sliderPosition == SliderPosition.RIGHT_ALIGN) 88.dp else 0.dp,
 					),
 			) {
-				NekoVerticalPageScrubber(
+				ReaderVerticalPageScrubber(
 					currentPage = pageIndex + 1,
 					totalPages = totalPages,
 					canGoPrevChapter = chapterIndex > 0,
@@ -1111,7 +1119,7 @@ fun ReaderScreen(
 		// =========================================================================
 		// TASK 5.1: TOGGLEABLE ON-SCREEN ZOOM BUTTONS (🔍+ / 🔍- & 100% ↺)
 		// Bound strictly to isHudVisible && readerConfig.showZoomButtons && !anyModalOrDrawerOpen
-		// Aligned to exact 12.dp right margin and 40.dp width matching NekoVerticalPageScrubber
+		// Aligned to exact 12.dp right margin and 40.dp width matching ReaderVerticalPageScrubber
 		// =========================================================================
 		AnimatedVisibility(
 			visible = isHudVisible && readerConfig.showZoomButtons && !anyModalOrDrawerOpen,
@@ -1137,7 +1145,7 @@ fun ReaderScreen(
 		}
 
 		// =========================================================================
-		// 3.1 NEKO TOP APP BAR (when isHudVisible == true)
+		// 3.1 READER TOP APP BAR (when isHudVisible == true)
 		// - Left: Back arrow button (single tap = back; long-press = jump to Home)
 		// - Center: Two-line title block + compact 🕵️ Incognito badge next to chapter subtitle
 		// - Right: Circular [ ✦ ] (AI Upscaling Preview) & [ ⋮ ] (Two-Tab Reading | More Sheet)
@@ -1172,7 +1180,7 @@ fun ReaderScreen(
 							},
 						)
 					}
-					.testTag("neko_reader_top_bar"),
+					.testTag("reader_top_bar"),
 			) {
 				Box(
 					modifier = Modifier
@@ -1332,7 +1340,7 @@ fun ReaderScreen(
 				val targetSheetBodyHeight by animateDpAsState(
 					targetValue = if (expandedSheetTab != null) (screenHeightDp * 0.55f) else 0.dp,
 					animationSpec = tween(240),
-					label = "nekoBottomSheetHeight",
+					label = "readerBottomSheetHeight",
 				)
 
 				Surface(
@@ -1343,7 +1351,7 @@ fun ReaderScreen(
 					modifier = Modifier
 						.fillMaxWidth()
 						.navigationBarsPadding()
-						.testTag("neko_reader_bottom_sheet"),
+						.testTag("reader_bottom_sheet"),
 				) {
 					Column(modifier = Modifier.fillMaxWidth()) {
 						// Centered 36.dp x 4.dp rounded drag handle (#4A4E58, padding(top = 10.dp, bottom = 6.dp))
@@ -1354,11 +1362,11 @@ fun ReaderScreen(
 									expandedSheetTab = if (expandedSheetTab != null) {
 										null
 									} else {
-										NekoBottomSheetTab.AI_TOOLS
+										ReaderBottomSheetTab.AI_TOOLS
 									}
 								}
 								.padding(top = 10.dp, bottom = 6.dp)
-								.testTag("neko_reader_sheet_drag_handle"),
+								.testTag("reader_sheet_drag_handle"),
 							contentAlignment = Alignment.Center,
 						) {
 							Box(
@@ -1378,8 +1386,8 @@ fun ReaderScreen(
 									.height(targetSheetBodyHeight),
 							) {
 								when (expandedSheetTab!!) {
-									NekoBottomSheetTab.CHAPTERS -> {
-										NekoChaptersTabContent(
+									ReaderBottomSheetTab.CHAPTERS -> {
+										ReaderChaptersTabContent(
 											chapters = chapterEntries,
 											activeChapterIndex = chapterIndex,
 											bookmarkedChapterIndices = bookmarkedChapters,
@@ -1400,8 +1408,8 @@ fun ReaderScreen(
 										)
 									}
 
-									NekoBottomSheetTab.AI_TOOLS -> {
-										NekoAiAndPageToolsTabContent(
+									ReaderBottomSheetTab.AI_TOOLS -> {
+										ReaderAiAndPageToolsTabContent(
 											mangaItem = mangaItem,
 											readerConfig = readerConfig,
 											effectiveAutoCrop = effectiveAutoCrop,
@@ -1418,8 +1426,8 @@ fun ReaderScreen(
 										)
 									}
 
-									NekoBottomSheetTab.SETTINGS -> {
-										NekoSettingsTabContent(
+									ReaderBottomSheetTab.SETTINGS -> {
+										ReaderSettingsTabContent(
 											readerConfig = readerConfig,
 											activeSubTab = settingsSubTab,
 											onSelectSubTab = { settingsSubTab = it },
@@ -1441,51 +1449,51 @@ fun ReaderScreen(
 							verticalAlignment = Alignment.CenterVertically,
 						) {
 							// 1. Chapters (FormatListNumbered icon)
-							NekoBottomBarIconButton(
+							ReaderBottomBarIconButton(
 								icon = Icons.Default.FormatListNumbered,
 								contentDescription = "Chapters",
-								isSelected = expandedSheetTab == NekoBottomSheetTab.CHAPTERS,
+								isSelected = expandedSheetTab == ReaderBottomSheetTab.CHAPTERS,
 								showActiveBadgeDot = false,
 								onClick = {
-									expandedSheetTab = if (expandedSheetTab == NekoBottomSheetTab.CHAPTERS) {
+									expandedSheetTab = if (expandedSheetTab == ReaderBottomSheetTab.CHAPTERS) {
 										null
 									} else {
-										NekoBottomSheetTab.CHAPTERS
+										ReaderBottomSheetTab.CHAPTERS
 									}
 								},
-								modifier = Modifier.testTag("neko_tab_chapters"),
+								modifier = Modifier.testTag("reader_tab_chapters"),
 							)
 
-							// 2. AI & Crop Tools (AutoAwesome icon — replaces Neko's unused Comments icon)
-							NekoBottomBarIconButton(
+							// 2. AI & Crop Tools (AutoAwesome icon)
+							ReaderBottomBarIconButton(
 								icon = Icons.Default.AutoAwesome,
 								contentDescription = "AI & Crop Tools",
-								isSelected = expandedSheetTab == NekoBottomSheetTab.AI_TOOLS,
+								isSelected = expandedSheetTab == ReaderBottomSheetTab.AI_TOOLS,
 								showActiveBadgeDot = isAiOrCropActive,
 								onClick = {
-									expandedSheetTab = if (expandedSheetTab == NekoBottomSheetTab.AI_TOOLS) {
+									expandedSheetTab = if (expandedSheetTab == ReaderBottomSheetTab.AI_TOOLS) {
 										null
 									} else {
-										NekoBottomSheetTab.AI_TOOLS
+										ReaderBottomSheetTab.AI_TOOLS
 									}
 								},
-								modifier = Modifier.testTag("neko_tab_ai_tools"),
+								modifier = Modifier.testTag("reader_tab_ai_tools"),
 							)
 
 							// 3. Reader Settings (Tune sliders icon)
-							NekoBottomBarIconButton(
+							ReaderBottomBarIconButton(
 								icon = Icons.Default.Tune,
 								contentDescription = "Reader Settings",
-								isSelected = expandedSheetTab == NekoBottomSheetTab.SETTINGS,
+								isSelected = expandedSheetTab == ReaderBottomSheetTab.SETTINGS,
 								showActiveBadgeDot = false,
 								onClick = {
-									expandedSheetTab = if (expandedSheetTab == NekoBottomSheetTab.SETTINGS) {
+									expandedSheetTab = if (expandedSheetTab == ReaderBottomSheetTab.SETTINGS) {
 										null
 									} else {
-										NekoBottomSheetTab.SETTINGS
+										ReaderBottomSheetTab.SETTINGS
 									}
 								},
-								modifier = Modifier.testTag("neko_tab_settings"),
+								modifier = Modifier.testTag("reader_tab_settings"),
 							)
 						}
 					}
@@ -1544,8 +1552,8 @@ fun ReaderScreen(
 				onOpenAdvancedReaderSettings = {
 					showReadingMoreSheet = false
 					isHudVisible = true
-					settingsSubTab = NekoSettingsSubTab.GENERAL
-					expandedSheetTab = NekoBottomSheetTab.SETTINGS
+					settingsSubTab = ReaderSettingsSubTab.GENERAL
+					expandedSheetTab = ReaderBottomSheetTab.SETTINGS
 				},
 				onDismiss = {
 					showReadingMoreSheet = false
@@ -1681,7 +1689,7 @@ fun ReaderScreen(
 }
 
 @Composable
-private fun NekoBottomBarIconButton(
+private fun ReaderBottomBarIconButton(
 	icon: androidx.compose.ui.graphics.vector.ImageVector,
 	contentDescription: String,
 	isSelected: Boolean,
@@ -1720,10 +1728,10 @@ private fun NekoBottomBarIconButton(
 }
 
 // =========================================================================
-// 2.1 VERTICAL NEKO 3-PIECE PAGE SCRUBBER & CHAPTER SKIPPER
+// 2.1 VERTICAL 3-PIECE PAGE SCRUBBER & CHAPTER SKIPPER
 // =========================================================================
 @Composable
-private fun NekoVerticalPageScrubber(
+private fun ReaderVerticalPageScrubber(
 	currentPage: Int,
 	totalPages: Int,
 	canGoPrevChapter: Boolean,
@@ -1754,7 +1762,7 @@ private fun NekoVerticalPageScrubber(
 					},
 				)
 			}
-			.testTag("neko_vertical_scrubber"),
+			.testTag("reader_vertical_scrubber"),
 		horizontalAlignment = Alignment.CenterHorizontally,
 		verticalArrangement = Arrangement.spacedBy(8.dp),
 	) {
@@ -1906,11 +1914,11 @@ private fun NekoVerticalPageScrubber(
 }
 
 // =========================================================================
-// 2.2 HORIZONTAL NEKO 3-PIECE PAGE SCRUBBER & CHAPTER SKIPPER
+// 2.2 HORIZONTAL 3-PIECE PAGE SCRUBBER & CHAPTER SKIPPER
 // [ ⏮ ] — [ 1  ━━━━━━━|━━━━  13 ] — [ ⏭ ]
 // =========================================================================
 @Composable
-private fun NekoHorizontalPageScrubber(
+private fun ReaderHorizontalPageScrubber(
 	currentPage: Int,
 	totalPages: Int,
 	isRtl: Boolean,
@@ -1941,7 +1949,7 @@ private fun NekoHorizontalPageScrubber(
 					},
 				)
 			}
-			.testTag("neko_horizontal_scrubber"),
+			.testTag("reader_horizontal_scrubber"),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(8.dp),
 	) {
@@ -2122,10 +2130,10 @@ private fun resolveSliderPositionFromDrag(
 }
 
 // =========================================================================
-// TAB 1: CHAPTERS LIST (NEKO STYLE)
+// TAB 1: CHAPTERS LIST
 // =========================================================================
 @Composable
-private fun NekoChaptersTabContent(
+private fun ReaderChaptersTabContent(
 	chapters: List<ReaderChapterEntry>,
 	activeChapterIndex: Int,
 	bookmarkedChapterIndices: List<Int>,
@@ -2168,10 +2176,10 @@ private fun NekoChaptersTabContent(
 			state = listState,
 			modifier = Modifier
 				.fillMaxSize()
-				.testTag("neko_chapters_lazy_list"),
+				.testTag("reader_chapters_lazy_list"),
 			contentPadding = PaddingValues(vertical = 6.dp),
 		) {
-			itemsIndexed(chapters, key = { _, item -> "neko_ch_${item.index}" }) { idx, chapter ->
+			itemsIndexed(chapters, key = { _, item -> "reader_ch_${item.index}" }) { idx, chapter ->
 				val isCurrent = idx == activeChapterIndex
 				val isBookmarked = bookmarkedChapterIndices.contains(idx)
 
@@ -2231,11 +2239,11 @@ private fun NekoChaptersTabContent(
 }
 
 // =========================================================================
-// TAB 2: AI & PAGE TOOLS (REPLACING NEKO'S UNUSED COMMENTS TAB)
+// TAB 2: AI & PAGE TOOLS
 // =========================================================================
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NekoAiAndPageToolsTabContent(
+private fun ReaderAiAndPageToolsTabContent(
 	mangaItem: LibraryMangaItem,
 	readerConfig: ReaderCustomizationConfig,
 	effectiveAutoCrop: Boolean,
@@ -2288,7 +2296,7 @@ private fun NekoAiAndPageToolsTabContent(
 			) {
 				upscaleOptions.forEach { (mode, label) ->
 					val selected = readerConfig.aiUpscaleMode == mode
-					NekoPillOptionButton(
+					ReaderPillOptionButton(
 						label = label,
 						selected = selected,
 						onClick = {
@@ -2403,16 +2411,16 @@ private fun NekoAiAndPageToolsTabContent(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 			) {
-				NekoWideSpreadMode.entries.forEach { mode ->
+				ReaderWideSpreadMode.entries.forEach { mode ->
 					val selected = readerConfig.wideSpreadMode == mode
-					NekoPillOptionButton(
+					ReaderPillOptionButton(
 						label = mode.label,
 						selected = selected,
 						onClick = {
 							onUpdateReaderConfig {
 								it.copy(
 									wideSpreadMode = mode,
-									splitDoubleSpreadsInPortrait = mode == NekoWideSpreadMode.SPLIT_INTO_TWO,
+									splitDoubleSpreadsInPortrait = mode == ReaderWideSpreadMode.SPLIT_INTO_TWO,
 								)
 							}
 						},
@@ -2535,10 +2543,10 @@ private fun NekoAiAndPageToolsTabContent(
 // =========================================================================
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NekoSettingsTabContent(
+private fun ReaderSettingsTabContent(
 	readerConfig: ReaderCustomizationConfig,
-	activeSubTab: NekoSettingsSubTab,
-	onSelectSubTab: (NekoSettingsSubTab) -> Unit,
+	activeSubTab: ReaderSettingsSubTab,
+	onSelectSubTab: (ReaderSettingsSubTab) -> Unit,
 	onUpdateReaderConfig: ((ReaderCustomizationConfig) -> ReaderCustomizationConfig) -> Unit,
 ) {
 	val accentCyan = Color(0xFF5CE1E6)
@@ -2552,7 +2560,7 @@ private fun NekoSettingsTabContent(
 			horizontalArrangement = Arrangement.spacedBy(24.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			NekoSettingsSubTab.entries.forEach { tab ->
+			ReaderSettingsSubTab.entries.forEach { tab ->
 				val selected = activeSubTab == tab
 				Column(
 					modifier = Modifier
@@ -2588,7 +2596,7 @@ private fun NekoSettingsTabContent(
 			verticalArrangement = Arrangement.spacedBy(18.dp),
 		) {
 			when (activeSubTab) {
-				NekoSettingsSubTab.GENERAL -> {
+				ReaderSettingsSubTab.GENERAL -> {
 					// 1. Reading mode: Default, Left to right, Right to left, Vertical, Webtoon
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 						Text(
@@ -2615,7 +2623,7 @@ private fun NekoSettingsTabContent(
 								} else {
 									!useDefaultReadingMode && readerConfig.readingMode == styleMode
 								}
-								NekoPillOptionButton(
+								ReaderPillOptionButton(
 									label = label,
 									selected = isSelected,
 									onClick = {
@@ -2638,8 +2646,8 @@ private fun NekoSettingsTabContent(
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
 							verticalArrangement = Arrangement.spacedBy(8.dp),
 						) {
-							NekoRotationMode.entries.forEach { rotMode ->
-								NekoPillOptionButton(
+							ReaderRotationMode.entries.forEach { rotMode ->
+								ReaderPillOptionButton(
 									label = rotMode.label,
 									selected = readerConfig.rotationMode == rotMode,
 									onClick = {
@@ -2661,8 +2669,8 @@ private fun NekoSettingsTabContent(
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
 							verticalArrangement = Arrangement.spacedBy(8.dp),
 						) {
-							NekoBackgroundColorMode.entries.forEach { bgMode ->
-								NekoPillOptionButton(
+							ReaderBackgroundColorMode.entries.forEach { bgMode ->
+								ReaderPillOptionButton(
 									label = bgMode.label,
 									selected = readerConfig.backgroundColorMode == bgMode,
 									onClick = {
@@ -2685,7 +2693,7 @@ private fun NekoSettingsTabContent(
 							verticalArrangement = Arrangement.spacedBy(8.dp),
 						) {
 							SliderPosition.entries.forEach { pos ->
-								NekoPillOptionButton(
+								ReaderPillOptionButton(
 									label = pos.label,
 									selected = readerConfig.sliderPosition == pos,
 									onClick = {
@@ -2825,7 +2833,7 @@ private fun NekoSettingsTabContent(
 					)
 				}
 
-				NekoSettingsSubTab.PAGED -> {
+				ReaderSettingsSubTab.PAGED -> {
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 						Text(
 							text = "Scale type",
@@ -2837,7 +2845,7 @@ private fun NekoSettingsTabContent(
 							verticalArrangement = Arrangement.spacedBy(8.dp),
 						) {
 							ReaderScaleMode.entries.forEach { scale ->
-								NekoPillOptionButton(
+								ReaderPillOptionButton(
 									label = scale.label,
 									selected = readerConfig.scaleMode == scale,
 									onClick = {
@@ -2858,8 +2866,8 @@ private fun NekoSettingsTabContent(
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
 							verticalArrangement = Arrangement.spacedBy(8.dp),
 						) {
-							NekoWideSpreadMode.entries.forEach { mode ->
-								NekoPillOptionButton(
+							ReaderWideSpreadMode.entries.forEach { mode ->
+								ReaderPillOptionButton(
 									label = mode.label,
 									selected = readerConfig.wideSpreadMode == mode,
 									onClick = {
@@ -2871,7 +2879,7 @@ private fun NekoSettingsTabContent(
 					}
 				}
 
-				NekoSettingsSubTab.FILTER -> {
+				ReaderSettingsSubTab.FILTER -> {
 					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 						Text(
 							text = "Color filter preset",
@@ -2883,7 +2891,7 @@ private fun NekoSettingsTabContent(
 							verticalArrangement = Arrangement.spacedBy(8.dp),
 						) {
 							ReaderColorFilterPreset.entries.forEach { preset ->
-								NekoPillOptionButton(
+								ReaderPillOptionButton(
 									label = preset.label,
 									selected = readerConfig.colorFilterPreset == preset,
 									onClick = {
@@ -2934,7 +2942,7 @@ private fun NekoSettingsTabContent(
 }
 
 @Composable
-private fun NekoPillOptionButton(
+private fun ReaderPillOptionButton(
 	label: String,
 	selected: Boolean,
 	onClick: () -> Unit,
@@ -2982,14 +2990,54 @@ private fun NekoPillOptionButton(
 	}
 }
 
+private suspend fun decodeLocalOrOnlineMangaPageBitmap(
+	mangaUrl: String,
+	mangaTitle: String,
+	chapterUrl: String?,
+	chapterIndex: Int,
+	pageIndex: Int,
+	wideSpreadMode: ReaderWideSpreadMode,
+	isRtl: Boolean,
+): Bitmap? {
+	if (
+		(mangaUrl.startsWith("http://") || mangaUrl.startsWith("https://")) &&
+		!mangaUrl.contains("example.org") &&
+		!mangaUrl.contains(".ext/")
+	) {
+		val onlineBitmap = runCatching {
+			org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.decodeHttpOrMangaDexPageBitmap(
+				mangaUrl = mangaUrl,
+				mangaTitle = mangaTitle,
+				chapterUrl = chapterUrl,
+				pageIndex = pageIndex,
+				chapterIndex = chapterIndex,
+			)
+		}.getOrNull()
+		if (onlineBitmap != null) {
+			return transformBitmapForSpreadMode(
+				src = onlineBitmap,
+				mode = wideSpreadMode,
+				isRtl = isRtl,
+				subHalf = pageIndex % 2,
+			)
+		}
+	}
+	return decodeLocalMangaPageBitmap(
+		mangaUrl = mangaUrl,
+		pageIndex = pageIndex,
+		wideSpreadMode = wideSpreadMode,
+		isRtl = isRtl,
+	)
+}
+
 private fun decodeLocalMangaPageBitmap(
 	mangaUrl: String,
 	pageIndex: Int,
-	wideSpreadMode: NekoWideSpreadMode,
+	wideSpreadMode: ReaderWideSpreadMode,
 	isRtl: Boolean,
 ): Bitmap? {
 	return runCatching {
-		val cleanPath = mangaUrl.removePrefix("file://")
+		val cleanPath = mangaUrl.removePrefix("file://").removePrefix("cbz://")
 		val f = File(cleanPath)
 		if (!f.exists()) return@runCatching null
 
@@ -3000,7 +3048,7 @@ private fun decodeLocalMangaPageBitmap(
 				.toList()
 			if (imgFiles.isEmpty()) return@runCatching null
 			val targetFile = imgFiles[pageIndex.coerceIn(0, imgFiles.lastIndex)]
-			if (wideSpreadMode == NekoWideSpreadMode.SPLIT_INTO_TWO && WidePageProcessor.isWideSpread(targetFile)) {
+			if (wideSpreadMode == ReaderWideSpreadMode.SPLIT_INTO_TWO && WidePageProcessor.isWideSpread(targetFile)) {
 				WidePageProcessor.decodeSplitHalf(
 					imageFile = targetFile,
 					isFirstHalfInReadingOrder = (pageIndex % 2 == 0),
@@ -3037,18 +3085,18 @@ private fun decodeLocalMangaPageBitmap(
 
 private fun transformBitmapForSpreadMode(
 	src: Bitmap,
-	mode: NekoWideSpreadMode,
+	mode: ReaderWideSpreadMode,
 	isRtl: Boolean,
 	subHalf: Int,
 ): Bitmap {
 	val isWide = src.width.toFloat() / src.height.toFloat().coerceAtLeast(1f) > 1.2f
 	return when (mode) {
-		NekoWideSpreadMode.NONE -> src
-		NekoWideSpreadMode.AUTO_ROTATE_90 -> {
+		ReaderWideSpreadMode.NONE -> src
+		ReaderWideSpreadMode.AUTO_ROTATE_90 -> {
 			if (!isWide) return src
 			WidePageProcessor.rotateWideBitmap(src)
 		}
-		NekoWideSpreadMode.SPLIT_INTO_TWO -> {
+		ReaderWideSpreadMode.SPLIT_INTO_TWO -> {
 			if (!isWide) return src
 			val halfW = (src.width / 2).coerceAtLeast(1)
 			val takeRightHalf = if (isRtl) (subHalf == 0) else (subHalf != 0)

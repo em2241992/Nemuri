@@ -100,7 +100,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 // =========================================================================
-// TASK 1: "KOTATSU NEKO SLUMBER" (2 SLEEPING EYES) SVG BRAND ICON
+// TASK 1: "NEMURI SLUMBER" (2 SLEEPING EYES) SVG BRAND ICON
 // Exact 512x512 vector geometry from the specification
 // =========================================================================
 @Composable

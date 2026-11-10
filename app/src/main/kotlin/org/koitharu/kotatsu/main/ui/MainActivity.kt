@@ -758,6 +758,8 @@ fun KotatsuNeoRootApp(
 											isAiActive = aiEngineConfig.masterAiEnabled,
 											onInstallOrUpdateExtension = viewModel::installOrUpdateExtension,
 											onUninstallExtension = viewModel::uninstallExtension,
+											onSyncAllRepositories = viewModel::syncAllExtensionRepositories,
+											onQuerySourceCatalog = viewModel::querySourceCatalog,
 											debugSandboxEnabled = debugSandboxEnabled,
 											extensionInstallTasks = extensionInstallTasks,
 										)

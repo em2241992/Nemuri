@@ -907,7 +907,7 @@ private fun CompactHistoryRow(
  * Feed Screen with 4 Dedicated Categories:
  * 1. Home page (Catalogue to discover: Feed updates, Popular new titles, Suggestions, All-time favorites from a user-defaulted source — defaults to MangaDex!)
  * 2. Updates (Dedicated chapter release timeline)
- * 3. Reading Summary (Neko-inspired reading stats & activity summary)
+ * 3. Reading Summary (Reading stats & activity summary)
  * 4. Suggestions (Dedicated AI & Tag-matched manga recommendations)
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -939,7 +939,7 @@ fun FeedScreen(
 	var groupingMode by remember { mutableStateOf(FeedGroupingMode.BY_DATE) }
 	var layoutMode by remember { mutableStateOf(SectionViewLayout.COMPACT_ROWS) }
 	var gridColumns by remember { mutableIntStateOf(3) }
-	var nekoGalleryColumns by rememberSaveable { mutableIntStateOf(5) }
+	var hubGalleryColumns by rememberSaveable { mutableIntStateOf(5) }
 	var cardShape by remember { mutableStateOf(CardCoverShape.ROUNDED) }
 	var showNewDropBadge by remember { mutableStateOf(true) }
 	var showScanlator by remember { mutableStateOf(true) }
@@ -949,7 +949,13 @@ fun FeedScreen(
 	var showAdvancedSearchSheet by remember { mutableStateOf(false) }
 	var useFloatingBottomCategoryPill by rememberSaveable { mutableStateOf(false) }
 
-	val availableCatalogueSources = listOf("MangaDex", "Aqua Manga", "ComicK", "Bato.to", "All Sources")
+	val availableCatalogueSources = remember(extensionCatalog, libraryItems) {
+		val dynamicSources = (
+			extensionCatalog.map { org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(it.sourceName) } +
+				libraryItems.map { org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(it.manga.source) }
+			).filter { it.isNotBlank() }.distinct()
+		(listOf("MangaDex") + dynamicSources + listOf("All Sources")).distinct()
+	}
 	val sources = remember(feedUpdates) {
 		feedUpdates.map { it.mangaItem.manga.source }.distinct().sorted()
 	}
@@ -1145,8 +1151,8 @@ fun FeedScreen(
 						extensionCatalog = extensionCatalog,
 						libraryNormalizedTitles = libraryNormalizedTitles,
 						searchQuery = searchQuery,
-						nekoGalleryColumns = nekoGalleryColumns,
-						onSelectNekoGalleryColumns = { nekoGalleryColumns = it.coerceIn(3, 5) },
+						hubGalleryColumns = hubGalleryColumns,
+						onSelectHubGalleryColumns = { hubGalleryColumns = it.coerceIn(3, 5) },
 						onRequestFocusTopSearch = {
 							runCatching { feedSearchFocusRequester.requestFocus() }
 						},
@@ -1185,8 +1191,8 @@ fun FeedScreen(
 						extensionCatalog = extensionCatalog,
 						libraryNormalizedTitles = libraryNormalizedTitles,
 						searchQuery = searchQuery,
-						nekoGalleryColumns = nekoGalleryColumns,
-						onSelectNekoGalleryColumns = { nekoGalleryColumns = it.coerceIn(3, 5) },
+						hubGalleryColumns = hubGalleryColumns,
+						onSelectHubGalleryColumns = { hubGalleryColumns = it.coerceIn(3, 5) },
 						onRequestFocusTopSearch = {
 							runCatching { feedSearchFocusRequester.requestFocus() }
 						},
@@ -1234,7 +1240,7 @@ fun FeedScreen(
 				}
 
 				FeedSectionCategory.SUMMARY -> {
-					NekoReadingSummaryView(
+					FeedReadingSummaryView(
 						libraryItems = libraryItems,
 						onOpenReader = onOpenReader,
 						onOpenDetails = onOpenDetails,
@@ -1435,10 +1441,10 @@ fun FeedScreen(
 				) {
 					listOf(3, 4, 5).forEach { cols ->
 						FilterChip(
-							selected = nekoGalleryColumns == cols,
-							onClick = { nekoGalleryColumns = cols },
+							selected = hubGalleryColumns == cols,
+							onClick = { hubGalleryColumns = cols },
 							label = { Text(if (cols == 5) "5 Columns (Default)" else "$cols Columns") },
-							modifier = Modifier.testTag("tune_neko_gallery_cols_$cols"),
+							modifier = Modifier.testTag("tune_hub_gallery_cols_$cols"),
 						)
 					}
 				}
@@ -2102,10 +2108,10 @@ private fun FeedDedicatedUpdatesView(
 }
 
 /**
- * Neko-Inspired Reading Summary Category under Feed.
+ * Reading Summary Category under Feed.
  */
 @Composable
-private fun NekoReadingSummaryView(
+private fun FeedReadingSummaryView(
 	libraryItems: List<LibraryMangaItem>,
 	onOpenReader: (Long, Int) -> Unit,
 	onOpenDetails: (Long) -> Unit,
@@ -2120,7 +2126,8 @@ private fun NekoReadingSummaryView(
 	val estHoursRead = "%.1f".format(totalPagesTurned / 55f)
 	val overallCompletion = (totalChaptersRead.toFloat() / totalChaptersAll.toFloat()).coerceIn(0f, 1f)
 
-	val weeklyActivity = remember(totalChaptersRead) {
+	val hasDebugMock = remember(libraryItems) { libraryItems.any { it.isDebugMock } }
+	val weeklyActivity = remember(totalChaptersRead, libraryItems, hasDebugMock) {
 		if (totalChaptersRead == 0) {
 			listOf(
 				"Mon" to 0,
@@ -2131,7 +2138,7 @@ private fun NekoReadingSummaryView(
 				"Sat" to 0,
 				"Sun" to 0,
 			)
-		} else {
+		} else if (hasDebugMock) {
 			listOf(
 				"Mon" to ((totalChaptersRead * 2) % 9 + 1),
 				"Tue" to ((totalChaptersRead * 3) % 11 + 1),
@@ -2141,6 +2148,28 @@ private fun NekoReadingSummaryView(
 				"Sat" to ((totalChaptersRead * 4) % 15 + 1),
 				"Sun" to ((totalChaptersRead * 3) % 14 + 1),
 			)
+		} else {
+			val dayLabels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+			val counts = IntArray(7)
+			val cal = java.util.Calendar.getInstance()
+			libraryItems.forEach { item ->
+				val readChapters = item.chapters.count { it.isRead }
+				if (readChapters > 0 && item.lastReadAt > 0L) {
+					cal.timeInMillis = item.lastReadAt
+					val dow = cal.get(java.util.Calendar.DAY_OF_WEEK)
+					val idx = when (dow) {
+						java.util.Calendar.MONDAY -> 0
+						java.util.Calendar.TUESDAY -> 1
+						java.util.Calendar.WEDNESDAY -> 2
+						java.util.Calendar.THURSDAY -> 3
+						java.util.Calendar.FRIDAY -> 4
+						java.util.Calendar.SATURDAY -> 5
+						else -> 6
+					}
+					counts[idx] += readChapters
+				}
+			}
+			dayLabels.mapIndexed { idx, label -> label to counts[idx] }
 		}
 	}
 	val maxWeeklyDay = remember(weeklyActivity) {

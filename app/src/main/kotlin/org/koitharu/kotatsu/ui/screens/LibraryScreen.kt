@@ -1658,7 +1658,7 @@ private fun LibraryGridMangaCard(
 				}
 			}
 
-			// Neko / Mihon COMPACT GRID Mode: Title rendered inside bottom of cover over smooth gradient scrim
+			// COMPACT GRID Mode: Title rendered inside bottom of cover over smooth gradient scrim
 			if (isCompactGrid) {
 				Box(
 					modifier = Modifier

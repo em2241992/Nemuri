@@ -111,9 +111,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import org.koitharu.kotatsu.core.model.AiUpscaleMode
-import org.koitharu.kotatsu.core.model.NekoRotationMode
 import org.koitharu.kotatsu.core.model.ReaderColorFilterPreset
 import org.koitharu.kotatsu.core.model.ReaderCustomizationConfig
+import org.koitharu.kotatsu.core.model.ReaderRotationMode
 import org.koitharu.kotatsu.core.model.ReaderScaleMode
 import org.koitharu.kotatsu.core.model.ReaderStyleMode
 import org.koitharu.kotatsu.ui.components.MangaReaderPageCanvas
@@ -859,7 +859,7 @@ internal fun ReaderTwoTabOptionsSheet(
 							}
 
 							// Rotate screen (1-tap Portrait / Landscape lock toggle)
-							val isLandscapeLocked = readerConfig.rotationMode == NekoRotationMode.LANDSCAPE
+							val isLandscapeLocked = readerConfig.rotationMode == ReaderRotationMode.LANDSCAPE
 							Surface(
 								color = if (isLandscapeLocked) accentCyan.copy(alpha = 0.18f) else Color(0xFF1E222D),
 								shape = RoundedCornerShape(18.dp),
@@ -874,12 +874,12 @@ internal fun ReaderTwoTabOptionsSheet(
 									.clip(RoundedCornerShape(18.dp))
 									.clickable {
 										val nextRotation = if (isLandscapeLocked) {
-											NekoRotationMode.PORTRAIT
+											ReaderRotationMode.PORTRAIT
 										} else {
-											NekoRotationMode.LANDSCAPE
+											ReaderRotationMode.LANDSCAPE
 										}
 										onUpdateReaderConfig { it.copy(rotationMode = nextRotation) }
-										(context as? Activity)?.requestedOrientation = if (nextRotation == NekoRotationMode.LANDSCAPE) {
+										(context as? Activity)?.requestedOrientation = if (nextRotation == ReaderRotationMode.LANDSCAPE) {
 											ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 										} else {
 											ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT

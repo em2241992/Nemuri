@@ -573,7 +573,7 @@ class UniversalBackupRepository(
 	}
 
 	/**
-	 * Exports the library to a Mihon/Neko portable `.json` backup.
+	 * Exports the library to a Mihon portable `.json` backup.
 	 */
 	suspend fun exportMihonJson(): String {
 		val allManga = db.getMangaDao().getAllWithTags()

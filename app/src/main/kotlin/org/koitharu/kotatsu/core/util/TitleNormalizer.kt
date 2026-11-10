@@ -23,7 +23,7 @@ object TitleNormalizer {
 
 	/**
 	 * Produces a canonical, source-agnostic fingerprint for matching titles across
-	 * Kotatsu parsers, MangaDex (Neko), and Mihon/DropSauce extensions.
+	 * Kotatsu parsers, MangaDex, and Mihon extensions.
 	 */
 	fun toNormalizedSlug(rawTitle: String): String {
 		if (rawTitle.isBlank()) return ""

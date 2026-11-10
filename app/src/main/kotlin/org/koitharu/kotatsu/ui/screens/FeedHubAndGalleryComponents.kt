@@ -87,24 +87,24 @@ import org.koitharu.kotatsu.ui.theme.PlusJakartaDisplayFamily
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 
-enum class NekoHubAndGalleryFilter(val label: String) {
+enum class FeedHubAndGalleryFilter(val label: String) {
 	ALL("All"),
 	MY_FOLLOWS("My Follows"),
 	UNREAD_ONLY("Unread Only"),
 	NEW_AND_TRENDING("New & Trending"),
 }
 
-enum class NekoHubSectionCategory(val headerTitle: String) {
+enum class FeedHubSectionCategory(val headerTitle: String) {
 	FEED_UPDATES("Feed updates"),
 	POPULAR_NEW_TITLES("Popular new titles"),
 	LATEST_UPLOADS("Latest uploads"),
 }
 
 @Composable
-fun NekoTopFilterChipRow(
-	activeFilter: NekoHubAndGalleryFilter,
-	onSelectFilter: (NekoHubAndGalleryFilter) -> Unit,
-	activeSectionFilter: NekoHubSectionCategory? = null,
+fun FeedHubTopFilterChipRow(
+	activeFilter: FeedHubAndGalleryFilter,
+	onSelectFilter: (FeedHubAndGalleryFilter) -> Unit,
+	activeSectionFilter: FeedHubSectionCategory? = null,
 	onClearSectionFilter: (() -> Unit)? = null,
 	modifier: Modifier = Modifier,
 ) {
@@ -113,7 +113,7 @@ fun NekoTopFilterChipRow(
 			.fillMaxWidth()
 			.padding(horizontal = 14.dp, vertical = 4.dp)
 			.horizontalScroll(rememberScrollState())
-			.testTag("neko_top_filter_chip_row"),
+			.testTag("hub_top_filter_chip_row"),
 		horizontalArrangement = Arrangement.spacedBy(8.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
@@ -128,7 +128,7 @@ fun NekoTopFilterChipRow(
 						color = Color(0xFF5CE1E6),
 						shape = RoundedCornerShape(14.dp),
 					)
-					.testTag("neko_clear_section_filter_chip"),
+					.testTag("hub_clear_section_filter_chip"),
 			) {
 				Row(
 					modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -157,7 +157,7 @@ fun NekoTopFilterChipRow(
 			}
 		}
 
-		NekoHubAndGalleryFilter.entries.forEach { filter ->
+		FeedHubAndGalleryFilter.entries.forEach { filter ->
 			val selected = activeFilter == filter
 			Surface(
 				onClick = { onSelectFilter(filter) },
@@ -167,7 +167,7 @@ fun NekoTopFilterChipRow(
 					MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
 				},
 				shape = RoundedCornerShape(14.dp),
-				modifier = Modifier.testTag("neko_filter_chip_${filter.name.lowercase()}"),
+				modifier = Modifier.testTag("hub_filter_chip_${filter.name.lowercase()}"),
 			) {
 				Text(
 					text = filter.label,
@@ -186,7 +186,7 @@ fun NekoTopFilterChipRow(
 }
 
 /**
- * 1.2 Neko Sectioned Carousel Hub (`NekoBrowseHubView`):
+ * 1.2 Sectioned Carousel Hub (`FeedBrowseHubView`):
  * - Top horizontal filter chip row (`All` | `My Follows` | `Unread Only` | `New & Trending`)
  *   matching the exact position and style of the filter row in `Updates` (no double-stacked bottom bar).
  * - Vertically scrollable `LazyColumn` (`contentPadding = PaddingValues(bottom = 120.dp)`)
@@ -198,12 +198,12 @@ fun NekoTopFilterChipRow(
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun NekoBrowseHubView(
+fun FeedBrowseHubView(
 	entries: List<HybridFeedEntry>,
 	libraryItems: List<LibraryMangaItem>,
-	activeFilter: NekoHubAndGalleryFilter = NekoHubAndGalleryFilter.ALL,
-	onSelectFilter: (NekoHubAndGalleryFilter) -> Unit = {},
-	onSelectSectionForGallery: ((NekoHubSectionCategory) -> Unit)? = null,
+	activeFilter: FeedHubAndGalleryFilter = FeedHubAndGalleryFilter.ALL,
+	onSelectFilter: (FeedHubAndGalleryFilter) -> Unit = {},
+	onSelectSectionForGallery: ((FeedHubSectionCategory) -> Unit)? = null,
 	galleryColumns: Int = 5,
 	onSelectGalleryColumns: (Int) -> Unit = {},
 	isBookmarked: (HybridFeedEntry) -> Boolean,
@@ -213,7 +213,7 @@ fun NekoBrowseHubView(
 	onRequestFocusTopSearch: () -> Unit = {},
 	modifier: Modifier = Modifier,
 ) {
-	var drillDownSection by rememberSaveable { mutableStateOf<NekoHubSectionCategory?>(null) }
+	var drillDownSection by rememberSaveable { mutableStateOf<FeedHubSectionCategory?>(null) }
 	var quickPeekEntry by remember { mutableStateOf<HybridFeedEntry?>(null) }
 
 	val haptic = LocalHapticFeedback.current
@@ -222,9 +222,9 @@ fun NekoBrowseHubView(
 		BackHandler {
 			drillDownSection = null
 		}
-	} else if (activeFilter != NekoHubAndGalleryFilter.ALL) {
+	} else if (activeFilter != FeedHubAndGalleryFilter.ALL) {
 		BackHandler {
-			onSelectFilter(NekoHubAndGalleryFilter.ALL)
+			onSelectFilter(FeedHubAndGalleryFilter.ALL)
 		}
 	}
 
@@ -241,23 +241,32 @@ fun NekoBrowseHubView(
 			(TitleNormalizer.toNormalizedSlug(entry.title) in librarySlugs)
 	}
 
-	val filteredPool = remember(entries, activeFilter, libraryItems, libraryMangaIds, librarySlugs) {
+	val hasDebugMock = remember(libraryItems) { libraryItems.any { it.isDebugMock } }
+
+	val filteredPool = remember(entries, activeFilter, libraryItems, libraryMangaIds, librarySlugs, hasDebugMock) {
 		when (activeFilter) {
-			NekoHubAndGalleryFilter.ALL -> entries
-			NekoHubAndGalleryFilter.MY_FOLLOWS -> entries.filter { isEntryInLibrary(it) }.ifEmpty { entries }
-			NekoHubAndGalleryFilter.UNREAD_ONLY -> entries.filter { entry ->
-				val libMatch = libraryItems.find { it.manga.id == entry.mangaId }
-				(libMatch != null && libMatch.unreadCount > 0) || entry.isNewDrop
-			}.ifEmpty { entries }
-			NekoHubAndGalleryFilter.NEW_AND_TRENDING -> entries
+			FeedHubAndGalleryFilter.ALL -> entries
+			FeedHubAndGalleryFilter.MY_FOLLOWS -> {
+				val follows = entries.filter { isEntryInLibrary(it) }
+				if (hasDebugMock) follows.ifEmpty { entries } else follows
+			}
+			FeedHubAndGalleryFilter.UNREAD_ONLY -> {
+				val unread = entries.filter { entry ->
+					val libMatch = libraryItems.find { it.manga.id == entry.mangaId }
+					(libMatch != null && libMatch.unreadCount > 0) || (entry.inLibrary && entry.isNewDrop)
+				}
+				if (hasDebugMock) unread.ifEmpty { entries } else unread
+			}
+			FeedHubAndGalleryFilter.NEW_AND_TRENDING -> entries
 				.filter { it.isNewDrop || it.matchPercent >= 95 }
 				.sortedByDescending { it.baseHeatScore + it.matchPercent * 20 }
 				.ifEmpty { entries }
 		}
 	}
 
-	val feedUpdateEntries = remember(filteredPool) {
-		filteredPool.filter { it.inLibrary || it.mangaId != null }.ifEmpty { filteredPool }
+	val feedUpdateEntries = remember(filteredPool, hasDebugMock) {
+		val libUpdates = filteredPool.filter { it.inLibrary || it.mangaId != null }
+		if (hasDebugMock) libUpdates.ifEmpty { filteredPool } else libUpdates
 	}
 	val popularNewEntries = remember(filteredPool) {
 		filteredPool.sortedByDescending { it.baseHeatScore + it.matchPercent * 25 }
@@ -266,7 +275,7 @@ fun NekoBrowseHubView(
 		filteredPool.sortedByDescending { (if (it.isNewDrop) 5_000 else 0) + it.chapterNumber }
 	}
 
-	val handleOpenSection: (NekoHubSectionCategory) -> Unit = { section ->
+	val handleOpenSection: (FeedHubSectionCategory) -> Unit = { section ->
 		if (onSelectSectionForGallery != null) {
 			onSelectSectionForGallery(section)
 		} else {
@@ -276,11 +285,11 @@ fun NekoBrowseHubView(
 
 	if (drillDownSection != null) {
 		val sectionItems = when (drillDownSection!!) {
-			NekoHubSectionCategory.FEED_UPDATES -> feedUpdateEntries
-			NekoHubSectionCategory.POPULAR_NEW_TITLES -> popularNewEntries
-			NekoHubSectionCategory.LATEST_UPLOADS -> latestUploadEntries
+			FeedHubSectionCategory.FEED_UPDATES -> feedUpdateEntries
+			FeedHubSectionCategory.POPULAR_NEW_TITLES -> popularNewEntries
+			FeedHubSectionCategory.LATEST_UPLOADS -> latestUploadEntries
 		}
-		NekoDenseGalleryGrid(
+		FeedDenseGalleryGrid(
 			title = drillDownSection!!.headerTitle,
 			entries = sectionItems,
 			libraryItems = libraryItems,
@@ -289,7 +298,7 @@ fun NekoBrowseHubView(
 			activeSectionFilter = drillDownSection,
 			onClearSectionFilter = { drillDownSection = null },
 			galleryColumns = galleryColumns,
-			showRankFooter = drillDownSection == NekoHubSectionCategory.POPULAR_NEW_TITLES,
+			showRankFooter = drillDownSection == FeedHubSectionCategory.POPULAR_NEW_TITLES,
 			onSelectGalleryColumns = onSelectGalleryColumns,
 			isBookmarked = isEntryInLibrary,
 			onToggleBookmark = onToggleBookmark,
@@ -304,10 +313,10 @@ fun NekoBrowseHubView(
 	Column(
 		modifier = modifier
 			.fillMaxSize()
-			.testTag("neko_browse_hub_view"),
+			.testTag("hub_browse_view"),
 	) {
 		// Top Horizontal Filter Chip Row directly below Updates | Hub | Gallery | For You
-		NekoTopFilterChipRow(
+		FeedHubTopFilterChipRow(
 			activeFilter = activeFilter,
 			onSelectFilter = onSelectFilter,
 		)
@@ -317,7 +326,7 @@ fun NekoBrowseHubView(
 				modifier = Modifier
 					.fillMaxSize()
 					.padding(32.dp)
-					.testTag("neko_hub_empty_state"),
+					.testTag("hub_empty_state"),
 				contentAlignment = Alignment.Center,
 			) {
 				Column(
@@ -345,52 +354,69 @@ fun NekoBrowseHubView(
 			verticalArrangement = Arrangement.spacedBy(22.dp),
 			modifier = Modifier
 				.fillMaxSize()
-				.testTag("neko_hub_lazy_column"),
+				.testTag("hub_lazy_column"),
 		) {
 			// Section 1: Feed updates →
-			item(key = "neko_hub_sec_feed_updates") {
+			item(key = "hub_sec_feed_updates") {
 				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-					NekoHubSectionHeader(
-						title = NekoHubSectionCategory.FEED_UPDATES.headerTitle,
-						onClick = { handleOpenSection(NekoHubSectionCategory.FEED_UPDATES) },
+					FeedHubSectionHeader(
+						title = FeedHubSectionCategory.FEED_UPDATES.headerTitle,
+						onClick = { handleOpenSection(FeedHubSectionCategory.FEED_UPDATES) },
 					)
-					LazyRow(
-						contentPadding = PaddingValues(horizontal = 14.dp),
-						horizontalArrangement = Arrangement.spacedBy(12.dp),
-					) {
-						itemsIndexed(
-							items = feedUpdateEntries,
-							key = { _, item -> "hub_feed_${item.id}" },
-						) { idx, entry ->
-							val inLib = isEntryInLibrary(entry)
-							val volNum = (entry.chapterNumber / 10).coerceAtLeast(1)
-							val cleanChTitle = entry.chapterTitle
-								.removePrefix("Chapter ${entry.chapterNumber}: ")
-								.removePrefix("Ch. ${entry.chapterNumber} • ")
-								.trim()
-							NekoCarouselCard(
-								title = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title),
-								subtitle = "Vol.$volNum Ch.${entry.chapterNumber} - $cleanChTitle",
-								coverUrl = entry.coverUrl,
-								inLibrary = inLib,
-								onClick = { onOpenDetails(entry) },
-								onLongClick = {
-									haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-									onToggleBookmark(entry)
-								},
-								modifier = Modifier.testTag("neko_hub_feed_card_$idx"),
+					if (feedUpdateEntries.isEmpty()) {
+						Surface(
+							color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+							shape = RoundedCornerShape(14.dp),
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 14.dp),
+						) {
+							Text(
+								text = "No library chapter updates yet — Add series from Explore or long-press any title below to track updates here.",
+								style = MaterialTheme.typography.bodySmall,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+								modifier = Modifier.padding(14.dp),
 							)
+						}
+					} else {
+						LazyRow(
+							contentPadding = PaddingValues(horizontal = 14.dp),
+							horizontalArrangement = Arrangement.spacedBy(12.dp),
+						) {
+							itemsIndexed(
+								items = feedUpdateEntries,
+								key = { _, item -> "hub_feed_${item.id}" },
+							) { idx, entry ->
+								val inLib = isEntryInLibrary(entry)
+								val volNum = (entry.chapterNumber / 10).coerceAtLeast(1)
+								val cleanChTitle = entry.chapterTitle
+									.removePrefix("Chapter ${entry.chapterNumber}: ")
+									.removePrefix("Ch. ${entry.chapterNumber} • ")
+									.trim()
+								FeedCarouselCard(
+									title = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title),
+									subtitle = "Vol.$volNum Ch.${entry.chapterNumber} - $cleanChTitle",
+									coverUrl = entry.coverUrl,
+									inLibrary = inLib,
+									onClick = { onOpenDetails(entry) },
+									onLongClick = {
+										haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+										onToggleBookmark(entry)
+									},
+									modifier = Modifier.testTag("hub_feed_card_$idx"),
+								)
+							}
 						}
 					}
 				}
 			}
 
 			// Section 2: Popular new titles →
-			item(key = "neko_hub_sec_popular_new") {
+			item(key = "hub_sec_popular_new") {
 				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-					NekoHubSectionHeader(
-						title = NekoHubSectionCategory.POPULAR_NEW_TITLES.headerTitle,
-						onClick = { handleOpenSection(NekoHubSectionCategory.POPULAR_NEW_TITLES) },
+					FeedHubSectionHeader(
+						title = FeedHubSectionCategory.POPULAR_NEW_TITLES.headerTitle,
+						onClick = { handleOpenSection(FeedHubSectionCategory.POPULAR_NEW_TITLES) },
 					)
 					LazyRow(
 						contentPadding = PaddingValues(horizontal = 14.dp),
@@ -401,7 +427,7 @@ fun NekoBrowseHubView(
 							key = { _, item -> "hub_pop_${item.id}" },
 						) { idx, entry ->
 							val inLib = isEntryInLibrary(entry)
-							NekoCarouselCard(
+							FeedCarouselCard(
 								title = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title),
 								subtitle = "No. ${idx + 1}",
 								coverUrl = entry.coverUrl,
@@ -411,7 +437,7 @@ fun NekoBrowseHubView(
 									haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 									onToggleBookmark(entry)
 								},
-								modifier = Modifier.testTag("neko_hub_popular_card_$idx"),
+								modifier = Modifier.testTag("hub_popular_card_$idx"),
 							)
 						}
 					}
@@ -419,11 +445,11 @@ fun NekoBrowseHubView(
 			}
 
 			// Section 3: Latest uploads →
-			item(key = "neko_hub_sec_latest_uploads") {
+			item(key = "hub_sec_latest_uploads") {
 				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-					NekoHubSectionHeader(
-						title = NekoHubSectionCategory.LATEST_UPLOADS.headerTitle,
-						onClick = { handleOpenSection(NekoHubSectionCategory.LATEST_UPLOADS) },
+					FeedHubSectionHeader(
+						title = FeedHubSectionCategory.LATEST_UPLOADS.headerTitle,
+						onClick = { handleOpenSection(FeedHubSectionCategory.LATEST_UPLOADS) },
 					)
 					LazyRow(
 						contentPadding = PaddingValues(horizontal = 14.dp),
@@ -435,7 +461,7 @@ fun NekoBrowseHubView(
 						) { idx, entry ->
 							val inLib = isEntryInLibrary(entry)
 							val volNum = (entry.chapterNumber / 10).coerceAtLeast(1)
-							NekoCarouselCard(
+							FeedCarouselCard(
 								title = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title),
 								subtitle = "Vol.$volNum Ch.${entry.chapterNumber} • ${entry.releaseTimeLabel}",
 								coverUrl = entry.coverUrl,
@@ -445,7 +471,7 @@ fun NekoBrowseHubView(
 									haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 									onToggleBookmark(entry)
 								},
-								modifier = Modifier.testTag("neko_hub_latest_card_$idx"),
+								modifier = Modifier.testTag("hub_latest_card_$idx"),
 							)
 						}
 					}
@@ -457,7 +483,7 @@ fun NekoBrowseHubView(
 
 	val peekTarget = quickPeekEntry
 	if (peekTarget != null) {
-		NekoQuickPeekDetailsSheet(
+		FeedQuickPeekDetailsSheet(
 			entry = peekTarget,
 			inLibrary = isEntryInLibrary(peekTarget),
 			onDismiss = { quickPeekEntry = null },
@@ -480,7 +506,7 @@ fun NekoBrowseHubView(
 }
 
 @Composable
-private fun NekoHubSectionHeader(
+private fun FeedHubSectionHeader(
 	title: String,
 	onClick: () -> Unit,
 ) {
@@ -490,7 +516,7 @@ private fun NekoHubSectionHeader(
 			.fillMaxWidth()
 			.clickable(onClick = onClick)
 			.padding(horizontal = 16.dp, vertical = 4.dp)
-			.testTag("neko_section_header_${title.lowercase().replace(" ", "_")}"),
+			.testTag("hub_section_header_${title.lowercase().replace(" ", "_")}"),
 		horizontalArrangement = Arrangement.Center,
 		verticalAlignment = Alignment.CenterVertically,
 	) {
@@ -512,7 +538,7 @@ private fun NekoHubSectionHeader(
 }
 
 /**
- * Neko Section Carousel Card (`165.dp` width):
+ * Section Carousel Card (`165.dp` width):
  * - Top: Rounded square/portrait cover (`165.dp x 165.dp`, `RoundedCornerShape(12.dp)`).
  * - Top-Left `In Library` badge (`RoundedCornerShape(topStart = 12.dp, bottomEnd = 10.dp)`,
  *   background `#5CE1E6` / `#B8C4FF`, dark text `#0F1419`, `labelSmall`).
@@ -521,7 +547,7 @@ private fun NekoHubSectionHeader(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NekoCarouselCard(
+private fun FeedCarouselCard(
 	title: String,
 	subtitle: String,
 	coverUrl: String,
@@ -599,7 +625,7 @@ private fun NekoCarouselCard(
 }
 
 /**
- * 1.3 Neko 5-Column Dense Gallery View (`NekoDenseGalleryGrid`):
+ * 1.3 5-Column Dense Gallery View (`FeedDenseGalleryGrid`):
  * - Accessible both as a top-level `Gallery` tab in Feed AND whenever the user taps a section header
  *   (`Popular new titles →`, `Feed updates →`, `Latest uploads →`).
  * - Includes the top horizontal filter chip row (`All` | `My Follows` | `Unread Only` | `New & Trending`)
@@ -607,13 +633,13 @@ private fun NekoCarouselCard(
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun NekoDenseGalleryGrid(
+fun FeedDenseGalleryGrid(
 	title: String,
 	entries: List<HybridFeedEntry>,
 	libraryItems: List<LibraryMangaItem>,
-	activeFilter: NekoHubAndGalleryFilter = NekoHubAndGalleryFilter.ALL,
-	onSelectFilter: (NekoHubAndGalleryFilter) -> Unit = {},
-	activeSectionFilter: NekoHubSectionCategory? = null,
+	activeFilter: FeedHubAndGalleryFilter = FeedHubAndGalleryFilter.ALL,
+	onSelectFilter: (FeedHubAndGalleryFilter) -> Unit = {},
+	activeSectionFilter: FeedHubSectionCategory? = null,
 	onClearSectionFilter: (() -> Unit)? = null,
 	galleryColumns: Int = 5,
 	showRankFooter: Boolean = true,
@@ -648,34 +674,45 @@ fun NekoDenseGalleryGrid(
 			(TitleNormalizer.toNormalizedSlug(entry.title) in librarySlugs)
 	}
 
-	val filteredGalleryEntries = remember(entries, activeFilter, activeSectionFilter, libraryItems, libraryMangaIds, librarySlugs) {
+	val hasDebugMock = remember(libraryItems) { libraryItems.any { it.isDebugMock } }
+
+	val filteredGalleryEntries = remember(entries, activeFilter, activeSectionFilter, libraryItems, libraryMangaIds, librarySlugs, hasDebugMock) {
 		val byFilter = when (activeFilter) {
-			NekoHubAndGalleryFilter.ALL -> entries
-			NekoHubAndGalleryFilter.MY_FOLLOWS -> entries.filter { isEntryInLibrary(it) }.ifEmpty { entries }
-			NekoHubAndGalleryFilter.UNREAD_ONLY -> entries.filter { entry ->
-				val libMatch = libraryItems.find { it.manga.id == entry.mangaId }
-				(libMatch != null && libMatch.unreadCount > 0) || entry.isNewDrop
-			}.ifEmpty { entries }
-			NekoHubAndGalleryFilter.NEW_AND_TRENDING -> entries
+			FeedHubAndGalleryFilter.ALL -> entries
+			FeedHubAndGalleryFilter.MY_FOLLOWS -> {
+				val follows = entries.filter { isEntryInLibrary(it) }
+				if (hasDebugMock) follows.ifEmpty { entries } else follows
+			}
+			FeedHubAndGalleryFilter.UNREAD_ONLY -> {
+				val unread = entries.filter { entry ->
+					val libMatch = libraryItems.find { it.manga.id == entry.mangaId }
+					(libMatch != null && libMatch.unreadCount > 0) || (entry.inLibrary && entry.isNewDrop)
+				}
+				if (hasDebugMock) unread.ifEmpty { entries } else unread
+			}
+			FeedHubAndGalleryFilter.NEW_AND_TRENDING -> entries
 				.filter { it.isNewDrop || it.matchPercent >= 95 }
 				.sortedByDescending { it.baseHeatScore + it.matchPercent * 20 }
 				.ifEmpty { entries }
 		}
 		when (activeSectionFilter) {
 			null -> byFilter
-			NekoHubSectionCategory.FEED_UPDATES -> byFilter.filter { it.inLibrary || it.mangaId != null }.ifEmpty { byFilter }
-			NekoHubSectionCategory.POPULAR_NEW_TITLES -> byFilter.sortedByDescending { it.baseHeatScore + it.matchPercent * 25 }
-			NekoHubSectionCategory.LATEST_UPLOADS -> byFilter.sortedByDescending { (if (it.isNewDrop) 5_000 else 0) + it.chapterNumber }
+			FeedHubSectionCategory.FEED_UPDATES -> {
+				val libUpdates = byFilter.filter { it.inLibrary || it.mangaId != null }
+				if (hasDebugMock) libUpdates.ifEmpty { byFilter } else libUpdates
+			}
+			FeedHubSectionCategory.POPULAR_NEW_TITLES -> byFilter.sortedByDescending { it.baseHeatScore + it.matchPercent * 25 }
+			FeedHubSectionCategory.LATEST_UPLOADS -> byFilter.sortedByDescending { (if (it.isNewDrop) 5_000 else 0) + it.chapterNumber }
 		}
 	}
 
 	Column(
 		modifier = modifier
 			.fillMaxSize()
-			.testTag("neko_dense_gallery_container"),
+			.testTag("dense_gallery_container"),
 	) {
 		// Top Horizontal Filter Chip Row (All | My Follows | Unread Only | New & Trending + Section Back Chip)
-		NekoTopFilterChipRow(
+		FeedHubTopFilterChipRow(
 			activeFilter = activeFilter,
 			onSelectFilter = onSelectFilter,
 			activeSectionFilter = activeSectionFilter,
@@ -700,7 +737,7 @@ fun NekoDenseGalleryGrid(
 						onClick = backHandler,
 						modifier = Modifier
 							.size(34.dp)
-							.testTag("neko_gallery_back_button"),
+							.testTag("dense_gallery_back_button"),
 					) {
 						Icon(
 							imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -741,7 +778,7 @@ fun NekoDenseGalleryGrid(
 							MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
 						},
 						shape = RoundedCornerShape(8.dp),
-						modifier = Modifier.testTag("neko_gallery_cols_$cols"),
+						modifier = Modifier.testTag("dense_gallery_cols_$cols"),
 					) {
 						Text(
 							text = "${cols}c",
@@ -763,11 +800,11 @@ fun NekoDenseGalleryGrid(
 			contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 120.dp),
 			modifier = Modifier
 				.fillMaxSize()
-				.testTag("neko_dense_gallery_grid"),
+				.testTag("dense_gallery_grid"),
 		) {
 			itemsIndexed(
 				items = filteredGalleryEntries,
-				key = { _, item -> "neko_dense_${item.id}" },
+				key = { _, item -> "dense_${item.id}" },
 			) { idx, entry ->
 				val inLib = isEntryInLibrary(entry)
 				val cleanTitle = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title)
@@ -790,7 +827,7 @@ fun NekoDenseGalleryGrid(
 								onToggleBookmark(entry)
 							},
 						)
-						.testTag("neko_dense_poster_$idx"),
+						.testTag("dense_gallery_poster_$idx"),
 				) {
 					// 1. Full-bleed cover image
 					MangaCoverArtwork(
@@ -869,7 +906,7 @@ fun NekoDenseGalleryGrid(
 
 	val peekTarget = quickPeekEntry
 	if (peekTarget != null) {
-		NekoQuickPeekDetailsSheet(
+		FeedQuickPeekDetailsSheet(
 			entry = peekTarget,
 			inLibrary = isEntryInLibrary(peekTarget),
 			onDismiss = { quickPeekEntry = null },
@@ -893,7 +930,7 @@ fun NekoDenseGalleryGrid(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun NekoQuickPeekDetailsSheet(
+private fun FeedQuickPeekDetailsSheet(
 	entry: HybridFeedEntry,
 	inLibrary: Boolean,
 	onDismiss: () -> Unit,
