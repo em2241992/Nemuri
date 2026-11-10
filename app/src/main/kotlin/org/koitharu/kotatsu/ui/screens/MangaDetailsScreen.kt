@@ -175,22 +175,26 @@ fun MangaDetailsScreen(
 		}
 	}
 
-	// Ensure real story synopsis is always shown and never overwritten by "Merged with..." diagnostic strings
-	val canonicalSynopsis = remember(item.manga.id, item.manga.description, cleanTitle) {
+	// Ensure real story synopsis is always shown and never overwritten by diagnostic strings
+	val canonicalSynopsis = remember(item.manga.id, item.manga.description, cleanTitle, item.isDebugMock) {
 		val raw = item.manga.description?.trim().orEmpty()
 		when {
 			raw.isBlank() ||
 				raw.startsWith("Merged with ", ignoreCase = true) ||
 				raw.startsWith("Secondary mirror entry", ignoreCase = true) ||
 				raw.contains("Ready for 1-by-1 or En Masse Deduplication", ignoreCase = true) -> {
-				when {
-					cleanTitle.contains("Frieren", ignoreCase = true) ->
-						"After a ten-year quest to defeat the Demon King alongside the hero Himmel, the elven mage Frieren embarks on a new journey across the continent to understand human mortality and the fleeting bonds of time."
-					cleanTitle.contains("Dungeon Meshi", ignoreCase = true) ||
-						cleanTitle.contains("Delicious in Dungeon", ignoreCase = true) ->
-						"After the Golden Kingdom is sunk underground by an insane magician, adventurer Laios and his party descend into the dungeon labyrinth—cooking and eating monsters to survive and rescue his sister Falin."
-					else ->
-						"An acclaimed serialized manga following $cleanTitle across ${item.totalChapters} chapters."
+				if (item.isDebugMock) {
+					when {
+						cleanTitle.contains("Frieren", ignoreCase = true) ->
+							"After a ten-year quest to defeat the Demon King alongside the hero Himmel, the elven mage Frieren embarks on a new journey across the continent to understand human mortality and the fleeting bonds of time."
+						cleanTitle.contains("Dungeon Meshi", ignoreCase = true) ||
+							cleanTitle.contains("Delicious in Dungeon", ignoreCase = true) ->
+							"After the Golden Kingdom is sunk underground by an insane magician, adventurer Laios and his party descend into the dungeon labyrinth—cooking and eating monsters to survive and rescue his sister Falin."
+						else ->
+							"An acclaimed serialized manga following $cleanTitle across ${item.totalChapters} chapters."
+					}
+				} else {
+					"No description provided by source."
 				}
 			}
 			else -> raw

@@ -385,7 +385,7 @@ fun FeedBrowseHubView(
 						) {
 							itemsIndexed(
 								items = feedUpdateEntries,
-								key = { _, item -> "hub_feed_${item.id}" },
+								key = { idx, item -> "hub_feed_${idx}_${item.id}" },
 							) { idx, entry ->
 								val inLib = isEntryInLibrary(entry)
 								val volNum = (entry.chapterNumber / 10).coerceAtLeast(1)
@@ -424,7 +424,7 @@ fun FeedBrowseHubView(
 					) {
 						itemsIndexed(
 							items = popularNewEntries,
-							key = { _, item -> "hub_pop_${item.id}" },
+							key = { idx, item -> "hub_pop_${idx}_${item.id}" },
 						) { idx, entry ->
 							val inLib = isEntryInLibrary(entry)
 							FeedCarouselCard(
@@ -457,7 +457,7 @@ fun FeedBrowseHubView(
 					) {
 						itemsIndexed(
 							items = latestUploadEntries,
-							key = { _, item -> "hub_latest_${item.id}" },
+							key = { idx, item -> "hub_latest_${idx}_${item.id}" },
 						) { idx, entry ->
 							val inLib = isEntryInLibrary(entry)
 							val volNum = (entry.chapterNumber / 10).coerceAtLeast(1)
@@ -804,7 +804,7 @@ fun FeedDenseGalleryGrid(
 		) {
 			itemsIndexed(
 				items = filteredGalleryEntries,
-				key = { _, item -> "dense_${item.id}" },
+				key = { idx, item -> "dense_${idx}_${item.id}" },
 			) { idx, entry ->
 				val inLib = isEntryInLibrary(entry)
 				val cleanTitle = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title)

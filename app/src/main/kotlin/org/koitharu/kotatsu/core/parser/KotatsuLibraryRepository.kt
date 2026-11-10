@@ -23,9 +23,12 @@ import org.koitharu.kotatsu.core.db.entity.TagEntity
 import org.koitharu.kotatsu.core.db.entity.TitleNormalizer
 import org.koitharu.kotatsu.core.db.entity.TrackEntity
 import org.koitharu.kotatsu.core.model.LibraryMangaItem
+import org.koitharu.kotatsu.core.model.MangaSource
 import org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter
 import org.koitharu.kotatsu.extensions.ExtensionCatalogManga
 import org.koitharu.kotatsu.history.data.HistoryRepository
+import org.koitharu.kotatsu.parsers.model.Manga
+import org.koitharu.kotatsu.parsers.model.MangaState
 import kotlin.math.abs
 import kotlin.system.measureNanoTime
 
@@ -463,20 +466,50 @@ class KotatsuLibraryRepository(
 		categoryId: Long = 1L,
 		swapExistingMangaId: Long? = null,
 	): Long = withContext(Dispatchers.IO) {
-		val liveFetchedChapters = if (
-			item.url.startsWith("http") &&
-			!item.url.contains("example.org") &&
-			!item.url.contains("nemuri.app/debug")
-		) {
+		val sourceObj = MangaSource(item.sourceName)
+		val initialDomainManga = Manga(
+			id = abs((item.sourceName + "|" + item.url).hashCode().toLong()).coerceAtLeast(1000L),
+			title = item.title,
+			altTitle = item.altTitle,
+			url = item.url,
+			publicUrl = item.url,
+			rating = item.rating,
+			isNsfw = false,
+			coverUrl = item.coverSeed.takeIf { it.isNotBlank() && !it.startsWith("studio_cover://") },
+			largeCoverUrl = item.coverSeed.takeIf { it.isNotBlank() && !it.startsWith("studio_cover://") },
+			description = item.description.takeIf { it.isNotBlank() },
+			tags = emptySet(),
+			state = MangaState.ONGOING,
+			author = item.author.takeIf { it.isNotBlank() },
+			chapters = null,
+			source = sourceObj,
+		)
+		val fetchedDetails: Manga? = if (!item.isDebugMock && item.url.isNotBlank()) {
 			runCatching {
-				LiveSourceParsers.fetchChaptersForManga(
-					mangaUrl = item.url,
-					mangaTitle = item.title,
-					sourceId = item.sourceName,
-				)
-			}.getOrDefault(emptyList())
+				val repo = MangaRepository.Factory(GlobalParserContextHolder.applicationContext).createAsync(sourceObj)
+				repo.getDetails(initialDomainManga)
+			}.getOrNull()
 		} else {
-			emptyList()
+			null
+		}
+		val liveFetchedChapters = fetchedDetails?.chapters.orEmpty()
+		val resolvedCover = when {
+			!fetchedDetails?.coverUrl.isNullOrBlank() -> fetchedDetails!!.coverUrl!!
+			item.coverSeed.startsWith("http://") ||
+				item.coverSeed.startsWith("https://") ||
+				item.coverSeed.startsWith("file://") ||
+				item.coverSeed.startsWith("content://") ||
+				item.coverSeed.startsWith("cbz://") -> item.coverSeed
+			item.isDebugMock -> if (item.coverSeed.startsWith("studio_cover://")) item.coverSeed else "studio_cover://${item.coverSeed}"
+			else -> ""
+		}
+		val resolvedLargeCover = fetchedDetails?.largeCoverUrl?.takeIf { it.isNotBlank() } ?: resolvedCover
+		val resolvedDescription = fetchedDetails?.description?.takeIf { it.isNotBlank() } ?: item.description
+		val resolvedAuthor = fetchedDetails?.author?.takeIf { it.isNotBlank() } ?: item.author
+		val resolvedTagsList = if (!fetchedDetails?.tags.isNullOrEmpty()) {
+			fetchedDetails!!.tags.map { it.title }
+		} else {
+			item.tags
 		}
 
 		var resultId = 0L
@@ -492,15 +525,16 @@ class KotatsuLibraryRepository(
 						altTitles = item.altTitle ?: existing.manga.altTitles,
 						source = item.sourceName,
 						url = item.url,
-						publicUrl = item.url,
-						coverUrl = if (item.coverSeed.startsWith("http")) item.coverSeed else "studio_cover://${item.coverSeed}",
-						largeCoverUrl = if (item.coverSeed.startsWith("http")) item.coverSeed else "studio_cover://${item.coverSeed}",
-						description = item.description,
+						publicUrl = fetchedDetails?.publicUrl?.ifBlank { item.url } ?: item.url,
+						coverUrl = resolvedCover,
+						largeCoverUrl = resolvedLargeCover,
+						authors = resolvedAuthor.ifBlank { existing.manga.authors },
+						description = resolvedDescription,
 						isBroken = false,
 						healthError = null,
 						normalizedTitle = TitleNormalizer.normalize(item.title),
 					)
-					val tags = item.tags.mapIndexed { idx, t ->
+					val tags = resolvedTagsList.mapIndexed { idx, t ->
 						TagEntity(
 							id = abs((t + item.sourceName).hashCode().toLong()).coerceAtLeast(1L) + idx,
 							title = t,
@@ -509,47 +543,53 @@ class KotatsuLibraryRepository(
 						)
 					}
 					db.getMangaDao().upsert(updatedEntity, tags)
-					val newChList = if (liveFetchedChapters.isNotEmpty()) {
-						liveFetchedChapters.mapIndexed { idx, ch ->
-							val n = idx + 1
-							ChapterEntity(
-								chapterId = swapExistingMangaId * 1000L + n,
-								mangaId = swapExistingMangaId,
-								title = ch.title ?: "Chapter ${ch.number}",
-								number = ch.number,
-								volume = ch.volume,
-								url = ch.url,
-								scanlator = ch.scanlator ?: item.sourceName.removePrefix("EXT:"),
-								uploadDate = ch.uploadDate,
-								branch = ch.branch,
-								index = idx,
-								isRead = n <= readCount,
-								isDownloaded = n <= 2,
-								lastPageRead = if (n <= readCount) 18 else 0,
-							)
+					val newChList = when {
+						liveFetchedChapters.isNotEmpty() -> {
+							liveFetchedChapters.mapIndexed { idx, ch ->
+								val n = idx + 1
+								ChapterEntity(
+									chapterId = swapExistingMangaId * 1000L + n,
+									mangaId = swapExistingMangaId,
+									title = ch.name.ifBlank { "Chapter ${ch.number}" },
+									number = if (ch.number > 0f) ch.number else n.toFloat(),
+									volume = ch.volume,
+									url = ch.url,
+									scanlator = ch.scanlator ?: sourceObj.title,
+									uploadDate = ch.uploadDate,
+									branch = ch.branch,
+									index = idx,
+									isRead = n <= readCount,
+									isDownloaded = false,
+									lastPageRead = if (n <= readCount) 1 else 0,
+								)
+							}
 						}
-					} else {
-						val totalCh = item.totalChapters.coerceIn(12, 36)
-						(1..totalCh).map { n ->
-							ChapterEntity(
-								chapterId = swapExistingMangaId * 1000L + n,
-								mangaId = swapExistingMangaId,
-								title = "Chapter $n",
-								number = n.toFloat(),
-								volume = (n - 1) / 10 + 1,
-								url = "${item.url}/ch-$n",
-								scanlator = item.sourceName.removePrefix("EXT:"),
-								uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
-								branch = null,
-								index = n - 1,
-								isRead = n <= readCount,
-								isDownloaded = n <= 2,
-								lastPageRead = if (n <= readCount) 18 else 0,
-							)
+						item.isDebugMock -> {
+							val totalCh = item.totalChapters.coerceIn(12, 36)
+							(1..totalCh).map { n ->
+								ChapterEntity(
+									chapterId = swapExistingMangaId * 1000L + n,
+									mangaId = swapExistingMangaId,
+									title = "Chapter $n",
+									number = n.toFloat(),
+									volume = (n - 1) / 10 + 1,
+									url = "${item.url}/ch-$n",
+									scanlator = item.sourceName.removePrefix("EXT:"),
+									uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
+									branch = null,
+									index = n - 1,
+									isRead = n <= readCount,
+									isDownloaded = n <= 2,
+									lastPageRead = if (n <= readCount) 18 else 0,
+								)
+							}
 						}
+						else -> emptyList()
 					}
 					db.getChaptersDao().deleteByMangaId(swapExistingMangaId)
-					db.getChaptersDao().upsertAll(newChList)
+					if (newChList.isNotEmpty()) {
+						db.getChaptersDao().upsertAll(newChList)
+					}
 					resultId = swapExistingMangaId
 				}
 			} else {
@@ -559,20 +599,20 @@ class KotatsuLibraryRepository(
 					title = item.title,
 					altTitles = item.altTitle,
 					url = item.url,
-					publicUrl = item.url,
+					publicUrl = fetchedDetails?.publicUrl?.ifBlank { item.url } ?: item.url,
 					rating = item.rating,
-					isNsfw = false,
-					contentRating = "SAFE",
-					coverUrl = if (item.coverSeed.startsWith("http")) item.coverSeed else "studio_cover://${item.coverSeed}",
-					largeCoverUrl = if (item.coverSeed.startsWith("http")) item.coverSeed else "studio_cover://${item.coverSeed}",
-					state = "ONGOING",
-					authors = item.author,
+					isNsfw = fetchedDetails?.isNsfw ?: false,
+					contentRating = if (fetchedDetails?.isNsfw == true) "ADULT" else "SAFE",
+					coverUrl = resolvedCover,
+					largeCoverUrl = resolvedLargeCover,
+					state = fetchedDetails?.state?.name ?: "ONGOING",
+					authors = resolvedAuthor,
 					source = item.sourceName,
-					description = item.description,
+					description = resolvedDescription,
 					normalizedTitle = TitleNormalizer.normalize(item.title),
 					isBroken = false,
 				)
-				val tags = item.tags.mapIndexed { idx, t ->
+				val tags = resolvedTagsList.mapIndexed { idx, t ->
 					TagEntity(
 						id = abs((t + item.sourceName).hashCode().toLong()).coerceAtLeast(1L) + idx,
 						title = t,
@@ -589,51 +629,57 @@ class KotatsuLibraryRepository(
 						createdAt = System.currentTimeMillis(),
 					),
 				)
-				val chapters = if (liveFetchedChapters.isNotEmpty()) {
-					liveFetchedChapters.mapIndexed { idx, ch ->
-						val n = idx + 1
-						ChapterEntity(
-							chapterId = newId * 1000L + n,
-							mangaId = newId,
-							title = ch.title ?: "Chapter ${ch.number}",
-							number = ch.number,
-							volume = ch.volume,
-							url = ch.url,
-							scanlator = ch.scanlator ?: item.sourceName.removePrefix("EXT:"),
-							uploadDate = ch.uploadDate,
-							branch = ch.branch,
-							index = idx,
-							isRead = false,
-							isDownloaded = n == 1,
-							lastPageRead = 0,
-						)
+				val chapters = when {
+					liveFetchedChapters.isNotEmpty() -> {
+						liveFetchedChapters.mapIndexed { idx, ch ->
+							val n = idx + 1
+							ChapterEntity(
+								chapterId = newId * 1000L + n,
+								mangaId = newId,
+								title = ch.name.ifBlank { "Chapter ${ch.number}" },
+								number = if (ch.number > 0f) ch.number else n.toFloat(),
+								volume = ch.volume,
+								url = ch.url,
+								scanlator = ch.scanlator ?: sourceObj.title,
+								uploadDate = ch.uploadDate,
+								branch = ch.branch,
+								index = idx,
+								isRead = false,
+								isDownloaded = false,
+								lastPageRead = 0,
+							)
+						}
 					}
-				} else {
-					val totalCh = item.totalChapters.coerceIn(10, 30)
-					(1..totalCh).map { n ->
-						ChapterEntity(
-							chapterId = newId * 1000L + n,
-							mangaId = newId,
-							title = "Chapter $n",
-							number = n.toFloat(),
-							volume = (n - 1) / 10 + 1,
-							url = "${item.url}/ch-$n",
-							scanlator = item.sourceName.removePrefix("EXT:"),
-							uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
-							branch = null,
-							index = n - 1,
-							isRead = false,
-							isDownloaded = n == 1,
-							lastPageRead = 0,
-						)
+					item.isDebugMock -> {
+						val totalCh = item.totalChapters.coerceIn(10, 30)
+						(1..totalCh).map { n ->
+							ChapterEntity(
+								chapterId = newId * 1000L + n,
+								mangaId = newId,
+								title = "Chapter $n",
+								number = n.toFloat(),
+								volume = (n - 1) / 10 + 1,
+								url = "${item.url}/ch-$n",
+								scanlator = item.sourceName.removePrefix("EXT:"),
+								uploadDate = System.currentTimeMillis() - (totalCh - n) * 86_400_000L,
+								branch = null,
+								index = n - 1,
+								isRead = false,
+								isDownloaded = n == 1,
+								lastPageRead = 0,
+							)
+						}
 					}
+					else -> emptyList()
 				}
-				db.getChaptersDao().upsertAll(chapters)
+				if (chapters.isNotEmpty()) {
+					db.getChaptersDao().upsertAll(chapters)
+				}
 				db.getAuxiliaryDao().upsertTrack(
 					TrackEntity(
 						mangaId = newId,
 						totalChapters = chapters.size,
-						lastChapterId = chapters.last().chapterId,
+						lastChapterId = chapters.lastOrNull()?.chapterId ?: 0L,
 						newChapters = chapters.size,
 						lastCheckTime = System.currentTimeMillis(),
 						lastChapterDate = System.currentTimeMillis(),
@@ -1127,7 +1173,8 @@ class KotatsuLibraryRepository(
 	}
 
 	/**
-	 * Scrubs all debug/mock manga entries and orphaned history cached in Room without deleting real user manga.
+	 * Scrubs all debug/mock manga entries, pre-seeded sandbox categories, pre-seeded mock repos,
+	 * and orphaned history cached in Room without deleting real user manga.
 	 */
 	suspend fun purgeDebugMockDataset(): Int = withContext(Dispatchers.IO) {
 		val allExisting = db.getMangaDao().getAllWithTags()
@@ -1147,24 +1194,53 @@ class KotatsuLibraryRepository(
 			.map { it.mangaId }
 			.filter { it !in remainingValidMangaIds }
 			.toSet()
-		if (orphanedHistoryIds.isNotEmpty()) {
-			db.withTransaction {
-				for (id in orphanedHistoryIds) {
-					db.getHistoryDao().deleteByMangaId(id)
-					db.getChaptersHistoryDao().deleteByMangaId(id)
-				}
+
+		db.withTransaction {
+			for (id in orphanedHistoryIds) {
+				db.getHistoryDao().deleteByMangaId(id)
+				db.getChaptersHistoryDao().deleteByMangaId(id)
+			}
+
+			// Remove pre-seeded mock extension repositories from legacy/sandbox builds
+			val existingRepos = db.getAuxiliaryDao().getExtensionRepos()
+			existingRepos.filter { repo ->
+				repo.baseUrl.startsWith("content://") ||
+					repo.baseUrl.startsWith("file://") ||
+					(repo.repoId == 1L && repo.extensionCount == 1488 && repo.name == "Keiyoushi / Mihon Official Extension Index")
+			}.forEach { mockRepo ->
+				db.getAuxiliaryDao().deleteExtensionRepo(mockRepo.repoId)
+			}
+
+			// Remove pre-seeded sandbox categories (1..4) if no real user manga is assigned to them
+			val activeUserFavCatIds = db.getFavouritesDao().getAllFavourites()
+				.filter { it.mangaId in remainingValidMangaIds }
+				.map { it.categoryId.toInt() }
+				.toSet()
+			val sandboxCategoryTitles = setOf(
+				"Reading Now",
+				"Seinen & Dark Fantasy",
+				"Webtoons & Manhwa",
+				"Local CBZ Vault",
+			)
+			db.getFavouritesDao().getCategories().filter { cat ->
+				cat.categoryId in 1..4 &&
+					cat.title in sandboxCategoryTitles &&
+					cat.categoryId !in activeUserFavCatIds
+			}.forEach { cat ->
+				db.getFavouritesDao().deleteCategory(cat.categoryId)
 			}
 		}
 		mockIds.size
 	}
 
 	/**
-	 * Seeds the Kotatsu v28 database. In production UI, `seedDebugMockData` is controlled by
-	 * `debugSandboxEnabled` (strictly defaulting to `false`).
+	 * Seeds the database ONLY when `seedDebugMockData == true`.
+	 * When `seedDebugMockData == false` (default), purges all mock/sandbox records so the app starts
+	 * with 0 manga, 0 sources, 0 extension repos, and 0 categories.
 	 */
-	suspend fun ensureSeeded(seedDebugMockData: Boolean = true) = withContext(Dispatchers.IO) {
-		ensureBaseCategoriesAndReposSeeded()
+	suspend fun ensureSeeded(seedDebugMockData: Boolean = false) = withContext(Dispatchers.IO) {
 		if (seedDebugMockData) {
+			ensureBaseCategoriesAndReposSeeded()
 			if (db.getMangaDao().getAllWithTags().none { it.manga.id in DEBUG_MOCK_MANGA_IDS }) {
 				seedDebugSandboxDataset()
 			}

@@ -191,8 +191,111 @@ fun ReaderScreen(
 	volumeKeyEvents: Flow<Int> = emptyFlow(),
 	isIncognitoSession: Boolean = false,
 ) {
-	val totalPages = 18
-	val totalChapters = mangaItem.totalChapters.coerceAtLeast(1)
+	val initContext = LocalContext.current
+	val liveFetchedChapters by androidx.compose.runtime.produceState<List<org.koitharu.kotatsu.parsers.model.MangaChapter>>(
+		initialValue = emptyList(),
+		mangaItem.manga.id,
+		mangaItem.manga.url,
+		mangaItem.manga.source,
+		mangaItem.chapters.size,
+		mangaItem.isDebugMock,
+	) {
+		if (!mangaItem.isDebugMock && mangaItem.chapters.isEmpty() && mangaItem.manga.url.isNotBlank()) {
+			value = withContext(Dispatchers.IO) {
+				runCatching {
+					val src = org.koitharu.kotatsu.core.model.MangaSource(mangaItem.manga.source)
+					val repo = org.koitharu.kotatsu.core.parser.MangaRepository.Factory(initContext).createAsync(src)
+					repo.getDetails(
+						org.koitharu.kotatsu.parsers.model.Manga(
+							id = mangaItem.manga.id,
+							title = mangaItem.manga.title,
+							altTitle = mangaItem.manga.altTitles,
+							url = mangaItem.manga.url,
+							publicUrl = mangaItem.manga.publicUrl,
+							rating = mangaItem.manga.rating,
+							isNsfw = mangaItem.manga.isNsfw,
+							coverUrl = mangaItem.manga.coverUrl,
+							largeCoverUrl = mangaItem.manga.largeCoverUrl,
+							description = mangaItem.manga.description,
+							tags = emptySet(),
+							state = org.koitharu.kotatsu.parsers.model.MangaState.ONGOING,
+							author = mangaItem.manga.authors,
+							chapters = null,
+							source = src,
+						),
+					).chapters.orEmpty()
+				}.getOrDefault(emptyList())
+			}
+		} else {
+			value = emptyList()
+		}
+	}
+
+	val totalChapters = when {
+		mangaItem.isDebugMock -> mangaItem.totalChapters.coerceAtLeast(1)
+		mangaItem.chapters.isNotEmpty() -> mangaItem.chapters.size
+		liveFetchedChapters.isNotEmpty() -> liveFetchedChapters.size
+		else -> 1
+	}
+
+	val resolvedActiveChapterUrl = remember(mangaItem.chapters, liveFetchedChapters, chapterIndex) {
+		val safeIdx = chapterIndex.coerceIn(0, (totalChapters - 1).coerceAtLeast(0))
+		mangaItem.chapters.getOrNull(safeIdx)?.url
+			?: liveFetchedChapters.getOrNull(safeIdx)?.url
+	}
+
+	val liveResolvedPageUrls by androidx.compose.runtime.produceState<List<String>>(
+		initialValue = emptyList(),
+		mangaItem.manga.id,
+		mangaItem.manga.url,
+		mangaItem.manga.source,
+		resolvedActiveChapterUrl,
+		chapterIndex,
+		mangaItem.isDebugMock,
+	) {
+		if (mangaItem.isDebugMock) {
+			value = emptyList()
+		} else {
+			value = withContext(Dispatchers.IO) {
+				if (mangaItem.manga.url.startsWith("cbz://")) {
+					val rawPath = mangaItem.manga.url.removePrefix("cbz://").substringBefore('#')
+					val count = org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.countPagesInCbzFile(File(rawPath)).coerceAtLeast(1)
+					List(count) { pIdx -> "cbz://$rawPath#page_$pIdx" }
+				} else if (!resolvedActiveChapterUrl.isNullOrBlank()) {
+					runCatching {
+						val src = org.koitharu.kotatsu.core.model.MangaSource(mangaItem.manga.source)
+						val repo = org.koitharu.kotatsu.core.parser.MangaRepository.Factory(initContext).createAsync(src)
+						val pages = repo.getPages(
+							org.koitharu.kotatsu.parsers.model.MangaChapter(
+								id = kotlin.math.abs((mangaItem.manga.source + "|" + resolvedActiveChapterUrl).hashCode().toLong()),
+								name = "Chapter ${chapterIndex + 1}",
+								number = (chapterIndex + 1).toFloat(),
+								volume = 0,
+								url = resolvedActiveChapterUrl,
+								scanlator = null,
+								uploadDate = 0L,
+								branch = null,
+								source = src,
+							),
+						)
+						pages.map { p -> runCatching { repo.getPageUrl(p) }.getOrDefault(p.url) }
+					}.getOrDefault(emptyList())
+				} else {
+					emptyList()
+				}
+			}
+		}
+	}
+
+	val totalPages = when {
+		mangaItem.isDebugMock -> 18
+		liveResolvedPageUrls.isNotEmpty() -> liveResolvedPageUrls.size
+		mangaItem.manga.url.startsWith("cbz://") -> {
+			val rawPath = mangaItem.manga.url.removePrefix("cbz://").substringBefore('#')
+			org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.countPagesInCbzFile(File(rawPath)).coerceAtLeast(1)
+		}
+		else -> 1
+	}
 
 	// Start in clean Fullscreen Reading State (isHudVisible == false) or collapse on page turn / scroll
 	var isHudVisible by remember { mutableStateOf(false) }
@@ -294,38 +397,102 @@ fun ReaderScreen(
 		UiSourceAndTitleFormatter.formatDisplayTitle(mangaItem.manga.title)
 	}
 
-	val chapterEntries = remember(mangaItem.manga.id, totalChapters, activeChapterSource) {
-		val relativeDates = listOf("Today", "Yesterday", "3d ago", "6d ago", "2w ago", "1mo ago", "2mo ago")
-		val chapterTitles = listOf(
-			"The Quiet Threshold",
-			"Echoes Under Rain",
-			"Promises in Neon",
-			"Lanterns at Midnight",
-			"Distant Footsteps",
-			"Fractured Horizon",
-			"Beneath the Cherry Tree",
-			"Unspoken Words",
-		)
-		val secondaryScanlators = listOf("Asmodeus Scans", "Aqua Scans", "Bato Mirror")
-		List(totalChapters) { idx ->
-			val vol = (idx / 10) + 1
-			// Every 5th index (idx % 5 == 2 && idx > 0) represents a secondary scanlator upload of the same chapter number
-			val isSecondaryDuplicate = idx > 0 && idx % 5 == 2
-			val logicalChInt = if (isSecondaryDuplicate) idx else idx + 1
-			val chNum = if (!isSecondaryDuplicate && idx % 7 == 4) "${logicalChInt}.5" else "$logicalChInt"
-			val scanlator = if (isSecondaryDuplicate) {
-				secondaryScanlators[idx % secondaryScanlators.size]
+	val chapterEntries = remember(
+		mangaItem.manga.id,
+		mangaItem.chapters,
+		liveFetchedChapters,
+		totalChapters,
+		activeChapterSource,
+		mangaItem.isDebugMock,
+	) {
+		if (!mangaItem.isDebugMock) {
+			if (mangaItem.chapters.isNotEmpty()) {
+				val now = System.currentTimeMillis()
+				mangaItem.chapters.mapIndexed { idx, ch ->
+					val numStr = if (ch.number % 1f == 0f) ch.number.toInt().toString() else ch.number.toString()
+					val ageDays = if (ch.uploadDate > 0L) ((now - ch.uploadDate).coerceAtLeast(0L) / 86_400_000L) else -1L
+					val relDate = when {
+						ageDays < 0L -> ""
+						ageDays == 0L -> "Today"
+						ageDays == 1L -> "Yesterday"
+						ageDays < 30L -> "${ageDays}d ago"
+						else -> "${ageDays / 30L}mo ago"
+					}
+					ReaderChapterEntry(
+						index = idx,
+						volumeNumber = ch.volume.coerceAtLeast(1),
+						chapterNumber = numStr,
+						title = ch.title.ifBlank { "Chapter $numStr" },
+						relativeDate = relDate,
+						scanlatorOrSource = ch.scanlator?.takeIf { it.isNotBlank() } ?: activeChapterSource,
+					)
+				}
+			} else if (liveFetchedChapters.isNotEmpty()) {
+				val now = System.currentTimeMillis()
+				liveFetchedChapters.mapIndexed { idx, ch ->
+					val numVal = if (ch.number > 0f) ch.number else (idx + 1).toFloat()
+					val numStr = if (numVal % 1f == 0f) numVal.toInt().toString() else numVal.toString()
+					val ageDays = if (ch.uploadDate > 0L) ((now - ch.uploadDate).coerceAtLeast(0L) / 86_400_000L) else -1L
+					val relDate = when {
+						ageDays < 0L -> ""
+						ageDays == 0L -> "Today"
+						ageDays == 1L -> "Yesterday"
+						ageDays < 30L -> "${ageDays}d ago"
+						else -> "${ageDays / 30L}mo ago"
+					}
+					ReaderChapterEntry(
+						index = idx,
+						volumeNumber = ch.volume.coerceAtLeast(1),
+						chapterNumber = numStr,
+						title = ch.name.ifBlank { "Chapter $numStr" },
+						relativeDate = relDate,
+						scanlatorOrSource = ch.scanlator?.takeIf { it.isNotBlank() } ?: activeChapterSource,
+					)
+				}
 			} else {
-				activeChapterSource
+				listOf(
+					ReaderChapterEntry(
+						index = 0,
+						volumeNumber = 1,
+						chapterNumber = "1",
+						title = "Chapter 1",
+						relativeDate = "",
+						scanlatorOrSource = activeChapterSource,
+					),
+				)
 			}
-			ReaderChapterEntry(
-				index = idx,
-				volumeNumber = vol,
-				chapterNumber = chNum,
-				title = chapterTitles[logicalChInt % chapterTitles.size],
-				relativeDate = relativeDates[(totalChapters - 1 - idx).coerceAtLeast(0) % relativeDates.size],
-				scanlatorOrSource = scanlator,
+		} else {
+			val relativeDates = listOf("Today", "Yesterday", "3d ago", "6d ago", "2w ago", "1mo ago", "2mo ago")
+			val chapterTitles = listOf(
+				"The Quiet Threshold",
+				"Echoes Under Rain",
+				"Promises in Neon",
+				"Lanterns at Midnight",
+				"Distant Footsteps",
+				"Fractured Horizon",
+				"Beneath the Cherry Tree",
+				"Unspoken Words",
 			)
+			val secondaryScanlators = listOf("Asmodeus Scans", "Aqua Scans", "Bato Mirror")
+			List(totalChapters) { idx ->
+				val vol = (idx / 10) + 1
+				val isSecondaryDuplicate = idx > 0 && idx % 5 == 2
+				val logicalChInt = if (isSecondaryDuplicate) idx else idx + 1
+				val chNum = if (!isSecondaryDuplicate && idx % 7 == 4) "${logicalChInt}.5" else "$logicalChInt"
+				val scanlator = if (isSecondaryDuplicate) {
+					secondaryScanlators[idx % secondaryScanlators.size]
+				} else {
+					activeChapterSource
+				}
+				ReaderChapterEntry(
+					index = idx,
+					volumeNumber = vol,
+					chapterNumber = chNum,
+					title = chapterTitles[logicalChInt % chapterTitles.size],
+					relativeDate = relativeDates[(totalChapters - 1 - idx).coerceAtLeast(0) % relativeDates.size],
+					scanlatorOrSource = scanlator,
+				)
+			}
 		}
 	}
 
@@ -405,14 +572,15 @@ fun ReaderScreen(
 	val isVerticalPager = readerConfig.readingMode == ReaderStyleMode.PAGER_VERTICAL
 	val isWebtoon = readerConfig.readingMode == ReaderStyleMode.WEBTOON_CONTINUOUS
 
-	val activeChapterUrl = remember(mangaItem.chapters, chapterIndex) {
-		mangaItem.chapters.getOrNull(chapterIndex.coerceIn(0, (mangaItem.chapters.size - 1).coerceAtLeast(0)))?.url
-	}
+	val activeChapterUrl = resolvedActiveChapterUrl
+	val activeDirectPageUrl = liveResolvedPageUrls.getOrNull(pageIndex.coerceIn(0, (liveResolvedPageUrls.size - 1).coerceAtLeast(0)))
 
 	val decodedPageBitmap by produceState<Bitmap?>(
 		initialValue = null,
 		mangaItem.manga.url,
+		mangaItem.manga.source,
 		activeChapterUrl,
+		activeDirectPageUrl,
 		chapterIndex,
 		pageIndex,
 		readerConfig.wideSpreadMode,
@@ -422,11 +590,12 @@ fun ReaderScreen(
 			decodeLocalOrOnlineMangaPageBitmap(
 				mangaUrl = mangaItem.manga.url,
 				mangaTitle = cleanMangaTitle,
-				chapterUrl = activeChapterUrl,
+				chapterUrl = activeDirectPageUrl ?: activeChapterUrl,
 				chapterIndex = chapterIndex,
 				pageIndex = pageIndex,
 				wideSpreadMode = readerConfig.wideSpreadMode,
 				isRtl = isRtl,
+				sourceName = mangaItem.manga.source,
 			)
 		}
 	}
@@ -775,32 +944,92 @@ fun ReaderScreen(
 							}
 							.testTag("reader_webtoon_page_box_$idx"),
 					) {
-						MangaReaderPageCanvas(
-							mangaTitle = cleanMangaTitle,
-							chapterNumber = (chapterIndex + 1).toFloat(),
-							pageNumber = idx + 1,
-							totalPages = totalPages,
-							upscaleMode = readerConfig.aiUpscaleMode,
-							showBeforeAfterSplit = readerConfig.showBeforeAfterSplit,
-							warmPaperTint = readerConfig.warmPaperTint,
-							invertColors = readerConfig.invertColors,
-							grayscale = readerConfig.grayscale,
-							colorFilterPreset = readerConfig.colorFilterPreset,
-							brightnessDelta = readerConfig.brightnessDelta,
-							contrastDelta = readerConfig.contrastDelta,
-							warmthDelta = readerConfig.warmthDelta,
-							bedtimeDimmerAlpha = readerConfig.bedtimeDimmerAlpha,
-							saturation = readerConfig.saturation,
-							redBalance = readerConfig.redBalance,
-							greenBalance = readerConfig.greenBalance,
-							blueBalance = readerConfig.blueBalance,
-							decodedBitmap = if (idx == pageIndex) decodedPageBitmap else null,
-							seamlessVerticalStitch = stitchFlush,
-							isDebugMock = mangaItem.isDebugMock,
-							modifier = Modifier
-								.fillMaxSize()
-								.padding(if (stitchFlush || effectiveAutoCrop) 0.dp else 6.dp),
-						)
+						val itemDirectUrl = liveResolvedPageUrls.getOrNull(idx)
+						val itemDecodedBitmap by produceState<Bitmap?>(
+							initialValue = if (idx == pageIndex) decodedPageBitmap else null,
+							mangaItem.manga.url,
+							mangaItem.manga.source,
+							activeChapterUrl,
+							itemDirectUrl,
+							chapterIndex,
+							idx,
+							readerConfig.wideSpreadMode,
+							isRtl,
+						) {
+							if (idx == pageIndex && decodedPageBitmap != null) {
+								value = decodedPageBitmap
+							} else {
+								value = withContext(Dispatchers.IO) {
+									decodeLocalOrOnlineMangaPageBitmap(
+										mangaUrl = mangaItem.manga.url,
+										mangaTitle = cleanMangaTitle,
+										chapterUrl = itemDirectUrl ?: activeChapterUrl,
+										chapterIndex = chapterIndex,
+										pageIndex = idx,
+										wideSpreadMode = readerConfig.wideSpreadMode,
+										isRtl = isRtl,
+										sourceName = mangaItem.manga.source,
+									)
+								}
+							}
+						}
+						if (itemDirectUrl != null && itemDirectUrl.startsWith("data:text/html;base64,")) {
+							val plainText = remember(itemDirectUrl) {
+								runCatching {
+									val rawB64 = itemDirectUrl.removePrefix("data:text/html;base64,")
+									val html = String(android.util.Base64.decode(rawB64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+									android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+								}.getOrDefault("")
+							}
+							Column(
+								modifier = Modifier
+									.fillMaxSize()
+									.background(Color(0xFF10131A))
+									.verticalScroll(rememberScrollState())
+									.padding(horizontal = 20.dp, vertical = 28.dp),
+							) {
+								Text(
+									text = currentChapterEntry.title,
+									color = Color.White,
+									fontSize = 18.sp,
+									fontWeight = FontWeight.Bold,
+								)
+								Spacer(modifier = Modifier.height(14.dp))
+								Text(
+									text = plainText.ifBlank { "Empty novel chapter content." },
+									color = Color(0xFFE2E8F0),
+									fontSize = 15.sp,
+									lineHeight = 24.sp,
+								)
+							}
+						} else {
+							MangaReaderPageCanvas(
+								mangaTitle = cleanMangaTitle,
+								chapterNumber = (chapterIndex + 1).toFloat(),
+								pageNumber = idx + 1,
+								totalPages = totalPages,
+								upscaleMode = readerConfig.aiUpscaleMode,
+								showBeforeAfterSplit = readerConfig.showBeforeAfterSplit,
+								warmPaperTint = readerConfig.warmPaperTint,
+								invertColors = readerConfig.invertColors,
+								grayscale = readerConfig.grayscale,
+								colorFilterPreset = readerConfig.colorFilterPreset,
+								brightnessDelta = readerConfig.brightnessDelta,
+								contrastDelta = readerConfig.contrastDelta,
+								warmthDelta = readerConfig.warmthDelta,
+								bedtimeDimmerAlpha = readerConfig.bedtimeDimmerAlpha,
+								saturation = readerConfig.saturation,
+								redBalance = readerConfig.redBalance,
+								greenBalance = readerConfig.greenBalance,
+								blueBalance = readerConfig.blueBalance,
+								decodedBitmap = itemDecodedBitmap,
+								seamlessVerticalStitch = stitchFlush,
+								isDebugMock = mangaItem.isDebugMock,
+								modifier = Modifier
+									.fillMaxSize()
+									.padding(if (stitchFlush || effectiveAutoCrop) 0.dp else 6.dp),
+							)
+						}
 					}
 				}
 
@@ -977,32 +1206,92 @@ fun ReaderScreen(
 							},
 						contentAlignment = Alignment.Center,
 					) {
-						MangaReaderPageCanvas(
-							mangaTitle = cleanMangaTitle,
-							chapterNumber = (chapterIndex + 1).toFloat(),
-							pageNumber = pageIdx + 1,
-							totalPages = totalPages,
-							upscaleMode = readerConfig.aiUpscaleMode,
-							showBeforeAfterSplit = readerConfig.showBeforeAfterSplit,
-							warmPaperTint = readerConfig.warmPaperTint,
-							invertColors = readerConfig.invertColors,
-							grayscale = readerConfig.grayscale,
-							colorFilterPreset = readerConfig.colorFilterPreset,
-							brightnessDelta = readerConfig.brightnessDelta,
-							contrastDelta = readerConfig.contrastDelta,
-							warmthDelta = readerConfig.warmthDelta,
-							bedtimeDimmerAlpha = readerConfig.bedtimeDimmerAlpha,
-							saturation = readerConfig.saturation,
-							redBalance = readerConfig.redBalance,
-							greenBalance = readerConfig.greenBalance,
-							blueBalance = readerConfig.blueBalance,
-							decodedBitmap = if (pageIdx == pageIndex) decodedPageBitmap else null,
-							seamlessVerticalStitch = stitchVerticalPage,
-							isDebugMock = mangaItem.isDebugMock,
-							modifier = Modifier
-								.fillMaxSize()
-								.padding(if (stitchVerticalPage || effectiveAutoCrop) 0.dp else 6.dp),
-						)
+						val pagedDirectUrl = liveResolvedPageUrls.getOrNull(pageIdx)
+						val pagedDecodedBitmap by produceState<Bitmap?>(
+							initialValue = if (pageIdx == pageIndex) decodedPageBitmap else null,
+							mangaItem.manga.url,
+							mangaItem.manga.source,
+							activeChapterUrl,
+							pagedDirectUrl,
+							chapterIndex,
+							pageIdx,
+							readerConfig.wideSpreadMode,
+							isRtl,
+						) {
+							if (pageIdx == pageIndex && decodedPageBitmap != null) {
+								value = decodedPageBitmap
+							} else {
+								value = withContext(Dispatchers.IO) {
+									decodeLocalOrOnlineMangaPageBitmap(
+										mangaUrl = mangaItem.manga.url,
+										mangaTitle = cleanMangaTitle,
+										chapterUrl = pagedDirectUrl ?: activeChapterUrl,
+										chapterIndex = chapterIndex,
+										pageIndex = pageIdx,
+										wideSpreadMode = readerConfig.wideSpreadMode,
+										isRtl = isRtl,
+										sourceName = mangaItem.manga.source,
+									)
+								}
+							}
+						}
+						if (pagedDirectUrl != null && pagedDirectUrl.startsWith("data:text/html;base64,")) {
+							val plainText = remember(pagedDirectUrl) {
+								runCatching {
+									val rawB64 = pagedDirectUrl.removePrefix("data:text/html;base64,")
+									val html = String(android.util.Base64.decode(rawB64, android.util.Base64.DEFAULT), Charsets.UTF_8)
+									android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+								}.getOrDefault("")
+							}
+							Column(
+								modifier = Modifier
+									.fillMaxSize()
+									.background(Color(0xFF10131A))
+									.verticalScroll(rememberScrollState())
+									.padding(horizontal = 20.dp, vertical = 28.dp),
+							) {
+								Text(
+									text = currentChapterEntry.title,
+									color = Color.White,
+									fontSize = 18.sp,
+									fontWeight = FontWeight.Bold,
+								)
+								Spacer(modifier = Modifier.height(14.dp))
+								Text(
+									text = plainText.ifBlank { "Empty novel chapter content." },
+									color = Color(0xFFE2E8F0),
+									fontSize = 15.sp,
+									lineHeight = 24.sp,
+								)
+							}
+						} else {
+							MangaReaderPageCanvas(
+								mangaTitle = cleanMangaTitle,
+								chapterNumber = (chapterIndex + 1).toFloat(),
+								pageNumber = pageIdx + 1,
+								totalPages = totalPages,
+								upscaleMode = readerConfig.aiUpscaleMode,
+								showBeforeAfterSplit = readerConfig.showBeforeAfterSplit,
+								warmPaperTint = readerConfig.warmPaperTint,
+								invertColors = readerConfig.invertColors,
+								grayscale = readerConfig.grayscale,
+								colorFilterPreset = readerConfig.colorFilterPreset,
+								brightnessDelta = readerConfig.brightnessDelta,
+								contrastDelta = readerConfig.contrastDelta,
+								warmthDelta = readerConfig.warmthDelta,
+								bedtimeDimmerAlpha = readerConfig.bedtimeDimmerAlpha,
+								saturation = readerConfig.saturation,
+								redBalance = readerConfig.redBalance,
+								greenBalance = readerConfig.greenBalance,
+								blueBalance = readerConfig.blueBalance,
+								decodedBitmap = pagedDecodedBitmap,
+								seamlessVerticalStitch = stitchVerticalPage,
+								isDebugMock = mangaItem.isDebugMock,
+								modifier = Modifier
+									.fillMaxSize()
+									.padding(if (stitchVerticalPage || effectiveAutoCrop) 0.dp else 6.dp),
+							)
+						}
 					}
 				}
 			}
@@ -2998,9 +3287,11 @@ private suspend fun decodeLocalOrOnlineMangaPageBitmap(
 	pageIndex: Int,
 	wideSpreadMode: ReaderWideSpreadMode,
 	isRtl: Boolean,
+	sourceName: String = "",
 ): Bitmap? {
 	if (
-		(mangaUrl.startsWith("http://") || mangaUrl.startsWith("https://")) &&
+		((mangaUrl.startsWith("http://") || mangaUrl.startsWith("https://")) ||
+			(!chapterUrl.isNullOrBlank() && (chapterUrl.startsWith("http://") || chapterUrl.startsWith("https://")))) &&
 		!mangaUrl.contains("example.org") &&
 		!mangaUrl.contains(".ext/")
 	) {
@@ -3011,6 +3302,7 @@ private suspend fun decodeLocalOrOnlineMangaPageBitmap(
 				chapterUrl = chapterUrl,
 				pageIndex = pageIndex,
 				chapterIndex = chapterIndex,
+				sourceName = sourceName,
 			)
 		}.getOrNull()
 		if (onlineBitmap != null) {
@@ -3023,7 +3315,7 @@ private suspend fun decodeLocalOrOnlineMangaPageBitmap(
 		}
 	}
 	return decodeLocalMangaPageBitmap(
-		mangaUrl = mangaUrl,
+		mangaUrl = chapterUrl?.takeIf { it.startsWith("cbz://") || it.startsWith("file://") } ?: mangaUrl,
 		pageIndex = pageIndex,
 		wideSpreadMode = wideSpreadMode,
 		isRtl = isRtl,

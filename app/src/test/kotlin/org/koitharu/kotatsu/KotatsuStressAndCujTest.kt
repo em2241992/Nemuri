@@ -1,6 +1,7 @@
 package org.koitharu.kotatsu
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.room.Room
 import androidx.room.withTransaction
@@ -27,6 +28,7 @@ import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.db.entity.ChapterEntity
 import org.koitharu.kotatsu.core.db.entity.FavouriteEntity
 import org.koitharu.kotatsu.core.db.entity.MangaEntity
+import org.koitharu.kotatsu.core.db.entity.MangaMergeLinkEntity
 import org.koitharu.kotatsu.core.db.entity.TagEntity
 import org.koitharu.kotatsu.core.db.entity.TitleNormalizer
 import org.koitharu.kotatsu.core.model.AiUpscaleMode
@@ -34,12 +36,21 @@ import org.koitharu.kotatsu.core.model.AppColorSchemePreset
 import org.koitharu.kotatsu.core.model.AppNavTab
 import org.koitharu.kotatsu.core.model.AppThemeMode
 import org.koitharu.kotatsu.core.model.BatchDeduplicationRule
+import org.koitharu.kotatsu.core.model.MangaSource
 import org.koitharu.kotatsu.core.model.NavBarStyle
+import org.koitharu.kotatsu.core.parser.EmptyMangaRepository
+import org.koitharu.kotatsu.core.parser.GlobalParserContextHolder
+import org.koitharu.kotatsu.core.parser.KotatsuExternalProviderScanner
 import org.koitharu.kotatsu.core.parser.KotatsuLibraryRepository
+import org.koitharu.kotatsu.core.parser.LocalMangaRepository
+import org.koitharu.kotatsu.core.parser.MangaRepository
+import org.koitharu.kotatsu.extensions.ExtensionCatalogManga
 import org.koitharu.kotatsu.extensions.ExternalExtensionManager
 import org.koitharu.kotatsu.main.ui.KotatsuNeoViewModel
+import org.koitharu.kotatsu.mihon.LazyMihonMangaRepository
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -55,7 +66,13 @@ class KotatsuStressAndCujTest {
 	@Before
 	fun setUp() {
 		app = ApplicationProvider.getApplicationContext()
-		java.io.File(app.filesDir, "installed_extensions_registry.json").delete()
+		GlobalParserContextHolder.applicationContext = app
+		app.getSharedPreferences("kotatsu_neo_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+		File(app.filesDir, "installed_extensions_registry.json").delete()
+		File(app.filesDir, "repo_indexes").deleteRecursively()
+		File(app.filesDir, "ln_plugins").deleteRecursively()
+		File(app.filesDir, "cbz_imports").deleteRecursively()
+		File(app.filesDir, "local_cbz").deleteRecursively()
 		db = Room.inMemoryDatabaseBuilder(app, MangaDatabase::class.java)
 			.allowMainThreadQueries()
 			.build()
@@ -71,8 +88,87 @@ class KotatsuStressAndCujTest {
 	}
 
 	@Test
+	fun testCleanStartupZeroMangaZeroSourcesZeroInfoAndFeedSafety() = runBlocking {
+		// 1. Default startup (seedDebugMockData = false) MUST have 0 manga, 0 sources, 0 repos, 0 categories, 0 history
+		libraryRepo.ensureSeeded(seedDebugMockData = false)
+		assertTrue("Fresh library must have 0 manga", libraryRepo.observeLibraryItems().first().isEmpty())
+		assertTrue("Fresh DB must have 0 categories", db.getFavouritesDao().getCategories().isEmpty())
+		assertTrue("Fresh DB must have 0 extension repos", db.getAuxiliaryDao().getExtensionRepos().isEmpty())
+		assertTrue("Fresh DB must have 0 history rows", db.getHistoryDao().getAllHistory().isEmpty())
+		assertTrue(
+			"Fresh extension manager must discover 0 sources when none are installed",
+			extensionManager.discoverExtensions(emptyList(), includeDebugMock = false).isEmpty(),
+		)
+		assertTrue(
+			"Fresh extension catalog must be empty when debug sandbox is disabled",
+			extensionManager.getExtensionCatalogItems(includeDebugMock = false).isEmpty(),
+		)
+
+		val vm = KotatsuNeoViewModel(app)
+		assertFalse("Debug sandbox must be OFF by default", vm.debugSandboxEnabled.value)
+		assertTrue("ViewModel repair audit log must be empty on fresh launch", vm.repairAuditLog.value.isEmpty())
+		assertTrue("ViewModel merged sources must be empty on fresh launch", vm.mergedSourcesByMangaId.value.isEmpty())
+		assertTrue("ViewModel extension catalog must be empty on fresh launch", vm.extensionCatalog.isEmpty())
+
+		// 2. Empty feed must produce 0 entries without crashing
+		val emptyFeedEntries = org.koitharu.kotatsu.ui.screens.buildHybridFeedEntries(
+			feedUpdates = emptyList(),
+			libraryItems = emptyList(),
+			extensionCatalog = emptyList(),
+			libraryNormalizedTitles = emptySet(),
+			defaultSource = "All Sources",
+			searchQuery = "",
+		)
+		assertTrue("Hybrid feed must be completely empty when 0 manga and 0 sources exist", emptyFeedEntries.isEmpty())
+
+		// 3. Duplicate URLs across real sources must produce strictly unique Lazy keys & zero fake comments/quotes
+		val realCatalogWithDuplicateUrls = listOf(
+			ExtensionCatalogManga(
+				title = "Real Series Alpha",
+				altTitle = null,
+				author = "Author A",
+				sourceName = "MIHON_1001",
+				url = "/manga/shared-slug",
+				coverSeed = "https://cdn.real.org/alpha.jpg",
+				totalChapters = 14,
+				rating = 0.9f,
+				tags = listOf("Action"),
+				description = "Real parsed description A.",
+				lang = "EN",
+				isDebugMock = false,
+			),
+			ExtensionCatalogManga(
+				title = "Real Series Beta",
+				altTitle = null,
+				author = "Author B",
+				sourceName = "KOTATSU_ORG_EXAMPLE",
+				url = "/manga/shared-slug",
+				coverSeed = "https://cdn.real.org/beta.jpg",
+				totalChapters = 8,
+				rating = 0.85f,
+				tags = listOf("Drama"),
+				description = "Real parsed description B.",
+				lang = "EN",
+				isDebugMock = false,
+			),
+		)
+		val realEntries = org.koitharu.kotatsu.ui.screens.buildHybridFeedEntries(
+			feedUpdates = emptyList(),
+			libraryItems = emptyList(),
+			extensionCatalog = realCatalogWithDuplicateUrls,
+			libraryNormalizedTitles = emptySet(),
+			defaultSource = "All Sources",
+			searchQuery = "",
+		)
+		assertEquals(2, realEntries.size)
+		assertEquals("Every HybridFeedEntry ID must be unique for Compose Lazy lists", 2, realEntries.map { it.id }.distinct().size)
+		assertTrue("Non-mock entries must have 0 fake comments", realEntries.all { it.baseCommentCount == 0 && it.topCommentPreview.isEmpty() })
+		assertTrue("Non-mock entries must not expand sandbox extra series", realEntries.none { it.isDebugMock })
+	}
+
+	@Test
 	fun stressTestSqliteV28BulkInsertAndFtsSearch() = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 
 		// Bulk insert 500 additional manga series to stress-test SQLite v28 + FTS4 virtual table
 		val bulkCount = 500
@@ -140,7 +236,7 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestKotatsuBakAndMihonTachibkRoundTripAndMalformedResilience() = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 		val initialMangaCount = db.getMangaDao().getAllWithTags().size
 		assertEquals(9, initialMangaCount)
 
@@ -190,7 +286,7 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestAiDeduplicationEnMasseAndFixItMigration() = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 		val initialItems = libraryRepo.observeLibraryItems().first()
 		assertEquals(9, initialItems.size)
 
@@ -210,15 +306,15 @@ class KotatsuStressAndCujTest {
 		assertNotNull(frierenWinner)
 		assertTrue(frierenWinner!!.categoryIds.containsAll(setOf(1L, 2L)))
 
-		// 3. Diagnose and repair broken series via Source Fix-It
-		val brokenProposals = aiEngine.diagnoseBrokenLibraryItems(afterDedupItems)
+		// 3. Diagnose and repair broken series via Source Fix-It (using sandbox installed sources)
+		val brokenProposals = aiEngine.diagnoseBrokenLibraryItems(afterDedupItems, includeDebugMock = true)
 		assertEquals("Should detect 2 broken seeded series (Berserk & ORV)", 2, brokenProposals.size)
 
 		val fixedCount = aiEngine.applyAllAiFixProposals(brokenProposals)
 		assertEquals(2, fixedCount)
 
 		val afterFixItems = libraryRepo.observeLibraryItems().first()
-		val remainingBroken = aiEngine.diagnoseBrokenLibraryItems(afterFixItems)
+		val remainingBroken = aiEngine.diagnoseBrokenLibraryItems(afterFixItems, includeDebugMock = true)
 		assertEquals("All broken series should be healthy after AI Fix-It batch", 0, remainingBroken.size)
 	}
 
@@ -293,15 +389,22 @@ class KotatsuStressAndCujTest {
 		vm.toggleNavTab(AppNavTab.HISTORY)
 		assertEquals(2, vm.enabledNavTabs.value.size)
 
-		// 3. Test Keiyoushi Extension Repository registration
+		// 3. Test Extension Repository URL normalization & real JSON parsing (zero spoofed fallback extensions)
 		val keiyoushiRepo = extensionManager.addExtensionRepository(
 			name = "Keiyoushi Official Repo",
-			url = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json",
+			rawUrl = "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json",
 			repoType = "MIHON_JSON",
 		)
 		assertEquals("https://raw.githubusercontent.com/keiyoushi/extensions/repo", keiyoushiRepo.baseUrl)
-		val discovered = extensionManager.discoverExtensions(listOf(keiyoushiRepo))
-		assertTrue("Keiyoushi repo should expose Mihon extension sources", discovered.size >= 4)
+		val sampleIndexJson = """
+			[
+			  {"name":"Tachiyomi: MangaDex","pkg":"eu.kanade.tachiyomi.extension.en.mangadex","apk":"mangadex.apk","lang":"en","code":205,"version":"1.4.205","nsfw":0,"sources":[{"name":"MangaDex","lang":"en","id":"2499283573021220255","baseUrl":"https://mangadex.org"}]},
+			  {"name":"Tachiyomi: Bato.to","pkg":"eu.kanade.tachiyomi.extension.en.batoto","apk":"batoto.apk","lang":"en","code":44,"version":"1.4.44","nsfw":0,"sources":[{"name":"Bato.to","lang":"en","id":"4401928374","baseUrl":"https://bato.to"}]}
+			]
+		""".trimIndent()
+		val parsed = extensionManager.parseMihonIndexJson(sampleIndexJson, keiyoushiRepo)
+		assertEquals(2, parsed.size)
+		assertTrue("Uninstalled repo entries must NOT be spoofed as installed", parsed.none { it.isInstalled })
 	}
 
 	@Test
@@ -310,40 +413,36 @@ class KotatsuStressAndCujTest {
 		// Default end-user mode (debugSandboxEnabled = false) must have zero dummy catalog data
 		assertFalse(vm.debugSandboxEnabled.value)
 		assertTrue(
-			"Default end-user catalogue must contain zero dummy items",
-			vm.extensionCatalog.none { KotatsuLibraryRepository.isDebugMockTitle(it.title) || it.url.contains(".ext/") },
+			"Default end-user catalogue must contain zero items",
+			vm.extensionCatalog.isEmpty(),
 		)
 
 		// Enable Debug Sandbox Mode to test hybrid feed & catalog discovery
 		vm.setDebugSandboxEnabled(true)
-		libraryRepo.seedDebugSandboxDataset()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 		val items = libraryRepo.observeLibraryItems().first { it.size >= 8 }
-		val feedUpdates = vm.feedUpdates.value
-		val catalog = vm.extensionCatalog
+		val catalog = extensionManager.getExtensionCatalogItems(includeDebugMock = true)
 		val normalizedSet = items.map { TitleNormalizer.normalize(it.manga.title) }.toSet()
 
 		val hybridEntries = org.koitharu.kotatsu.ui.screens.buildHybridFeedEntries(
-			feedUpdates = feedUpdates,
+			feedUpdates = emptyList(),
 			libraryItems = items,
 			extensionCatalog = catalog,
 			libraryNormalizedTitles = normalizedSet,
-			defaultSource = "MangaDex",
+			defaultSource = "All Sources",
 			searchQuery = "",
 		)
-		assertTrue("Hybrid feed should combine library updates and expanded discovery catalog entries", hybridEntries.size >= 12)
+		assertTrue("Hybrid feed in Debug Sandbox should combine 9 library updates + 4 expanded catalog entries", hybridEntries.size >= 12)
 		assertTrue("Hybrid feed entries should include staggered aspect ratios for 2-column masonry", hybridEntries.map { it.aspectRatio }.distinct().size >= 3)
-		assertTrue("Hybrid feed entries should include heat scores and comment counts for Reddit view", hybridEntries.all { it.baseHeatScore > 0 && it.baseCommentCount > 0 })
+		assertTrue("Sandbox hybrid feed entries should include heat scores and comment counts", hybridEntries.all { it.baseHeatScore > 0 && it.baseCommentCount > 0 })
 
-		// Verify 2-Column Catalog Discovery pool is distinct from the Top 1-Row Library Story updates
-		val storyRowIds = feedUpdates.map { it.mangaItem.manga.id }.toSet()
-		val catalogDiscoveryEntries = hybridEntries.filter { it.catalogRef != null || (it.mangaId != null && it.mangaId !in storyRowIds) }
-		assertTrue("2-Column Catalog Discovery grid should contain dedicated catalog series not in the 1-row story bar", catalogDiscoveryEntries.size >= 8)
+		val catalogDiscoveryEntries = hybridEntries.filter { it.catalogRef != null }
+		assertTrue("2-Column Catalog Discovery grid should contain dedicated catalog series", catalogDiscoveryEntries.size >= 4)
 		assertTrue("2-Column Catalog Discovery entries should carry AI Match % and total chapters", catalogDiscoveryEntries.all { it.matchPercent in 85..100 && it.totalChapters > 0 })
 
-		// Verify 1-Column Reddit [DISC] Release Stream has date buckets, scanlators, and top comment previews
 		val releaseBuckets = hybridEntries.map { it.releaseDateBucket }.distinct()
 		assertTrue("1-Column Reddit [DISC] stream should group into release buckets", releaseBuckets.size >= 2)
-		assertTrue("1-Column Reddit [DISC] stream entries should have scanlator and top comment previews", hybridEntries.all { it.scanlatorGroup.isNotBlank() && it.topCommentPreview.isNotBlank() })
+		assertTrue("Sandbox entries should have scanlator and top comment previews", hybridEntries.all { it.scanlatorGroup.isNotBlank() && it.topCommentPreview.isNotBlank() })
 
 		val settingsSections = org.koitharu.kotatsu.ui.screens.SettingsCategorySection.entries
 		assertEquals(11, settingsSections.size)
@@ -351,7 +450,7 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestAtomicLibraryManagementAndStorageVacuum() = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 
 		// 1. Verify TitleNormalizer memoized normalization & bigram cache consistency
 		val norm1 = TitleNormalizer.normalize("Sousou no Frieren: Beyond Journey's End")
@@ -411,7 +510,7 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestCbzReaderPipelineSpreadSplitMarginCropAndDataSync() = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 
 		// 1. Test real CBZ archive import & ZipInputStream bitmap decoding
 		val importedManga = extensionManager.importCbzArchive(
@@ -424,7 +523,7 @@ class KotatsuStressAndCujTest {
 		val indexedCbz = localIndexList.find { it.mangaId == importedManga.id }
 		assertNotNull("Imported CBZ must be registered in local_index", indexedCbz)
 
-		val cbzFile = java.io.File(indexedCbz!!.path)
+		val cbzFile = File(indexedCbz!!.path)
 		assertTrue("CBZ file must exist on disk", cbzFile.exists() && cbzFile.length() > 512L)
 		val totalCbzPages = org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.countPagesInCbzFile(cbzFile)
 		assertEquals(12, totalCbzPages)
@@ -491,7 +590,7 @@ class KotatsuStressAndCujTest {
 		assertTrue(org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.isValidArchiveImageEntry("vol1/page_01.webp", false))
 
 		// 3. Build a synthetic CBZ with out-of-order pages, __MACOSX junk, Zip-Slip entry, and rich ComicInfo.xml
-		val customCbzFile = java.io.File(app.cacheDir, "Test_ComicInfo_Archive.cbz")
+		val customCbzFile = File(app.cacheDir, "Test_ComicInfo_Archive.cbz")
 		java.io.FileOutputStream(customCbzFile).use { fos ->
 			java.util.zip.ZipOutputStream(fos).use { zos ->
 				val comicXml = """
@@ -588,64 +687,67 @@ class KotatsuStressAndCujTest {
 		assertEquals("Must parse all 600 extensions without 24-item truncation", 600, parsedExts.size)
 
 		// 2. Solid white & solid black blank separator pages must not crash or over-crop in cropUniformMargins
-		val solidWhite = android.graphics.Bitmap.createBitmap(400, 600, android.graphics.Bitmap.Config.ARGB_8888)
+		val solidWhite = Bitmap.createBitmap(400, 600, Bitmap.Config.ARGB_8888)
 		solidWhite.eraseColor(android.graphics.Color.WHITE)
 		val (croppedWhite, metricsWhite) = org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.cropUniformMargins(solidWhite)
 		assertEquals(400, croppedWhite.width)
 		assertEquals(600, croppedWhite.height)
 		assertEquals(0f, metricsWhite.trimmedAreaPercent, 0.01f)
 
-		val tinyBitmap = android.graphics.Bitmap.createBitmap(12, 12, android.graphics.Bitmap.Config.ARGB_8888)
+		val tinyBitmap = Bitmap.createBitmap(12, 12, Bitmap.Config.ARGB_8888)
 		val (croppedTiny, _) = org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.cropUniformMargins(tinyBitmap)
 		assertEquals(12, croppedTiny.width)
 	}
 
 	@Test
 	fun stressTestExtensionDownloaderFileProviderAndDynamicCatalog(): Unit = runBlocking {
+		// 1. Verify production mode (includeDebugMock = false) has 0 spoofed extensions and 0 fake catalog items
 		assertTrue(
 			"Default end-user catalog (includeDebugMock = false) must have zero dummy items",
 			extensionManager.getExtensionCatalogItems(includeDebugMock = false).isEmpty(),
 		)
-		val initialCatalogSize = extensionManager.getExtensionCatalogItems(includeDebugMock = true).size
-		val initialDiscovered = extensionManager.discoverExtensions(emptyList())
-		val installedCountBefore = initialDiscovered.count { it.isInstalled }
-		val availableCountBefore = initialDiscovered.count { !it.isInstalled }
-		assertTrue("Should have installed core extensions", installedCountBefore >= 4)
-		assertTrue("Should have available Keiyoushi extensions ready to install", availableCountBefore >= 5)
+		assertTrue(
+			"Default end-user extension discovery (includeDebugMock = false) must have zero spoofed extensions",
+			extensionManager.discoverExtensions(emptyList(), includeDebugMock = false).isEmpty(),
+		)
 
-		// 1. Verify Aqua Manga initially reports an available update (1.4.42 -> 1.4.58)
+		// 2. Verify Debug Sandbox isolation (includeDebugMock = true)
+		val initialCatalogSize = extensionManager.getExtensionCatalogItems(includeDebugMock = true).size
+		val initialDiscovered = extensionManager.discoverExtensions(emptyList(), includeDebugMock = true)
 		val aquaBefore = initialDiscovered.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.aquamanga" }
 		assertNotNull(aquaBefore)
-		assertTrue("Aqua Manga should initially flag hasUpdate", aquaBefore!!.hasUpdate)
+		assertTrue("Aqua Manga in Debug Sandbox should initially flag hasUpdate", aquaBefore!!.hasUpdate)
 		assertEquals("1.4.58", aquaBefore.latestVersionName)
 
-		// 2. Download & install an uninstalled extension (Asura Scans) and verify FileProvider URI & dynamic catalog expansion
 		val asuraCandidate = initialDiscovered.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.asurascans" }
-		assertNotNull("Asura Scans should be in Available list", asuraCandidate)
+		assertNotNull("Asura Scans should be in Sandbox Available list", asuraCandidate)
 		assertFalse(asuraCandidate!!.isInstalled)
 
 		val progressSteps = mutableListOf<Int>()
-		val installTask = extensionManager.downloadAndInstallExtension(asuraCandidate) { task ->
+		val installTask = extensionManager.downloadAndInstallExtension(
+			ext = asuraCandidate,
+			includeDebugMock = true,
+		) { task ->
 			progressSteps.add(task.progressPercent)
 		}
 		assertEquals(org.koitharu.kotatsu.core.model.ExtensionInstallStatus.INSTALLED, installTask.status)
 		assertEquals(100, installTask.progressPercent)
-		assertNotNull("Installed extension must expose a FileProvider URI or cached path", installTask.fileProviderUri)
 		assertTrue("Progress callbacks should report intermediate steps", progressSteps.isNotEmpty())
 
-		// Verify Asura Scans is now marked installed and adds Solo Leveling: Ragnarok to the browsable catalog
-		val afterInstallDiscovered = extensionManager.discoverExtensions(emptyList())
-		val asuraAfter = afterInstallDiscovered.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.asurascans" }!!
-		assertTrue("Asura Scans must be marked installed after downloadAndInstallExtension", asuraAfter.isInstalled)
-
-		val expandedCatalog = extensionManager.getExtensionCatalogItems(includeDebugMock = true)
-		assertTrue("Installing Asura Scans must dynamically expand catalog items", expandedCatalog.size > initialCatalogSize)
+		// Production catalog MUST STILL BE EMPTY even after sandbox install!
 		assertTrue(
-			"Expanded catalog must include Asura Scans series",
-			expandedCatalog.any { it.sourceName.contains("Asura Scans", ignoreCase = true) },
+			"Sandbox install must never leak into production catalog (includeDebugMock = false)",
+			extensionManager.getExtensionCatalogItems(includeDebugMock = false).isEmpty(),
 		)
 
-		// 3. Verify GitHub repository shorthand normalization ("keiyoushi/extensions" & "https://github.com/...")
+		val afterInstallDiscovered = extensionManager.discoverExtensions(emptyList(), includeDebugMock = true)
+		val asuraAfter = afterInstallDiscovered.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.asurascans" }!!
+		assertTrue("Asura Scans must be marked installed inside Debug Sandbox", asuraAfter.isInstalled)
+
+		val expandedCatalog = extensionManager.getExtensionCatalogItems(includeDebugMock = true)
+		assertTrue("Sandbox install should expand sandbox catalog", expandedCatalog.size > initialCatalogSize)
+
+		// 3. Verify GitHub repository shorthand normalization
 		assertEquals(
 			"https://raw.githubusercontent.com/keiyoushi/extensions/repo",
 			extensionManager.normalizeGitHubRepoUrl("keiyoushi/extensions"),
@@ -659,50 +761,32 @@ class KotatsuStressAndCujTest {
 			extensionManager.normalizeGitHubRepoUrl("Suwayomi/tachiyomi-extension@repo/index.min.json"),
 		)
 
-		// 4. Verify FileProvider extension package intent (application/zip), share intent, and cached ZIP archive
-		val cachedApkFile = extensionManager.getCachedApkFileForExtension(asuraAfter)
-		assertTrue("Cached package file must exist and be non-empty", cachedApkFile.exists() && cachedApkFile.length() > 64L)
-		java.util.zip.ZipFile(cachedApkFile).use { zip ->
-			assertNotNull("Extension archive must contain AndroidManifest.xml", zip.getEntry("AndroidManifest.xml"))
-			assertNotNull("Extension archive must contain manifest.json", zip.getEntry("manifest.json"))
-			assertNotNull("Extension archive must contain assets/extension_descriptor.json", zip.getEntry("assets/extension_descriptor.json"))
-		}
-
+		// 4. Verify Creator Program compliant zero-permission HTTPS APK download/install intent & share intent
 		val apkInstallerIntent = extensionManager.createApkPackageInstallerIntent(asuraAfter)
-		assertNotNull("createApkPackageInstallerIntent must return a valid intent", apkInstallerIntent)
 		assertEquals(android.content.Intent.ACTION_VIEW, apkInstallerIntent.action)
-		assertEquals("application/zip", apkInstallerIntent.type)
-		assertTrue(
-			"Extension package intent must grant URI read permission",
-			(apkInstallerIntent.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0,
-		)
-
 		val unknownSourcesIntent = extensionManager.createManageUnknownAppSourcesIntent()
 		assertEquals("package:${app.packageName}", unknownSourcesIntent.dataString)
-
-		val browserIntent = extensionManager.createBrowserApkDownloadIntent(asuraAfter)
-		assertEquals(android.content.Intent.ACTION_VIEW, browserIntent.action)
 		val shareIntent = extensionManager.createFileProviderShareIntent(asuraAfter)
-		assertNotNull("createFileProviderShareIntent must build a chooser intent for installed extension", shareIntent)
+		assertNotNull("createFileProviderShareIntent must build a chooser intent for cached sandbox archive", shareIntent)
 
-		// 5. Update Aqua Manga and verify hasUpdate clears and version updates to 1.4.58
-		extensionManager.downloadAndInstallExtension(aquaBefore)
-		val aquaAfterUpdate = extensionManager.discoverExtensions(emptyList())
+		// 5. Update Aqua Manga in sandbox and verify hasUpdate clears
+		extensionManager.downloadAndInstallExtension(aquaBefore, includeDebugMock = true)
+		val aquaAfterUpdate = extensionManager.discoverExtensions(emptyList(), includeDebugMock = true)
 			.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.aquamanga" }!!
 		assertFalse("Aqua Manga hasUpdate must be false after updating", aquaAfterUpdate.hasUpdate)
 		assertEquals("1.4.58", aquaAfterUpdate.versionName)
 
-		// 6. Uninstall Asura Scans and verify it returns to Available
+		// 6. Uninstall Asura Scans in sandbox and verify it returns to Available
 		val uninstalled = extensionManager.uninstallExtension(asuraAfter)
 		assertTrue(uninstalled.getOrDefault(false))
-		val afterUninstall = extensionManager.discoverExtensions(emptyList())
+		val afterUninstall = extensionManager.discoverExtensions(emptyList(), includeDebugMock = true)
 			.find { it.pkgName == "eu.kanade.tachiyomi.extension.en.asurascans" }!!
 		assertFalse("Asura Scans must return to Available after uninstall", afterUninstall.isInstalled)
 	}
 
 	@Test
 	fun stressTestPhase1To3NemuriHardeningMergeEngineAndExtensionParity(): Unit = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 
 		// 1. Phase 1.1: TitleNormalizer.toNormalizedSlug & toCanonicalChapterKey
 		val slugA = org.koitharu.kotatsu.core.util.TitleNormalizer.toNormalizedSlug("The Dangers in My Heart [Official] (Full Color)")
@@ -721,27 +805,20 @@ class KotatsuStressAndCujTest {
 		val fastViews = db.getAuxiliaryDao().observeAllFastViews().first()
 		assertTrue("library_fast_view should be populated for seeded manga", fastViews.size >= 9)
 
-		// 3. Phase 2.1: HybridMangaRepositoryFactory (Two-Tier Source Router & Lazy Extension Cache)
-		val mihonBridge = org.koitharu.kotatsu.core.parser.MihonExtensionBridge()
-		val lnBridge = org.koitharu.kotatsu.core.parser.LnReaderPluginBridge()
-		val factory = org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory(
-			loaderContext = org.koitharu.kotatsu.parsers.MangaLoaderContext(),
-			mihonExtensionBridge = mihonBridge,
-			lnReaderJsBridge = lnBridge,
-		)
-		val kotatsuSource = org.koitharu.kotatsu.core.model.MangaSource("MANGADEX_KOTATSU")
-		val mihonSource = org.koitharu.kotatsu.core.model.MangaSource("MIHON_EN_MANGADEX")
-		val lnSource = org.koitharu.kotatsu.core.model.MangaSource("LNREADER_NOVELUPDATES")
-		assertNotNull("Native Kotatsu source must return non-null from getOrCreateFast", factory.getOrCreateFast(kotatsuSource))
-		assertEquals("Mihon source must return null from getOrCreateFast before warm-up", null, factory.getOrCreateFast(mihonSource))
-		val warmedMihon = factory.getOrCreateAsync(mihonSource)
-		assertNotNull(warmedMihon)
-		assertNotNull("After getOrCreateAsync, getOrCreateFast must hit cache", factory.getOrCreateFast(mihonSource))
-		assertNotNull(factory.getOrCreateAsync(lnSource))
-		factory.evictSource(mihonSource.name)
-		assertEquals("Evicted source must be removed from cache", null, factory.getOrCreateFast(mihonSource))
+		// 3. MangaRepository.Factory (Pure Architecture — zero HybridMangaRepositoryFactory or cross-source MangaDex injection)
+		val factory = MangaRepository.Factory(app)
+		val localRepo = factory.createAsync(MangaSource("LOCAL"))
+		val mihonLazyRepo = factory.createAsync(MangaSource("MIHON_2499283573021220255"))
+		val uninstalledRepo = factory.createAsync(MangaSource("UNINSTALLED_EXTERNAL_SOURCE"))
+		assertTrue("LOCAL source must resolve to LocalMangaRepository", localRepo is LocalMangaRepository)
+		assertTrue("MIHON_ source must resolve to LazyMihonMangaRepository", mihonLazyRepo is LazyMihonMangaRepository)
+		assertTrue("Uninstalled source must resolve to EmptyMangaRepository (zero fake manga)", uninstalledRepo is EmptyMangaRepository)
+		assertTrue("Uninstalled source getList must return emptyList", uninstalledRepo.getList(0).isEmpty())
+		assertTrue("KotatsuExternalProviderScanner must return empty list when no provider APKs installed", KotatsuExternalProviderScanner.discoverProviders(app).isEmpty())
 
-		// 4. Phase 2.2: MergedChapterAggregator (Multi-Source Chapter Merge & Deduplicator)
+		// 4. MergedChapterAggregator (Multi-Source Chapter Merge & Deduplicator)
+		val primarySource = MangaSource("MIHON_1001")
+		val secondarySource = MangaSource("MIHON_1002")
 		val primaryChapters = listOf(
 			org.koitharu.kotatsu.parsers.model.MangaChapter(
 				id = 101L,
@@ -752,7 +829,7 @@ class KotatsuStressAndCujTest {
 				scanlator = "SpeedScan",
 				uploadDate = 1_700_000_000_000L,
 				branch = null,
-				source = kotatsuSource,
+				source = primarySource,
 			),
 			org.koitharu.kotatsu.parsers.model.MangaChapter(
 				id = 102L,
@@ -763,7 +840,7 @@ class KotatsuStressAndCujTest {
 				scanlator = "SpeedScan",
 				uploadDate = 1_700_086_400_000L,
 				branch = null,
-				source = kotatsuSource,
+				source = primarySource,
 			),
 		)
 		val secondaryChapters = listOf(
@@ -776,7 +853,7 @@ class KotatsuStressAndCujTest {
 				scanlator = "Kirei Cake",
 				uploadDate = 1_699_000_000_000L,
 				branch = null,
-				source = mihonSource,
+				source = secondarySource,
 			),
 			org.koitharu.kotatsu.parsers.model.MangaChapter(
 				id = 203L,
@@ -787,16 +864,15 @@ class KotatsuStressAndCujTest {
 				scanlator = "Kirei Cake",
 				uploadDate = 1_700_172_800_000L,
 				branch = null,
-				source = mihonSource,
+				source = secondarySource,
 			),
 		)
-		mihonBridge.registerSourceChapters(mihonSource.name) { secondaryChapters }
 		val aggregator = org.koitharu.kotatsu.details.domain.MergedChapterAggregator(factory)
 		val dummyManga = org.koitharu.kotatsu.parsers.model.Manga(
 			id = 1001L,
 			title = "Sousou no Frieren",
 			url = "/frieren",
-			source = kotatsuSource,
+			source = primarySource,
 			chapters = primaryChapters,
 		)
 		val mergedChapters = aggregator.fetchMergedChapters(
@@ -807,7 +883,7 @@ class KotatsuStressAndCujTest {
 					preferredScanlator = null,
 				),
 				org.koitharu.kotatsu.details.domain.MergeSourceCandidate(
-					manga = dummyManga.copy(id = 1002L, source = mihonSource, chapters = secondaryChapters),
+					manga = dummyManga.copy(id = 1002L, source = secondarySource, chapters = secondaryChapters),
 					priorityWeight = 90,
 					preferredScanlator = "Kirei Cake",
 				),
@@ -818,8 +894,8 @@ class KotatsuStressAndCujTest {
 		assertEquals("Chapter 10 must select preferred scanlator Kirei Cake", "Kirei Cake", ch10Winner.scanlator)
 
 		// 5. Phase 3.1: pruneOrphanedShortcutIcons
-		val shortcutDir = java.io.File(app.filesDir, "shortcuts").apply { mkdirs() }
-		val orphanFile = java.io.File(shortcutDir, "expired_manga_99999.png").apply { writeBytes(ByteArray(32)) }
+		val shortcutDir = File(app.filesDir, "shortcuts").apply { mkdirs() }
+		val orphanFile = File(shortcutDir, "expired_manga_99999.png").apply { writeBytes(ByteArray(32)) }
 		assertTrue(orphanFile.exists())
 		org.koitharu.kotatsu.core.os.pruneOrphanedShortcutIcons(app)
 		assertFalse("Orphaned launcher shortcut icon must be deleted", orphanFile.exists())
@@ -832,7 +908,7 @@ class KotatsuStressAndCujTest {
 		assertNotNull(hist1009)
 		assertTrue("Progress percent must be < 1.0f when not all chapters are read", hist1009!!.percent < 1.0f)
 
-		// 7. Module 2: Dual Coil 3 ImageLoader & MangaCoverRequest.build
+		// 7. Module 2: Dual Coil ImageLoader & MangaCoverRequest.build
 		val coverLoader = org.koitharu.kotatsu.core.ui.image.NemuriImageLoaderModule.provideCoverImageLoader(app)
 		val pageLoader = org.koitharu.kotatsu.core.ui.image.NemuriImageLoaderModule.providePageImageLoader(app)
 		assertEquals(500L * 1024L * 1024L, coverLoader.diskCache?.maxSizeBytes)
@@ -878,10 +954,60 @@ class KotatsuStressAndCujTest {
 		val syncResult = feedCoordinator.syncLibraryFeed(isManualForceRefresh = false)
 		assertTrue(syncResult.totalLibraryCount >= 9)
 
-		// 9. Module 4: SilentFailoverChapterLoader & ReaderPagePreloader (N+3 + totalPages-3 seam)
-		val brokenPrimarySource = org.koitharu.kotatsu.core.model.MangaSource("MIHON_BROKEN_SOURCE")
-		mihonBridge.registerSourcePages(brokenPrimarySource.name) { emptyList() } // Simulate broken source returning 0 pages
-		val healthyBackupSource = org.koitharu.kotatsu.core.model.MangaSource("EXT:Bato.to (Mihon EN)")
+		// 9. Module 4: SilentFailoverChapterLoader & ReaderPagePreloader backed by real LocalMangaRepository CBZ archive
+		val cbzBackupManga = extensionManager.importCbzArchive(
+			inputStream = java.io.ByteArrayInputStream(ByteArray(0)),
+			fileName = "Frieren_Local_Backup_Ch10.cbz",
+		)
+		db.withTransaction {
+			db.getMangaDao().upsertManga(
+				cbzBackupManga.copy(
+					source = "LOCAL",
+					normalizedSlug = sampleMangaEntity.normalizedSlug,
+				),
+			)
+			db.getChaptersDao().upsertAll(
+				listOf(
+					ChapterEntity(
+						chapterId = cbzBackupManga.id * 1000L + 10L,
+						mangaId = cbzBackupManga.id,
+						title = "Chapter 10",
+						number = 10f,
+						volume = 1,
+						url = cbzBackupManga.url,
+						scanlator = "Local Vault",
+						uploadDate = System.currentTimeMillis(),
+						branch = null,
+						index = 9,
+					),
+					ChapterEntity(
+						chapterId = cbzBackupManga.id * 1000L + 11L,
+						mangaId = cbzBackupManga.id,
+						title = "Chapter 11",
+						number = 11f,
+						volume = 1,
+						url = cbzBackupManga.url,
+						scanlator = "Local Vault",
+						uploadDate = System.currentTimeMillis(),
+						branch = null,
+						index = 10,
+					),
+				),
+			)
+			db.getAuxiliaryDao().upsertMergeLink(
+				MangaMergeLinkEntity(
+					parentMangaId = 1001L,
+					childMangaId = cbzBackupManga.id,
+					sourceName = "LOCAL",
+					priorityWeight = 10,
+					preferredScanlator = "Local Vault",
+					createdAt = System.currentTimeMillis(),
+				),
+			)
+		}
+
+		val brokenPrimarySource = MangaSource("MIHON_BROKEN_SOURCE")
+		val healthyLocalSource = MangaSource("LOCAL")
 		val failoverLoader = org.koitharu.kotatsu.reader.domain.SilentFailoverChapterLoader(
 			db = db,
 			repositoryFactory = factory,
@@ -893,7 +1019,7 @@ class KotatsuStressAndCujTest {
 			source = brokenPrimarySource,
 		)
 		val recoveredPages = failoverLoader.getPagesWithFailover(failingChapter10, parentMangaId = 1001L)
-		assertTrue("SilentFailoverChapterLoader must recover pages from linked fallback source", recoveredPages.isNotEmpty())
+		assertTrue("SilentFailoverChapterLoader must recover real CBZ pages from linked LOCAL fallback source", recoveredPages.isNotEmpty())
 
 		val preloader = org.koitharu.kotatsu.reader.domain.ReaderPagePreloader(
 			context = app,
@@ -904,15 +1030,15 @@ class KotatsuStressAndCujTest {
 			org.koitharu.kotatsu.parsers.model.MangaPage(
 				id = 100L + idx,
 				url = "https://cdn.nemuri.org/ch10/page_$idx.jpg",
-				source = healthyBackupSource,
+				source = healthyLocalSource,
 			)
 		}
 		val nextCh11 = org.koitharu.kotatsu.parsers.model.MangaChapter(
-			id = 1001_011L,
+			id = cbzBackupManga.id * 1000L + 11L,
 			name = "Chapter 11",
 			number = 11f,
-			url = "/manga/1001/ch/11",
-			source = healthyBackupSource,
+			url = cbzBackupManga.url,
+			source = healthyLocalSource,
 		)
 		// Trigger at currentIndex = 7 (which is >= pages.size - 3 == 7), pre-resolving nextCh11
 		preloader.prefetchWindowSuspend(
@@ -944,7 +1070,7 @@ class KotatsuStressAndCujTest {
 			baseWidth = 800,
 			baseHeight = 500,
 		)
-		val spreadFile = java.io.File(app.cacheDir, "wide_spread_test.png")
+		val spreadFile = File(app.cacheDir, "wide_spread_test.png")
 		spreadFile.writeBytes(org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.encodeBitmapToPngBytes(wideSpreadBmp))
 		assertTrue("800x500 image file must be detected as wide spread", org.koitharu.kotatsu.reader.domain.WidePageProcessor.isWideSpread(spreadFile))
 		val rtlFirstHalf = org.koitharu.kotatsu.reader.domain.WidePageProcessor.decodeSplitHalf(
@@ -963,7 +1089,7 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestPhase2TachibkSmartMergeTrackerSyncCloudflareAndLocalScanner(): Unit = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 
 		// 1. Module 1: TachibkSmartMergeImporter (Tier 1/2/3 Source Resolution + Cross-Source Merge Links)
 		val importer = org.koitharu.kotatsu.backups.domain.TachibkSmartMergeImporter(db)
@@ -1109,12 +1235,12 @@ class KotatsuStressAndCujTest {
 		assertEquals("Per-domain Mutex must execute headless solver exactly ONCE across 10 concurrent walls", 1, cfPool.totalHeadlessSolvesExecuted)
 
 		// 4. Module 4: MihonLocalStorageScanner (Zero-copy /local & /downloads + PDF zero-copy rendering)
-		val mihonRoot = java.io.File(app.cacheDir, "MihonTestRoot").apply { deleteRecursively(); mkdirs() }
-		val mangaFolder = java.io.File(mihonRoot, "local/Lone Wolf and Cub").apply { mkdirs() }
-		java.io.File(mangaFolder, "details.json").writeText(
+		val mihonRoot = File(app.cacheDir, "MihonTestRoot").apply { deleteRecursively(); mkdirs() }
+		val mangaFolder = File(mihonRoot, "local/Lone Wolf and Cub").apply { mkdirs() }
+		File(mangaFolder, "details.json").writeText(
 			"""{"title":"Lone Wolf and Cub","author":"Kazuo Koike","artist":"Goseki Kojima","description":"Ogami Itto and Daigoro walk the assassin's road.","status":2,"genre":["Historical","Seinen","Samurai"]}""",
 		)
-		val ch1Dir = java.io.File(mangaFolder, "Chapter 1 - Theoni").apply { mkdirs() }
+		val ch1Dir = File(mangaFolder, "Chapter 1 - Theoni").apply { mkdirs() }
 		val sampleBmp = org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.createRealMangaPageBitmap(
 			mangaTitle = "Lone Wolf",
 			chapterNumber = 1,
@@ -1123,10 +1249,10 @@ class KotatsuStressAndCujTest {
 			baseWidth = 300,
 			baseHeight = 450,
 		)
-		java.io.File(ch1Dir, "001.png").writeBytes(org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.encodeBitmapToPngBytes(sampleBmp))
+		File(ch1Dir, "001.png").writeBytes(org.koitharu.kotatsu.core.parser.ReaderBitmapPipeline.encodeBitmapToPngBytes(sampleBmp))
 
 		// Create a real 2-page PDF chapter inside mangaFolder
-		val pdfFile = java.io.File(mangaFolder, "Chapter 2 - Winter Road.pdf")
+		val pdfFile = File(mangaFolder, "Chapter 2 - Winter Road.pdf")
 		runCatching {
 			val pdfDoc = android.graphics.pdf.PdfDocument()
 			for (p in 1..2) {
@@ -1155,7 +1281,7 @@ class KotatsuStressAndCujTest {
 
 	@Test
 	fun stressTestOnDeviceGeminiNanoRecapQuarantineAndNlSearchAst(): Unit = runBlocking {
-		libraryRepo.ensureSeeded()
+		libraryRepo.ensureSeeded(seedDebugMockData = true)
 
 		val aiEngine = org.koitharu.kotatsu.core.ai.NemuriAiCoreEngine()
 		val recapUseCase = org.koitharu.kotatsu.details.ai.WhereWasIRecapUseCase(db, aiEngine)
@@ -1316,7 +1442,7 @@ class KotatsuStressAndCujTest {
 		assertTrue(lnEntries.first().pkg.startsWith("lnreader.plugin."))
 		assertEquals("en", lnEntries.first().lang)
 
-		// 3. Verify language display & autonym resolvers + SourceCatalogItem models
+		// 3. Verify language display & autonym resolvers
 		assertEquals("English", org.koitharu.kotatsu.extensions.store.getExternalExtensionLanguageDisplayName("en"))
 		assertEquals("日本語", org.koitharu.kotatsu.extensions.store.getExternalExtensionLanguageAutonym("ja"))
 		assertEquals(
@@ -1327,14 +1453,15 @@ class KotatsuStressAndCujTest {
 			),
 		)
 
-		// 4. Verify HybridMangaRepositoryFactory bridges (NativeKotatsuRepository, MihonExtensionBridge, LnReaderPluginBridge)
-		val factory = org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory()
-		val nativeRepo = factory.getOrCreateAsync(org.koitharu.kotatsu.core.model.MangaSource("MANGADEX_EN"))
-		val mihonRepo = factory.getOrCreateAsync(org.koitharu.kotatsu.core.model.MangaSource("MIHON_2499283573021220255"))
-		val lnRepo = factory.getOrCreateAsync(org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory().let { org.koitharu.kotatsu.core.model.MangaSource("LNREADER_ROYALROAD") })
-		assertEquals("MANGADEX_EN", nativeRepo.source.name)
+		// 4. Verify MangaRepository.Factory source routing (LocalMangaRepository, LazyMihonMangaRepository, EmptyMangaRepository)
+		val factory = MangaRepository.Factory(app)
+		val localRepo = factory.createAsync(MangaSource("LOCAL"))
+		val mihonRepo = factory.createAsync(MangaSource("MIHON_2499283573021220255"))
+		val uninstalledLnRepo = factory.createAsync(MangaSource("LNREADER_ROYALROAD"))
+		assertEquals("LOCAL", localRepo.source.name)
 		assertEquals("MIHON_2499283573021220255", mihonRepo.source.name)
-		assertEquals("LNREADER_ROYALROAD", lnRepo.source.name)
+		assertEquals("LNREADER_ROYALROAD", uninstalledLnRepo.source.name)
+		assertTrue("Uninstalled LNReader plugin must return empty list until installed", uninstalledLnRepo.getList(0).isEmpty())
 
 		// 5. Verify deprecated Keiyoushi index.min.json 2-item stub ("Outdated App" & "Update to Mihon 0.20.1+") is rejected
 		val deprecatedStubJson = """
@@ -1366,9 +1493,3 @@ class KotatsuStressAndCujTest {
 		assertTrue("Deprecated 2-item Keiyoushi stub must be completely filtered out", stubParsed.isEmpty())
 	}
 }
-
-
-
-
-
-

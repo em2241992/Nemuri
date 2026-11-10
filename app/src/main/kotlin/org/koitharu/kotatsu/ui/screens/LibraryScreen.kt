@@ -2421,16 +2421,23 @@ internal fun SourceMigrationModalSheet(
 	var showMihonMergeSelector by remember { mutableStateOf(false) }
 	var showMihonMigrateSelector by remember { mutableStateOf(false) }
 	var perItemPickerTarget by remember { mutableStateOf<LibraryMangaItem?>(null) }
+	val hasDebugMock = remember(itemsToMigrate) { itemsToMigrate.any { it.isDebugMock } }
+	val installedSourcePool = remember(primaryTotalChapters, hasDebugMock) {
+		buildMihonSourceCatalog(primaryTotalChapters, includeDebugMock = hasDebugMock)
+	}
 
 	val defaultBestSourceFor: (LibraryMangaItem) -> String = { item ->
-		if (item.manga.source.contains("MangaDex", ignoreCase = true)) {
-			"EXT:ComicK (Mihon Multi)"
-		} else {
-			"EXT:MangaDex (Mihon EN)"
+		val currentClean = UiSourceAndTitleFormatter.formatSourceName(item.manga.source)
+		val firstAlt = installedSourcePool.firstOrNull { !it.displayName.equals(currentClean, ignoreCase = true) }
+		when {
+			firstAlt != null -> firstAlt.fullSourceCode
+			hasDebugMock && item.manga.source.contains("MangaDex", ignoreCase = true) -> "EXT:ComicK (Mihon Multi)"
+			hasDebugMock -> "EXT:MangaDex (Mihon EN)"
+			else -> item.manga.source
 		}
 	}
 
-	val perItemSelectedSource = remember(itemsToMigrate) {
+	val perItemSelectedSource = remember(itemsToMigrate, installedSourcePool) {
 		mutableStateMapOf<Long, String>().apply {
 			itemsToMigrate.forEach { item ->
 				put(item.manga.id, defaultBestSourceFor(item))
@@ -2447,33 +2454,36 @@ internal fun SourceMigrationModalSheet(
 
 	val computeTargetChapters: (LibraryMangaItem, String) -> Int = { item, targetSrc ->
 		val base = if (item.manga.id == primaryItem.manga.id) primaryTotalChapters else item.totalChapters
-		val bonus = when {
-			targetSrc.contains("ComicK", ignoreCase = true) -> 3
-			targetSrc.contains("MangaFire", ignoreCase = true) -> 3
-			targetSrc.contains("MangaDex", ignoreCase = true) -> 3
-			targetSrc.contains("Asura", ignoreCase = true) -> 2
-			targetSrc.contains("Bato", ignoreCase = true) -> 1
-			else -> 2
+		if (!hasDebugMock) {
+			base.coerceAtLeast(1)
+		} else {
+			val bonus = when {
+				targetSrc.contains("ComicK", ignoreCase = true) -> 3
+				targetSrc.contains("MangaDex", ignoreCase = true) -> 3
+				targetSrc.contains("Asura", ignoreCase = true) -> 2
+				targetSrc.contains("Bato", ignoreCase = true) -> 1
+				else -> 2
+			}
+			(base + bonus).coerceAtLeast(1)
 		}
-		(base + bonus).coerceAtLeast(1)
 	}
 
-	// Recommended secondary source for Tab 1 (Merge)
-	val recommendedMergeCandidate = remember(cleanPrimarySource, localMergedSources.toList(), primaryTotalChapters) {
-		val candidates = listOf(
-			Triple("EXT:ComicK (Mihon Multi)", "ComicK", primaryTotalChapters + 3),
-			Triple("EXT:Asura Scans (Mihon EN)", "Asura Scans", primaryTotalChapters + 2),
-			Triple("EXT:MangaDex (Mihon EN)", "MangaDex", primaryTotalChapters + 3),
-			Triple("EXT:WeebCentral (Kotatsu EN)", "WeebCentral", primaryTotalChapters + 1),
-		)
+	val recommendedMergeCandidate = remember(cleanPrimarySource, localMergedSources.toList(), primaryTotalChapters, installedSourcePool, hasDebugMock) {
+		val candidates = installedSourcePool.map {
+			Triple(it.fullSourceCode, it.displayName, it.verifiedChapters)
+		}
 		candidates.firstOrNull { (_, display, _) ->
 			!display.equals(cleanPrimarySource, ignoreCase = true) &&
 				localMergedSources.none { it.equals(display, ignoreCase = true) }
-		} ?: Triple("EXT:ComicK (Mihon Multi)", "ComicK", primaryTotalChapters + 3)
+		} ?: if (hasDebugMock) {
+			Triple("EXT:ComicK (Mihon Multi)", "ComicK", primaryTotalChapters + 3)
+		} else {
+			Triple(primaryItem.manga.source, cleanPrimarySource, primaryTotalChapters)
+		}
 	}
 	val isRecommendedAlreadyMerged = localMergedSources.any {
 		it.equals(recommendedMergeCandidate.second, ignoreCase = true)
-	}
+	} || recommendedMergeCandidate.second.equals(cleanPrimarySource, ignoreCase = true)
 
 	Column(
 		modifier = Modifier
@@ -3003,14 +3013,14 @@ internal fun SourceMigrationModalSheet(
 		}
 	}
 
-	// Mihon Full-Screen Source Priority Selector for Tab 1 (`🔗 Merge (Combine Chapters)`)
 	if (showMihonMergeSelector) {
 		val seedSources = remember(localMergedSources.toList(), cleanPrimarySource) {
-			(listOf(cleanPrimarySource) + localMergedSources + listOf("ComicK", "MangaFire")).distinct()
+			(listOf(cleanPrimarySource) + localMergedSources).distinct()
 		}
 		MigrationSourceSelectorScreen(
 			baseChapterCount = primaryTotalChapters,
 			initialSelectedSourceNames = seedSources,
+			includeDebugMock = hasDebugMock,
 			onContinueWithSelected = { selectedCandidates ->
 				val secondaryCandidates = selectedCandidates.filterNot {
 					it.displayName.equals(cleanPrimarySource, ignoreCase = true)
@@ -3038,13 +3048,13 @@ internal fun SourceMigrationModalSheet(
 		)
 	}
 
-	// Mihon Full-Screen Source Priority Selector for Tab 2 (`⇄ Migrate (Replace Primary)`)
 	if (showMihonMigrateSelector) {
 		val currentTarget = perItemSelectedSource[primaryItem.manga.id] ?: defaultBestSourceFor(primaryItem)
 		val cleanCurrentTarget = UiSourceAndTitleFormatter.formatSourceName(currentTarget)
 		MigrationSourceSelectorScreen(
 			baseChapterCount = primaryTotalChapters,
-			initialSelectedSourceNames = listOf(cleanCurrentTarget, "ComicK", "MangaDex", "MangaFire", "Bato.to").distinct(),
+			initialSelectedSourceNames = listOf(cleanCurrentTarget).distinct(),
+			includeDebugMock = hasDebugMock,
 			onContinueWithSelected = { selectedCandidates ->
 				val topPriority = selectedCandidates.firstOrNull {
 					!it.displayName.equals(cleanPrimarySource, ignoreCase = true)
@@ -3069,7 +3079,8 @@ internal fun SourceMigrationModalSheet(
 		val cleanCurrentTarget = UiSourceAndTitleFormatter.formatSourceName(currentTarget)
 		MigrationSourceSelectorScreen(
 			baseChapterCount = targetItem.totalChapters,
-			initialSelectedSourceNames = listOf(cleanCurrentTarget, "ComicK", "MangaDex", "MangaFire").distinct(),
+			initialSelectedSourceNames = listOf(cleanCurrentTarget).distinct(),
+			includeDebugMock = hasDebugMock,
 			onContinueWithSelected = { selectedCandidates ->
 				val topPriority = selectedCandidates.firstOrNull()
 				if (topPriority != null) {

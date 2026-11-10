@@ -3,12 +3,18 @@
     <cache-path
         name="extensions_cache"
         path="extensions/" />
+    <cache-path
+        name="extension_apks_cache"
+        path="extension_apks/" />
     <files-path
         name="extension_descriptors"
         path="extension_descriptors/" />
     <files-path
         name="cbz_vault"
         path="cbz_vault/" />
+    <files-path
+        name="cbz_imports"
+        path="cbz_imports/" />
     <external-files-path
         name="offline_downloads"
         path="downloads/" />

@@ -158,11 +158,12 @@ data class HybridFeedEntry(
 	val synopsis: String,
 	val matchPercent: Int = 95,
 	val totalChapters: Int = chapterNumber,
-	val releaseTimeLabel: String = "2h ago",
-	val releaseDateBucket: String = "TODAY'S SIMULPUB DROPS",
-	val scanlatorGroup: String = "Official Simulpub",
-	val topCommentPreview: String = "The artwork and pacing in this chapter are unreal!",
-	val topCommentAuthor: String = "u/SakuraInkReader",
+	val releaseTimeLabel: String = "Recent",
+	val releaseDateBucket: String = "RECENT",
+	val scanlatorGroup: String = "",
+	val topCommentPreview: String = "",
+	val topCommentAuthor: String = "",
+	val isDebugMock: Boolean = false,
 )
 
 data class ChapterDiscussionComment(
@@ -190,7 +191,6 @@ private fun getExpandedDiscoveryCatalogPool(
 			altTitle = "とんがり帽子のアトリエ",
 			author = "Kamome Shirahama",
 			sourceName = "EXT:MangaDex (Mihon EN)",
-			mihonSourceId = 2499283573021220255L,
 			url = "https://mangadex.ext/title/witch-hat-atelier",
 			coverSeed = "witch_hat",
 			description = "In a world where everyone takes wonders like magic spells and dragons for granted, Coco is a girl with a simple dream: she wants to be a witch.",
@@ -204,7 +204,6 @@ private fun getExpandedDiscoveryCatalogPool(
 			altTitle = "ダンダダン",
 			author = "Yukinobu Tatsu",
 			sourceName = "EXT:MangaDex (Mihon EN)",
-			mihonSourceId = 2499283573021220255L,
 			url = "https://mangadex.ext/title/dandadan",
 			coverSeed = "dandadan",
 			description = "Momo Ayase believes in ghosts but not aliens, while her classmate Okarun believes in aliens but not ghosts. In a bet to determine who's right, both discover they are terrifyingly wrong.",
@@ -218,7 +217,6 @@ private fun getExpandedDiscoveryCatalogPool(
 			altTitle = "サカモトデイズ",
 			author = "Yuto Suzuki",
 			sourceName = "EXT:ComicK (Mihon Multi)",
-			mihonSourceId = 6905824949201189121L,
 			url = "https://comick.ext/comic/sakamoto-days",
 			coverSeed = "sakamoto_days",
 			description = "Taro Sakamoto was the ultimate assassin, feared by villains and admired by hitmen. But one day… he fell in love! Retirement, marriage, fatherhood and then… Sakamoto gained weight!",
@@ -232,7 +230,6 @@ private fun getExpandedDiscoveryCatalogPool(
 			altTitle = "던전 오디세이",
 			author = "Munpia, Son Min-woo",
 			sourceName = "EXT:Aqua Manga (Mihon EN)",
-			mihonSourceId = 5182930495817263541L,
 			url = "https://aquamanga.ext/series/dungeon-odyssey",
 			coverSeed = "dungeon_odyssey",
 			description = "Raised in the subterranean labyrinth, Jinwoo inherits control of the 12th Floor Naga Labyrinth and must wage strategic war against rival underground lords.",
@@ -316,7 +313,7 @@ fun buildHybridFeedEntries(
 		val ownSynopsis = rawSynopsis
 			.replace("Duplicate entry from EXT:", "Merged with ")
 			.replace("EXT:", "")
-		val ownHookQuote = resolveSeriesSpecificHookQuote(cleanTitle, ownSynopsis)
+		val ownHookQuote = resolveSeriesSpecificHookQuote(cleanTitle, ownSynopsis, isMock)
 		val rawScanlator = upd.chapter.scanlator?.takeIf { it.isNotBlank() }
 		val cleanScanlator = if (rawScanlator != null) {
 			UiSourceAndTitleFormatter.formatSourceName(rawScanlator)
@@ -349,6 +346,7 @@ fun buildHybridFeedEntries(
 			scanlatorGroup = cleanScanlator,
 			topCommentPreview = if (isMock) topComments[idx % topComments.size] else "",
 			topCommentAuthor = if (isMock) commentAuthors[idx % commentAuthors.size] else "",
+			isDebugMock = isMock,
 		)
 	}
 
@@ -367,9 +365,9 @@ fun buildHybridFeedEntries(
 		val ownSynopsis = rawSynopsis
 			.replace("Duplicate entry from EXT:", "Merged with ")
 			.replace("EXT:", "")
-		val ownHookQuote = resolveSeriesSpecificHookQuote(cleanTitle, ownSynopsis)
+		val ownHookQuote = resolveSeriesSpecificHookQuote(cleanTitle, ownSynopsis, isMock)
 		HybridFeedEntry(
-			id = "hybrid_cat_${cat.url}",
+			id = "hybrid_cat_${idx}_${cat.sourceName}_${cat.url}",
 			mangaId = matchedLib?.manga?.id,
 			catalogRef = cat,
 			title = cleanTitle,
@@ -378,7 +376,7 @@ fun buildHybridFeedEntries(
 			sourceName = cleanSource,
 			chapterNumber = chNum,
 			chapterIndex = ((matchedLib?.chapters?.size ?: 1) - 1).coerceAtLeast(0),
-			chapterTitle = if (matchedLib != null) "Ch. $chNum • In Library" else "$chNum Chapters • $cleanSource",
+			chapterTitle = if (matchedLib != null) "Ch. $chNum • In Library" else if (cat.totalChapters > 0) "$chNum Chapters • $cleanSource" else cleanSource,
 			isNewDrop = matchedLib?.unreadCount?.let { it > 0 } ?: (idx < 6),
 			inLibrary = norm in libraryNormalizedTitles || matchedLib != null,
 			genres = cat.tags.ifEmpty { listOf("Manga") },
@@ -388,16 +386,17 @@ fun buildHybridFeedEntries(
 			hookQuote = ownHookQuote,
 			synopsis = ownSynopsis,
 			matchPercent = (cat.rating * 100f).toInt().coerceIn(85, 99),
-			totalChapters = chNum,
+			totalChapters = cat.totalChapters,
 			releaseTimeLabel = cat.lang.uppercase(),
 			releaseDateBucket = "DISCOVER IN ${cleanSource.uppercase()}",
 			scanlatorGroup = cleanSource,
 			topCommentPreview = if (isMock) topComments[(idx + 2) % topComments.size] else "",
 			topCommentAuthor = if (isMock) commentAuthors[(idx + 2) % commentAuthors.size] else "",
+			isDebugMock = isMock,
 		)
 	}
 
-	val combined = (fromUpdates + fromCatalog)
+	val combined = (fromUpdates + fromCatalog).distinctBy { it.id }
 	return if (searchQuery.isBlank()) {
 		combined
 	} else {
@@ -410,16 +409,12 @@ fun buildHybridFeedEntries(
 	}
 }
 
-/**
- * Dual-Mode Hybrid Feed Container:
- * Splits the Feed Home experience into separate, non-overlapping functional views:
- * - Top 1-Row Stories Bar (`FeedStoriesQuickUpdatesBar`): Strictly for resuming active Library chapter drops (1-tap straight into Reader).
- * - Mode A.1 (`MASONRY_GALLERY` — 2-Column Catalog Gallery): Strictly for Visual Series Discovery & Catalog Browsing across sources/genres (excludes items already shown in the 1-row quick updates bar unless toggled).
- * - Mode A.2 (`REDDIT_CARD_FEED` — 1-Column [DISC] Release Stream): Dedicated to Chapter Release Breakdowns, 3-Panel Interior Page Previews, Scanlator credits & Community Spoiler Discussions (💬).
- * - Mode A.3 (`SOURCE_CATALOGUE` — Shelves): Curated horizontal shelves by category without duplicating the top story bar.
- * - Mode B (`DISCOVERY_FOR_YOU` — TikTok Photo-Mode): Full-screen vertical series pager with a 5-page Chapter 1 hook carousel.
- */
-private fun resolveSeriesSpecificHookQuote(cleanTitle: String, synopsis: String): String {
+private fun resolveSeriesSpecificHookQuote(
+	cleanTitle: String,
+	synopsis: String,
+	isDebugMock: Boolean = false,
+): String {
+	if (!isDebugMock) return synopsis
 	val lower = cleanTitle.lowercase()
 	return when {
 		lower.contains("akira") -> "In post-WWIII cyberpunk Neo-Tokyo, Kaneda and Tetsuo collide with a psychic government project."
@@ -948,7 +943,7 @@ fun DualModeHybridFeedHomeView(
 									0,
 									ChapterDiscussionComment(
 										id = "user_${System.currentTimeMillis()}",
-										authorHandle = "u/You (Kotatsu Reader)",
+										authorHandle = "You",
 										timeAgo = "Just now",
 										body = draftComment.trim(),
 										likes = 1,
@@ -1209,7 +1204,7 @@ fun FeedStoriesQuickUpdatesBar(
 			.fillMaxWidth()
 			.testTag("feed_stories_quick_updates_bar"),
 	) {
-		items(storyDrops, key = { "story_${it.id}" }) { drop ->
+		items(storyDrops.distinctBy { it.id }, key = { "story_${it.id}" }) { drop ->
 			val chNum = drop.chapter.number.toInt().coerceAtLeast(1)
 			Column(
 				horizontalAlignment = Alignment.CenterHorizontally,
@@ -1451,6 +1446,41 @@ private fun HybridMasonryGalleryFeed(
 								modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
 							)
 						}
+					}
+				}
+			}
+		}
+
+		if (entries.isEmpty()) {
+			item(span = StaggeredGridItemSpan.FullLine, key = "masonry_empty_state") {
+				Card(
+					shape = RoundedCornerShape(18.dp),
+					colors = CardDefaults.cardColors(
+						containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
+					),
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(top = 8.dp),
+				) {
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(24.dp),
+						horizontalAlignment = Alignment.CenterHorizontally,
+						verticalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						Text(
+							text = "No catalog entries yet",
+							style = MaterialTheme.typography.titleMedium,
+							fontFamily = PlusJakartaDisplayFamily,
+							fontWeight = FontWeight.Bold,
+						)
+						Text(
+							text = "Install an extension in Explore or import a local .CBZ archive to populate the gallery.",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+							textAlign = TextAlign.Center,
+						)
 					}
 				}
 			}
@@ -1727,24 +1757,35 @@ private fun HybridRedditReleaseCardFeed(
 			val cleanTitle = UiSourceAndTitleFormatter.formatDisplayTitle(entry.title)
 			val cleanSource = UiSourceAndTitleFormatter.formatSourceName(entry.sourceName)
 			val matchingLibItem = libraryItems.find { it.manga.id == entry.mangaId }
-			val pageCount = 18 + (abs(entry.title.hashCode()) % 14)
+			val isDebugMockEntry = entry.isDebugMock || matchingLibItem?.isDebugMock == true
+			val mockPageCount = if (isDebugMockEntry) 18 + (abs(entry.title.hashCode()) % 14) else 0
+			val metadataPillText = when {
+				isDebugMockEntry -> "${mockPageCount}p"
+				entry.totalChapters > 0 -> "${entry.totalChapters} Chs"
+				else -> cleanSource
+			}
 			val unreadBadgeText = when {
 				isRead -> "Read ✓"
 				matchingLibItem != null && matchingLibItem.unreadCount > 0 -> "Unread: ${matchingLibItem.unreadCount}"
 				else -> "New Drop"
 			}
-			val cleanScanlator = UiSourceAndTitleFormatter.formatSourceName(entry.scanlatorGroup)
-			val progressContextSnippet = remember(entry.id, matchingLibItem?.manga?.id, pageCount) {
+			val cleanScanlator = UiSourceAndTitleFormatter.formatSourceName(entry.scanlatorGroup.ifBlank { cleanSource })
+			val progressContextSnippet = remember(entry.id, matchingLibItem?.manga?.id, mockPageCount, isDebugMockEntry) {
 				val rawSeriesSynopsis = matchingLibItem?.manga?.description?.takeIf { it.isNotBlank() } ?: entry.synopsis
 				val ownSeriesSynopsis = rawSeriesSynopsis
 					.replace("Duplicate entry from EXT:", "Merged with ")
 					.replace("EXT:", "")
-				val progressPrefix = if (matchingLibItem != null && matchingLibItem.lastReadChapterNumber > 0f) {
-					"Paused on Ch. ${matchingLibItem.lastReadChapterNumber.toInt()} • ${pageCount}p"
-				} else {
-					"$cleanScanlator • ${pageCount} pages"
+				val progressPrefix = when {
+					matchingLibItem != null && matchingLibItem.lastReadChapterNumber > 0f && isDebugMockEntry ->
+						"Paused on Ch. ${matchingLibItem.lastReadChapterNumber.toInt()} • ${mockPageCount}p"
+					matchingLibItem != null && matchingLibItem.lastReadChapterNumber > 0f ->
+						"Paused on Ch. ${matchingLibItem.lastReadChapterNumber.toInt()}"
+					isDebugMockEntry ->
+						"$cleanScanlator • $mockPageCount pages"
+					else ->
+						cleanScanlator
 				}
-				"$progressPrefix — $ownSeriesSynopsis"
+				if (ownSeriesSynopsis.isNotBlank()) "$progressPrefix — $ownSeriesSynopsis" else progressPrefix
 			}
 
 			Card(
@@ -1918,7 +1959,7 @@ private fun HybridRedditReleaseCardFeed(
 								),
 							) {
 								Text(
-									text = "${pageCount}p",
+									text = metadataPillText,
 									fontFamily = JetBrainsMonoFamily,
 									fontWeight = FontWeight.Bold,
 									fontSize = 10.sp,
@@ -2063,10 +2104,11 @@ fun TikTokDiscoveryFeedView(
 			state = verticalPagerState,
 			modifier = Modifier.fillMaxSize(),
 		) { seriesIndex ->
-			val entry = entries[seriesIndex]
+			val entry = entries.getOrNull(seriesIndex) ?: return@VerticalPager
 			val bookmarked = isBookmarked(entry)
 			val commentsCount = commentCountFor(entry)
-			val hookSlideCount = 5
+			val isDebugMockEntry = entry.isDebugMock || entry.catalogRef?.isDebugMock == true
+			val hookSlideCount = if (isDebugMockEntry) 5 else 2
 			val horizontalPagerState = rememberPagerState(pageCount = { hookSlideCount })
 
 			Box(
@@ -2074,7 +2116,6 @@ fun TikTokDiscoveryFeedView(
 					.fillMaxSize()
 					.padding(bottom = 78.dp),
 			) {
-				// Horizontal Swipe = 5-Slide Hook Carousel (Slide 1 Cover Spread + 4 Consecutive Chapter 1 Pages)
 				HorizontalPager(
 					state = horizontalPagerState,
 					modifier = Modifier
@@ -2103,7 +2144,7 @@ fun TikTokDiscoveryFeedView(
 									),
 							)
 						}
-					} else {
+					} else if (isDebugMockEntry) {
 						Box(modifier = Modifier.fillMaxSize()) {
 							MangaReaderPageCanvas(
 								mangaTitle = entry.title,
@@ -2114,6 +2155,7 @@ fun TikTokDiscoveryFeedView(
 								showBeforeAfterSplit = false,
 								invertColors = slideIdx == 4,
 								warmPaperTint = slideIdx == 2,
+								isDebugMock = true,
 								modifier = Modifier.fillMaxSize(),
 							)
 							Box(
@@ -2131,6 +2173,46 @@ fun TikTokDiscoveryFeedView(
 										),
 									),
 							)
+						}
+					} else {
+						Box(
+							modifier = Modifier
+								.fillMaxSize()
+								.background(Color(0xFF0A0D14))
+								.padding(horizontal = 24.dp, vertical = 64.dp),
+							contentAlignment = Alignment.Center,
+						) {
+							Column(
+								verticalArrangement = Arrangement.spacedBy(12.dp),
+								modifier = Modifier.fillMaxWidth(0.84f),
+							) {
+								Text(
+									text = "SERIES OVERVIEW • ${entry.sourceName.uppercase()}",
+									fontFamily = JetBrainsMonoFamily,
+									fontSize = 11.sp,
+									fontWeight = FontWeight.Bold,
+									color = Color(0xFF4CCAD0),
+								)
+								Text(
+									text = entry.title,
+									style = MaterialTheme.typography.headlineSmall,
+									fontFamily = PlusJakartaDisplayFamily,
+									fontWeight = FontWeight.Bold,
+									color = Color.White,
+								)
+								Text(
+									text = "By ${entry.author}",
+									style = MaterialTheme.typography.bodyMedium,
+									color = Color(0xFF94A3B8),
+								)
+								Text(
+									text = entry.synopsis.ifBlank { "Open Read Ch.1 to fetch live pages directly from ${entry.sourceName}." },
+									style = MaterialTheme.typography.bodyMedium,
+									color = Color(0xFFE2E8F0),
+									maxLines = 8,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
 						}
 					}
 				}

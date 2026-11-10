@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -196,15 +197,8 @@ fun ExploreScreen(
 	var selectedSourceDisplayName by remember { mutableStateOf<String?>(null) }
 	var selectedGenre by remember { mutableStateOf<String?>(null) }
 	var showAddRepoDialog by remember { mutableStateOf(false) }
-	var pinnedSourceIds by rememberSaveable { mutableStateOf(setOf("mangadex", "comick")) }
+	var pinnedSourceIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
 	var activeSourceCategoryFilter by rememberSaveable { mutableStateOf(SourceCategoryFilter.ALL) }
-
-	androidx.compose.runtime.LaunchedEffect(currentSubView, selectedSourceKey, catalogSearchQuery) {
-		if (currentSubView == ExploreSubView.SOURCE_BROWSE || (currentSubView == ExploreSubView.HOME && catalogSearchQuery.length >= 2)) {
-			kotlinx.coroutines.delay(if (catalogSearchQuery.isNotBlank()) 250L else 0L)
-			onQuerySourceCatalog(selectedSourceKey ?: "MangaDex", catalogSearchQuery)
-		}
-	}
 
 	if (currentSubView != ExploreSubView.HOME || catalogSearchQuery.isNotBlank()) {
 		BackHandler {
@@ -301,11 +295,9 @@ fun ExploreScreen(
 		val extraInstalledTiles = discoveredExtensions
 			.filter { ext ->
 				val rawLower = ext.name.lowercase()
-				// Hide internal system loaders (Kotatsu IPC Provider & Local CBZ/ZIP Archive Loader)
-				val isInternalPlumbing = rawLower.contains("ipc provider") ||
+				val isInternalPlumbing = ext.pkgName == "org.koitharu.kotatsu.local.cbz" ||
+					ext.pkgName == "org.koitharu.kotatsu.extension.bridge" ||
 					rawLower.contains("archive loader") ||
-					rawLower.contains("local:cbz") ||
-					ext.extensionType == "KOTATSU_CONTENT_PROVIDER" ||
 					ext.extensionType == "LOCAL_ARCHIVE"
 				if (isInternalPlumbing || !ext.isInstalled) {
 					false
@@ -319,6 +311,8 @@ fun ExploreScreen(
 			}
 			.map { ext ->
 				val cleanName = org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(ext.name)
+				val isKotatsuProvider = ext.extensionType == "KOTATSU_CONTENT_PROVIDER"
+				val isLnPlugin = ext.extensionType == "LNREADER_PLUGIN"
 				val isAqua = cleanName.contains("Aqua Manga", ignoreCase = true)
 				val words = cleanName.split(" ").filter { it.isNotBlank() }
 				val monogram = if (words.size >= 2) {
@@ -326,15 +320,22 @@ fun ExploreScreen(
 				} else {
 					cleanName.take(2).uppercase()
 				}
+				val engineLabel = when {
+					isKotatsuProvider -> "Kotatsu ${ext.lang.uppercase()}"
+					isLnPlugin -> "LNReader ${ext.lang.uppercase()}"
+					else -> "Mihon ${ext.lang.uppercase()}"
+				}
 				KotatsuSourceTileModel(
-					id = if (isAqua) "aquamanga" else ext.id,
+					id = ext.id,
 					displayName = cleanName,
 					sourceMatchKey = cleanName,
-					subtitle = "Mihon ${ext.lang.uppercase()} • v${ext.versionName}",
+					subtitle = "$engineLabel • v${ext.versionName}",
 					tileType = if (isAqua) SourceTileVisual.AQUA_MANGA_A else SourceTileVisual.MONOGRAM_BADGE,
-					isNativeKotatsu = false,
+					isNativeKotatsu = isKotatsuProvider,
 					monogramText = monogram,
 					brandColor = when {
+						isKotatsuProvider -> Color(0xFF5CE1E6)
+						isLnPlugin -> Color(0xFF10B981)
 						cleanName.contains("Asura", ignoreCase = true) -> Color(0xFFA855F7)
 						cleanName.contains("Flame", ignoreCase = true) -> Color(0xFFF97316)
 						else -> Color(0xFFC084FC)
@@ -342,6 +343,15 @@ fun ExploreScreen(
 				)
 			}
 		(baseSourceTiles + lanTiles + extraInstalledTiles).sortedByDescending { it.id in pinnedSourceIds }
+	}
+
+	androidx.compose.runtime.LaunchedEffect(currentSubView, selectedSourceKey, catalogSearchQuery, sourceTiles.size, debugSandboxEnabled) {
+		val shouldQuery = currentSubView == ExploreSubView.SOURCE_BROWSE ||
+			(currentSubView == ExploreSubView.HOME && catalogSearchQuery.length >= 2)
+		if (shouldQuery && (sourceTiles.isNotEmpty() || debugSandboxEnabled || selectedSourceKey != null)) {
+			kotlinx.coroutines.delay(if (catalogSearchQuery.isNotBlank()) 250L else 0L)
+			onQuerySourceCatalog(selectedSourceKey ?: "ALL", catalogSearchQuery)
+		}
 	}
 
 	val displayedSourceTiles = remember(sourceTiles, activeSourceCategoryFilter, pinnedSourceIds) {
@@ -939,7 +949,7 @@ fun ExploreScreen(
 									FilledTonalButton(
 										onClick = {
 											onQuerySourceCatalog(
-												selectedSourceKey ?: "MangaDex",
+												selectedSourceKey ?: "ALL",
 												catalogSearchQuery,
 											)
 										},
@@ -950,14 +960,14 @@ fun ExploreScreen(
 											modifier = Modifier.size(16.dp),
 										)
 										Spacer(modifier = Modifier.width(6.dp))
-										Text("Refresh Source Catalog")
+										Text("Refresh Source Catalog", maxLines = 1, softWrap = false)
 									}
 								}
 							}
 						}
 					}
 
-					items(filteredCatalog, key = { it.url }) { catalogItem ->
+					itemsIndexed(filteredCatalog, key = { idx, it -> "cat_${idx}_${it.sourceName}_${it.url}" }) { _, catalogItem ->
 						Card(
 							colors = CardDefaults.cardColors(
 								containerColor = MaterialTheme.colorScheme.surface,
@@ -1212,14 +1222,16 @@ fun ExploreScreen(
 									style = MaterialTheme.typography.bodySmall,
 									color = MaterialTheme.colorScheme.onSurfaceVariant,
 								)
-								FlowRow(
+								Row(
 									modifier = Modifier.fillMaxWidth(),
 									horizontalArrangement = Arrangement.spacedBy(8.dp),
-									verticalArrangement = Arrangement.spacedBy(8.dp),
+									verticalAlignment = Alignment.CenterVertically,
 								) {
 									Button(
 										onClick = { showAddRepoDialog = true },
-										modifier = Modifier.testTag("add_extension_repo_button"),
+										modifier = Modifier
+											.weight(1f)
+											.testTag("add_extension_repo_button"),
 									) {
 										Icon(
 											imageVector = Icons.Default.Add,
@@ -1227,11 +1239,13 @@ fun ExploreScreen(
 											modifier = Modifier.size(18.dp),
 										)
 										Spacer(modifier = Modifier.width(6.dp))
-										Text("Add Repo URL")
+										Text("Add Repo URL", maxLines = 1, softWrap = false)
 									}
 									FilledTonalButton(
 										onClick = onSyncAllRepositories,
-										modifier = Modifier.testTag("explore_sync_repos_button"),
+										modifier = Modifier
+											.weight(1f)
+											.testTag("explore_sync_repos_button"),
 									) {
 										Icon(
 											imageVector = Icons.Default.Refresh,
@@ -1239,13 +1253,17 @@ fun ExploreScreen(
 											modifier = Modifier.size(16.dp),
 										)
 										Spacer(modifier = Modifier.width(4.dp))
-										Text("Sync Repos")
+										Text("Sync Repos", maxLines = 1, softWrap = false)
 									}
-									FilledTonalButton(
+								}
+								if (extensionCatalog.isNotEmpty() || sourceTiles.isNotEmpty()) {
+									OutlinedButton(
 										onClick = { currentSubView = ExploreSubView.SOURCE_BROWSE },
-										modifier = Modifier.testTag("explore_subtab_browse"),
+										modifier = Modifier
+											.fillMaxWidth()
+											.testTag("explore_subtab_browse"),
 									) {
-										Text("Browse (${extensionCatalog.size})")
+										Text("Browse Active Catalog (${extensionCatalog.size})", maxLines = 1, softWrap = false)
 									}
 								}
 							}
@@ -1261,10 +1279,7 @@ fun ExploreScreen(
 					}
 
 					items(repos, key = { it.repoId }) { repo ->
-						val indexedForRepo = maxOf(
-							repo.extensionCount,
-							discoveredExtensions.size,
-						)
+						val indexedForRepo = repo.extensionCount
 						Card(
 							colors = CardDefaults.cardColors(
 								containerColor = MaterialTheme.colorScheme.surface,
@@ -1608,8 +1623,8 @@ fun ExploreScreen(
 	}
 
 	if (showAddRepoDialog) {
-		var repoName by remember { mutableStateOf("Keiyoushi Mihon Community Repo") }
-		var repoUrl by remember { mutableStateOf("https://raw.githubusercontent.com/keiyoushi/extensions/repo") }
+		var repoName by remember { mutableStateOf("") }
+		var repoUrl by remember { mutableStateOf("") }
 		var repoType by remember { mutableStateOf("MIHON_JSON") }
 
 		AlertDialog(
@@ -1620,14 +1635,16 @@ fun ExploreScreen(
 					OutlinedTextField(
 						value = repoName,
 						onValueChange = { repoName = it },
-						label = { Text("Repository Name") },
+						label = { Text("Repository Name (optional)") },
+						placeholder = { Text("e.g. Community Extension Repo") },
 						singleLine = true,
 						modifier = Modifier.testTag("repo_name_input"),
 					)
 					OutlinedTextField(
 						value = repoUrl,
 						onValueChange = { repoUrl = it },
-						label = { Text("Repo URL (Mihon repo or Kotatsu Provider)") },
+						label = { Text("Repo URL (repo.json / index.min.json / plugins.min.json)") },
+						placeholder = { Text("https://.../repo.json") },
 						singleLine = true,
 						modifier = Modifier.testTag("repo_url_input"),
 					)

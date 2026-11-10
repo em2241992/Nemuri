@@ -17,6 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.koitharu.kotatsu.core.model.MangaSource
+import org.koitharu.kotatsu.parsers.model.Manga
+import org.koitharu.kotatsu.parsers.model.MangaChapter
+import org.koitharu.kotatsu.parsers.model.MangaState
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -428,8 +432,8 @@ object ReaderBitmapPipeline {
     }
 
     /**
-     * Resolves and decodes a live manga page over HTTP from a direct image URL, a MangaDex chapter URL,
-     * or a MangaDex series URL via LiveSourceParsers.
+     * Resolves and decodes a live manga page over HTTP from a direct image URL or via
+     * MangaRepository.Factory (MihonExtension, LnPlugin, or KotatsuContentProvider).
      */
     suspend fun decodeHttpOrMangaDexPageBitmap(
         mangaUrl: String,
@@ -437,17 +441,18 @@ object ReaderBitmapPipeline {
         chapterUrl: String?,
         pageIndex: Int,
         chapterIndex: Int = 0,
+        sourceName: String = "",
     ): Bitmap? = withContext(Dispatchers.IO) {
-        val cacheKey = "http|$mangaUrl|$chapterUrl|$chapterIndex|$pageIndex"
+        val cacheKey = "http|$sourceName|$mangaUrl|$chapterUrl|$chapterIndex|$pageIndex"
         synchronized(memoryCache) {
             memoryCache.get(cacheKey)?.let { if (!it.isRecycled) return@withContext it }
         }
 
-        // 1. Direct image URL (.jpg, .png, .webp)
+        // 1. Direct image URL (.jpg, .png, .webp, .gif, .bmp)
         val directCandidate = chapterUrl?.takeIf {
-            it.startsWith("http") && it.substringBefore('?').lowercase().matches(Regex(".*\\.(jpg|jpeg|png|webp)$"))
+            it.startsWith("http") && it.substringBefore('?').lowercase().matches(Regex(".*\\.(jpg|jpeg|png|webp|gif|bmp)$"))
         } ?: mangaUrl.takeIf {
-            it.startsWith("http") && it.substringBefore('?').lowercase().matches(Regex(".*\\.(jpg|jpeg|png|webp)$"))
+            it.startsWith("http") && it.substringBefore('?').lowercase().matches(Regex(".*\\.(jpg|jpeg|png|webp|gif|bmp)$"))
         }
         if (directCandidate != null) {
             decodeHttpBitmap(directCandidate)?.let { bmp ->
@@ -456,25 +461,72 @@ object ReaderBitmapPipeline {
             }
         }
 
-        // 2. MangaDex or HTTP chapter URL -> resolve page URLs via LiveSourceParsers
-        val effectiveChapterUrl = when {
-            !chapterUrl.isNullOrBlank() && chapterUrl.startsWith("http") -> chapterUrl
-            mangaUrl.contains("mangadex.org/chapter/") -> mangaUrl
-            else -> {
-                val chapters = LiveSourceParsers.fetchChaptersForManga(
-                    mangaUrl = mangaUrl,
-                    mangaTitle = mangaTitle,
-                    sourceId = "MANGADEX_EN",
-                )
-                chapters.getOrNull(chapterIndex.coerceIn(0, (chapters.size - 1).coerceAtLeast(0)))?.url
+        // 2. Local file:// or cbz:// image
+        val localCandidate = chapterUrl?.takeIf { it.startsWith("file://") || it.startsWith("cbz://") }
+            ?: mangaUrl.takeIf { it.startsWith("file://") || it.startsWith("cbz://") }
+        if (localCandidate != null) {
+            val bmp = if (localCandidate.startsWith("cbz://")) {
+                val rawPath = localCandidate.removePrefix("cbz://").substringBefore('#')
+                decodePageFromCbzFile(File(rawPath), pageIndex)
+            } else {
+                val rawPath = localCandidate.removePrefix("file://")
+                BitmapFactory.decodeFile(rawPath)
+            }
+            if (bmp != null) {
+                synchronized(memoryCache) { memoryCache.put(cacheKey, bmp) }
+                return@withContext bmp
             }
         }
 
-        if (!effectiveChapterUrl.isNullOrBlank()) {
-            val pageUrls = LiveSourceParsers.fetchPageUrlsForChapter(effectiveChapterUrl)
-            if (pageUrls.isNotEmpty()) {
-                val targetPageUrl = pageUrls[pageIndex.coerceIn(0, pageUrls.lastIndex)]
-                decodeHttpBitmap(targetPageUrl)?.let { bmp ->
+        // 3. Resolve chapter & page URLs via MangaRepository.Factory
+        if (sourceName.isNotBlank()) {
+            val resolvedImageUrl = runCatching {
+                val src = MangaSource(sourceName)
+                val repo = MangaRepository.Factory(GlobalParserContextHolder.applicationContext).createAsync(src)
+                val effectiveChapter = if (!chapterUrl.isNullOrBlank()) {
+                    MangaChapter(
+                        id = abs((sourceName + "|" + chapterUrl).hashCode().toLong()),
+                        name = "Chapter ${chapterIndex + 1}",
+                        number = (chapterIndex + 1).toFloat(),
+                        volume = 0,
+                        url = chapterUrl,
+                        scanlator = null,
+                        uploadDate = 0L,
+                        branch = null,
+                        source = src,
+                    )
+                } else {
+                    val details = repo.getDetails(
+                        Manga(
+                            id = abs((sourceName + "|" + mangaUrl).hashCode().toLong()),
+                            title = mangaTitle,
+                            altTitle = null,
+                            url = mangaUrl,
+                            publicUrl = mangaUrl,
+                            rating = -1f,
+                            isNsfw = false,
+                            coverUrl = null,
+                            largeCoverUrl = null,
+                            description = null,
+                            tags = emptySet(),
+                            state = MangaState.ONGOING,
+                            author = null,
+                            chapters = null,
+                            source = src,
+                        ),
+                    )
+                    val chs = details.chapters.orEmpty()
+                    chs.getOrNull(chapterIndex.coerceIn(0, (chs.size - 1).coerceAtLeast(0)))
+                } ?: return@runCatching null
+
+                val pages = repo.getPages(effectiveChapter)
+                if (pages.isEmpty()) return@runCatching null
+                val targetPage = pages[pageIndex.coerceIn(0, pages.lastIndex)]
+                repo.getPageUrl(targetPage)
+            }.getOrNull()
+
+            if (!resolvedImageUrl.isNullOrBlank() && resolvedImageUrl.startsWith("http")) {
+                decodeHttpBitmap(resolvedImageUrl)?.let { bmp ->
                     synchronized(memoryCache) { memoryCache.put(cacheKey, bmp) }
                     return@withContext bmp
                 }

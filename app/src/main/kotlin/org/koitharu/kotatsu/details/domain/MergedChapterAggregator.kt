@@ -3,7 +3,7 @@ package org.koitharu.kotatsu.details.domain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory
+import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.util.TitleNormalizer
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
@@ -11,12 +11,12 @@ import javax.inject.Inject
 
 data class MergeSourceCandidate(
 	val manga: Manga,
-	val priorityWeight: Int, // Lower = higher priority (e.g., 10 = Primary/MangaDex, 50 = Kotatsu Native, 100 = Extension)
+	val priorityWeight: Int, // Lower = higher priority
 	val preferredScanlator: String? = null,
 )
 
 class MergedChapterAggregator @Inject constructor(
-	private val repositoryFactory: HybridMangaRepositoryFactory = HybridMangaRepositoryFactory(),
+	private val repositoryFactory: MangaRepository.Factory = MangaRepository.Factory(),
 ) {
 	/**
 	 * Fetches chapters concurrently across primary + merged secondary sources and
@@ -26,7 +26,7 @@ class MergedChapterAggregator @Inject constructor(
 		val fetchedGroups = candidates.map { candidate ->
 			async {
 				runCatching {
-					val repo = repositoryFactory.getOrCreateAsync(candidate.manga.source)
+					val repo = repositoryFactory.createAsync(candidate.manga.source)
 					val details = repo.getDetails(candidate.manga)
 					details.chapters.orEmpty().map { chapter ->
 						RankedChapter(

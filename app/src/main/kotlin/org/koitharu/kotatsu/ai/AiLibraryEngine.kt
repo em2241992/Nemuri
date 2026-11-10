@@ -271,8 +271,9 @@ class AiLibraryEngine(
 	 */
 	fun diagnoseBrokenLibraryItems(
 		libraryItems: List<LibraryMangaItem>,
+		includeDebugMock: Boolean = false,
 	): List<BrokenMangaFixProposal> {
-		val catalog = extensionManager.getExtensionCatalogItems()
+		val catalog = extensionManager.getExtensionCatalogItems(includeDebugMock = includeDebugMock)
 		if (catalog.isEmpty()) return emptyList()
 		val proposals = mutableListOf<BrokenMangaFixProposal>()
 

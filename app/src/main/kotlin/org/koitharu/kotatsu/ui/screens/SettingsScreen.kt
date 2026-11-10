@@ -1804,7 +1804,7 @@ private fun MangaSourcesSettingsSubScreen(
 	var extSearchQuery by rememberSaveable { mutableStateOf("") }
 	var selectedLang by rememberSaveable { mutableStateOf("ALL") }
 	var sortOrder by rememberSaveable { mutableStateOf(ExtensionSortOrder.UPDATES_FIRST) }
-	var selectedMigrationTargetSource by rememberSaveable { mutableStateOf("Kotatsu Native") }
+	var selectedMigrationTargetSource by rememberSaveable { mutableStateOf("") }
 
 	val hasKeiyoushi = extensionRepos.any {
 		it.baseUrl.contains("keiyoushi", ignoreCase = true)
@@ -2198,18 +2198,10 @@ private fun MangaSourcesSettingsSubScreen(
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						Text(
-							text = "KEIYOUSHI & KOTATSU EXTENSION CATALOG (${availableList.size})",
+							text = "EXTENSION CATALOG (${availableList.size})",
 							style = MaterialTheme.typography.labelSmall,
 							color = MaterialTheme.colorScheme.primary,
 						)
-						if (!hasKeiyoushi) {
-							TextButton(
-								onClick = onQuickAddKeiyoushiRepo,
-								modifier = Modifier.testTag("available_quick_add_keiyoushi"),
-							) {
-								Text("+ Link Keiyoushi Repo", fontSize = 11.sp)
-							}
-						}
 					}
 				}
 
@@ -2237,7 +2229,9 @@ private fun MangaSourcesSettingsSubScreen(
 						.removePrefix("Mihon: ")
 						.substringBefore(" (Mihon")
 						.trim()
-				}.distinct().ifEmpty { listOf("MangaDex (EN)") }
+				}.distinct()
+				val effectiveTargetSource = selectedMigrationTargetSource.takeIf { it in targetSources }
+					?: targetSources.firstOrNull().orEmpty()
 				item {
 					Card(
 						colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -2262,32 +2256,41 @@ private fun MangaSourcesSettingsSubScreen(
 								style = MaterialTheme.typography.titleSmall,
 								fontWeight = FontWeight.SemiBold,
 							)
-							FlowRow(
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
-								verticalArrangement = Arrangement.spacedBy(8.dp),
-							) {
-								targetSources.forEach { target ->
-									FilterChip(
-										selected = selectedMigrationTargetSource == target,
-										onClick = { selectedMigrationTargetSource = target },
-										label = { Text(target, fontSize = 11.sp) },
-									)
-								}
-							}
-							Button(
-								onClick = {
-									val migrations = libraryItems.map { item ->
-										Triple(item.manga.id, selectedMigrationTargetSource, item.totalChapters.coerceAtLeast(12))
+							if (targetSources.isEmpty()) {
+								Text(
+									text = "No extensions installed yet — install an extension first to select a destination source.",
+									style = MaterialTheme.typography.bodySmall,
+									color = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							} else {
+								FlowRow(
+									horizontalArrangement = Arrangement.spacedBy(8.dp),
+									verticalArrangement = Arrangement.spacedBy(8.dp),
+								) {
+									targetSources.forEach { target ->
+										FilterChip(
+											selected = effectiveTargetSource == target,
+											onClick = { selectedMigrationTargetSource = target },
+											label = { Text(target, fontSize = 11.sp) },
+										)
 									}
-									onMigrateBatchSources(migrations)
-								},
-								modifier = Modifier
-									.fillMaxWidth()
-									.testTag("batch_migrate_all_sources_button"),
-							) {
-								Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
-								Spacer(modifier = Modifier.width(8.dp))
-								Text("Batch Migrate All (${libraryItems.size}) → $selectedMigrationTargetSource")
+								}
+								Button(
+									onClick = {
+										val migrations = libraryItems.map { item ->
+											Triple(item.manga.id, effectiveTargetSource, item.totalChapters.coerceAtLeast(1))
+										}
+										onMigrateBatchSources(migrations)
+									},
+									enabled = libraryItems.isNotEmpty() && effectiveTargetSource.isNotBlank(),
+									modifier = Modifier
+										.fillMaxWidth()
+										.testTag("batch_migrate_all_sources_button"),
+								) {
+									Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+									Spacer(modifier = Modifier.width(8.dp))
+									Text("Batch Migrate All (${libraryItems.size}) → $effectiveTargetSource")
+								}
 							}
 						}
 					}

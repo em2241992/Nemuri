@@ -2179,39 +2179,95 @@ private enum class MihonLanguageFilter {
 	ONLY_ALL_MULTI,
 }
 
-internal fun buildMihonSourceCatalog(baseChapterCount: Int): List<ScalableSourceCandidate> {
-	val base = baseChapterCount.coerceAtLeast(18)
-	return listOf(
+internal fun buildMihonSourceCatalog(
+	baseChapterCount: Int,
+	includeDebugMock: Boolean = false,
+): List<ScalableSourceCandidate> {
+	val base = baseChapterCount.coerceAtLeast(1)
+	val appCtx = org.koitharu.kotatsu.core.parser.GlobalParserContextHolder.applicationContext
+	val realCandidates = buildList {
+		if (appCtx != null) {
+			runCatching {
+				val mihonSources = org.koitharu.kotatsu.mihon.MihonExtensionManager.getInstance(appCtx).mihonSources.value
+				mihonSources.forEachIndexed { idx, src ->
+					val cleanName = src.displayName
+					add(
+						ScalableSourceCandidate(
+							id = "mihon_${src.catalogueSource.id}",
+							fullSourceCode = src.name,
+							displayName = cleanName,
+							monogram = cleanName.take(2).uppercase(),
+							langBadge = src.catalogueSource.lang.ifBlank { "ALL" }.uppercase(),
+							verifiedChapters = base,
+							latencyMs = 35 + (idx % 5) * 6,
+							brandColor = Color(0xFFA855F7),
+						),
+					)
+				}
+			}
+			runCatching {
+				val ktProviders = org.koitharu.kotatsu.core.parser.KotatsuExternalProviderScanner.discoverProviders(appCtx)
+				ktProviders.forEachIndexed { idx, prov ->
+					add(
+						ScalableSourceCandidate(
+							id = "kotatsu_${prov.authority}",
+							fullSourceCode = prov.sourceKey,
+							displayName = prov.label,
+							monogram = prov.label.take(2).uppercase(),
+							langBadge = prov.lang.ifBlank { "ALL" }.uppercase(),
+							verifiedChapters = base,
+							latencyMs = 28 + (idx % 4) * 5,
+							brandColor = Color(0xFF5CE1E6),
+						),
+					)
+				}
+			}
+			runCatching {
+				val lnPlugins = org.koitharu.kotatsu.lnreader.LnPluginManager.getInstance(appCtx).installedPlugins.value
+				lnPlugins.forEachIndexed { idx, plugin ->
+					add(
+						ScalableSourceCandidate(
+							id = "ln_${plugin.pluginId}",
+							fullSourceCode = plugin.sourceKey,
+							displayName = plugin.name,
+							monogram = plugin.name.take(2).uppercase(),
+							langBadge = plugin.lang.ifBlank { "ALL" }.uppercase(),
+							verifiedChapters = base,
+							latencyMs = 40 + (idx % 4) * 5,
+							brandColor = Color(0xFF10B981),
+						),
+					)
+				}
+			}
+		}
+	}.distinctBy { it.id }
+
+	if (!includeDebugMock) {
+		return realCandidates
+	}
+
+	val debugMockCandidates = listOf(
 		ScalableSourceCandidate("comick", "EXT:ComicK (Mihon Multi)", "ComicK", "CK", "EN", base + 3, 42, Color(0xFF5CE1E6)),
 		ScalableSourceCandidate("mangadex", "EXT:MangaDex (Mihon EN)", "MangaDex", "MD", "EN", base + 2, 38, Color(0xFFFF6740)),
-		ScalableSourceCandidate("mangafire", "EXT:MangaFire (Mihon EN)", "MangaFire", "MF", "EN", base + 3, 40, Color(0xFFF97316)),
-		ScalableSourceCandidate("hentainexus", "EXT:HentaiNexus (Mihon EN)", "HentaiNexus", "HN", "EN", base + 1, 46, Color(0xFFEC4899)),
-		ScalableSourceCandidate("batoto", "EXT:Bato.to (Mihon EN)", "Bato.to", "BT", "EN", base + 1, 54, Color(0xFF10B981)),
-		ScalableSourceCandidate("3hentai_all", "EXT:3Hentai (ALL)", "3Hentai", "3H", "ALL", base, 58, Color(0xFFE11D48)),
-		ScalableSourceCandidate("3hentai_en", "EXT:3Hentai (EN)", "3Hentai", "3H", "EN", base, 55, Color(0xFFF43F5E)),
-		ScalableSourceCandidate("8muses", "EXT:8Muses (EN)", "8Muses", "8M", "EN", base, 61, Color(0xFFA855F7)),
-		ScalableSourceCandidate("ap_comics", "EXT:AP Comics (EN)", "AP Comics", "AP", "EN", base, 63, Color(0xFF3B82F6)),
-		ScalableSourceCandidate("akuma_all", "EXT:Akuma (ALL)", "Akuma", "AK", "ALL", base + 1, 59, Color(0xFF8B5CF6)),
-		ScalableSourceCandidate("akuma_en", "EXT:Akuma (EN)", "Akuma", "AK", "EN", base + 1, 56, Color(0xFF6366F1)),
-		ScalableSourceCandidate("allmanga", "EXT:AllManga (EN)", "AllManga", "AM", "EN", base + 2, 49, Color(0xFF14B8A6)),
-		ScalableSourceCandidate("allporncomic", "EXT:AllPornComic (EN)", "AllPornComic", "PC", "EN", base, 66, Color(0xFFD946EF)),
-		ScalableSourceCandidate("aquamanga", "EXT:Aqua Manga (EN)", "Aqua Manga", "AQ", "EN", base, 62, Color(0xFF06B6D4)),
 		ScalableSourceCandidate("asura", "EXT:Asura Scans (Mihon EN)", "Asura Scans", "AS", "EN", base + 2, 48, Color(0xFFA855F7)),
-		ScalableSourceCandidate("flamecomics", "EXT:Flame Comics (Mihon EN)", "Flame Comics", "FC", "EN", base, 65, Color(0xFFF97316)),
-		ScalableSourceCandidate("weebcentral", "EXT:WeebCentral (Kotatsu EN)", "WeebCentral", "WC", "EN", base + 1, 51, Color(0xFF38BDF8)),
-		ScalableSourceCandidate("kotatsu_native", "NATIVE:Kotatsu", "Kotatsu Native", "KT", "ALL", base, 29, Color(0xFF10B981)),
+		ScalableSourceCandidate("batoto", "EXT:Bato.to (Mihon EN)", "Bato.to", "BT", "EN", base + 1, 54, Color(0xFF10B981)),
+		ScalableSourceCandidate("aquamanga", "EXT:Aqua Manga (EN)", "Aqua Manga", "AQ", "EN", base, 62, Color(0xFF06B6D4)),
 	)
+	return (realCandidates + debugMockCandidates).distinctBy { it.id }
 }
 
 @Composable
 fun MigrationSourceSelectorScreen(
 	baseChapterCount: Int = 30,
-	initialSelectedSourceNames: List<String> = listOf("ComicK", "MangaDex", "MangaFire", "Bato.to"),
+	initialSelectedSourceNames: List<String> = emptyList(),
+	includeDebugMock: Boolean = false,
 	onContinueWithSelected: (List<ScalableSourceCandidate>) -> Unit,
 	onDismiss: () -> Unit,
 ) {
 	val accentCyan = Color(0xFF5CE1E6)
-	val catalog = remember(baseChapterCount) { buildMihonSourceCatalog(baseChapterCount) }
+	val catalog = remember(baseChapterCount, includeDebugMock) {
+		buildMihonSourceCatalog(baseChapterCount, includeDebugMock = includeDebugMock)
+	}
 
 	val selectedIds = remember(initialSelectedSourceNames, catalog) {
 		val seedIds = initialSelectedSourceNames.mapNotNull { name ->
@@ -2225,7 +2281,7 @@ fun MigrationSourceSelectorScreen(
 			if (seedIds.isNotEmpty()) {
 				addAll(seedIds)
 			} else {
-				addAll(listOf("comick", "mangadex", "mangafire", "batoto"))
+				addAll(catalog.take(4).map { it.id })
 			}
 		}
 	}

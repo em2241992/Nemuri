@@ -27,7 +27,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -930,7 +932,7 @@ fun FeedScreen(
 	modifier: Modifier = Modifier,
 ) {
 	var selectedCategory by rememberSaveable { mutableStateOf(FeedSectionCategory.HOME_PAGE) }
-	var defaultCatalogueSource by rememberSaveable { mutableStateOf("MangaDex") }
+	var defaultCatalogueSource by rememberSaveable { mutableStateOf("All Sources") }
 
 	var searchQuery by remember { mutableStateOf("") }
 	val feedSearchFocusRequester = remember { FocusRequester() }
@@ -954,7 +956,7 @@ fun FeedScreen(
 			extensionCatalog.map { org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(it.sourceName) } +
 				libraryItems.map { org.koitharu.kotatsu.core.ui.util.UiSourceAndTitleFormatter.formatSourceName(it.manga.source) }
 			).filter { it.isNotBlank() }.distinct()
-		(listOf("MangaDex") + dynamicSources + listOf("All Sources")).distinct()
+		(listOf("All Sources") + dynamicSources).distinct()
 	}
 	val sources = remember(feedUpdates) {
 		feedUpdates.map { it.mangaItem.manga.source }.distinct().sorted()
@@ -970,7 +972,7 @@ fun FeedScreen(
 			val matchesUnread = !onlyUnread || !item.chapter.isRead
 			val matchesSource = selectedSourceFilter == null || item.mangaItem.manga.source == selectedSourceFilter
 			matchesQuery && matchesUnread && matchesSource
-		}
+		}.distinctBy { it.id }
 	}
 
 	val groupedUpdates = remember(filteredUpdates, groupingMode) {
@@ -1680,7 +1682,7 @@ private fun FeedHomePageCatalogueView(
 				modifier = Modifier.fillMaxSize(),
 			) {
 				if (drillDownSection == "Popular new titles") {
-					items(sourceFilteredCatalog, key = { "drill_pop_${it.url}" }) { catItem ->
+					itemsIndexed(sourceFilteredCatalog, key = { idx, it -> "drill_pop_${idx}_${it.sourceName}_${it.url}" }) { _, catItem ->
 						val isInLib = TitleNormalizer.normalize(catItem.title) in libraryNormalizedTitles
 						CatalogueTallCoverCard(
 							title = catItem.title,
@@ -1782,7 +1784,7 @@ private fun FeedHomePageCatalogueView(
 					contentPadding = PaddingValues(horizontal = 16.dp),
 					horizontalArrangement = Arrangement.spacedBy(12.dp),
 				) {
-					items(sourceFilteredCatalog, key = { "pop_${it.url}" }) { catItem ->
+					itemsIndexed(sourceFilteredCatalog, key = { idx, it -> "pop_${idx}_${it.sourceName}_${it.url}" }) { _, catItem ->
 						val isInLib = TitleNormalizer.normalize(catItem.title) in libraryNormalizedTitles
 						CatalogueTallCoverCard(
 							title = catItem.title,
@@ -1817,7 +1819,7 @@ private fun FeedHomePageCatalogueView(
 					contentPadding = PaddingValues(horizontal = 16.dp),
 					horizontalArrangement = Arrangement.spacedBy(12.dp),
 				) {
-					items(extensionCatalog.reversed(), key = { "sug_${it.url}" }) { catItem ->
+					itemsIndexed(extensionCatalog.reversed(), key = { idx, it -> "sug_${idx}_${it.sourceName}_${it.url}" }) { _, catItem ->
 						val isInLib = TitleNormalizer.normalize(catItem.title) in libraryNormalizedTitles
 						CatalogueTallCoverCard(
 							title = catItem.title,
@@ -2605,7 +2607,7 @@ private fun FeedDedicatedSuggestionsView(
 			}
 		}
 
-		items(suggestions, key = { "ded_sug_${it.url}" }) { item ->
+		itemsIndexed(suggestions, key = { idx, it -> "ded_sug_${idx}_${it.sourceName}_${it.url}" }) { _, item ->
 			val isInLib = TitleNormalizer.normalize(item.title) in libraryNormalizedTitles
 			Card(
 				colors = CardDefaults.cardColors(
@@ -2787,7 +2789,7 @@ private fun FeedReleaseRow(
 				)
 
 				val cleanSource = UiSourceAndTitleFormatter.formatSourceName(update.mangaItem.manga.source)
-				val cleanScanlator = UiSourceAndTitleFormatter.formatSourceName(update.chapter.scanlator ?: "Official")
+				val cleanScanlator = UiSourceAndTitleFormatter.formatSourceName(update.chapter.scanlator ?: cleanSource)
 				val scanlatorText = if (showScanlator) " • $cleanScanlator" else ""
 				Text(
 					text = "$cleanSource$scanlatorText",

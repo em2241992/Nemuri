@@ -18,7 +18,7 @@ import org.koitharu.kotatsu.core.db.entity.LibraryFastViewEntity
 import org.koitharu.kotatsu.core.db.entity.MangaEntity
 import org.koitharu.kotatsu.core.db.entity.TrackEntity
 import org.koitharu.kotatsu.core.model.MangaSource
-import org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory
+import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
@@ -40,7 +40,7 @@ data class SmartFeedSyncResult(
 @Singleton
 class SmartFeedSyncCoordinator @Inject constructor(
 	private val db: MangaDatabase,
-	private val repositoryFactory: HybridMangaRepositoryFactory = HybridMangaRepositoryFactory(),
+	private val repositoryFactory: MangaRepository.Factory = MangaRepository.Factory(),
 	private val loaderContext: MangaLoaderContext = MangaLoaderContext(),
 ) {
 	@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -130,15 +130,17 @@ class SmartFeedSyncCoordinator @Inject constructor(
 			}
 		}
 
-		// Partition into MangaDex vs other Kotatsu/Extension sources
+		// Partition into explicit MangaDex UUID entries vs all extension sources
+		val uuidRegex = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOption.IGNORE_CASE)
 		val (mangaDexList, otherSourcesList) = eligibleManga.partition { entity ->
-			entity.source.contains("MANGADEX", ignoreCase = true)
+			entity.source.contains("MANGADEX", ignoreCase = true) &&
+				uuidRegex.matches(extractMangaDexUuid(entity))
 		}
 
 		val discoveredUpdates = ConcurrentHashMap<Long, List<MangaChapter>>()
 		var mangaDexBatches = 0
 
-		// 2. MangaDex Batch Polling (100 UUIDs per Request)
+		// 2. MangaDex Batch Polling (100 UUIDs per Request) when a real MangaDex extension entry is in library
 		if (mangaDexList.isNotEmpty()) {
 			val chunks = mangaDexList.chunked(100)
 			mangaDexBatches = chunks.size
@@ -152,7 +154,7 @@ class SmartFeedSyncCoordinator @Inject constructor(
 							sem.withPermit {
 								runCatching {
 									val domainManga = mangaEntity.toDomainManga()
-									val repo = repositoryFactory.getOrCreateAsync(domainManga.source)
+									val repo = repositoryFactory.createAsync(domainManga.source)
 									val details = repo.getDetails(domainManga)
 									val chapters = details.chapters.orEmpty()
 									if (chapters.isNotEmpty()) {
@@ -166,7 +168,7 @@ class SmartFeedSyncCoordinator @Inject constructor(
 			}
 		}
 
-		// 3. Bounded Per-Host Concurrency for Kotatsu & Extension Sources
+		// 3. Bounded Per-Host Concurrency for Mihon, LNReader & Kotatsu Extension Sources
 		val groupedBySource = otherSourcesList.groupBy { it.source }
 		coroutineScope {
 			groupedBySource.flatMap { (sourceName, mangaGroup) ->
@@ -176,7 +178,7 @@ class SmartFeedSyncCoordinator @Inject constructor(
 						hostSem.withPermit {
 							runCatching {
 								val domainManga = mangaEntity.toDomainManga()
-								val repo = repositoryFactory.getOrCreateAsync(domainManga.source)
+								val repo = repositoryFactory.createAsync(domainManga.source)
 								val details = repo.getDetails(domainManga)
 								val chapters = details.chapters.orEmpty()
 								if (chapters.isNotEmpty()) {

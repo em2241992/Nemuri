@@ -10,11 +10,26 @@ enum class MangaState {
 	UPCOMING,
 }
 
+enum class SortOrder {
+	UPDATED,
+	POPULARITY,
+	RATING,
+	NEWEST,
+	ALPHABETICAL,
+	ALPHABETICAL_DESC,
+}
+
+data class MangaTag(
+	val title: String,
+	val key: String,
+	val source: MangaSource = MangaSource("LOCAL"),
+)
+
 data class MangaPage(
 	val id: Long,
 	val url: String,
 	val preview: String? = null,
-	val source: MangaSource = MangaSource("NATIVE_KOTATSU"),
+	val source: MangaSource = MangaSource("LOCAL"),
 )
 
 data class MangaChapter(
@@ -26,7 +41,7 @@ data class MangaChapter(
 	val scanlator: String? = null,
 	val uploadDate: Long = 0L,
 	val branch: String? = null,
-	val source: MangaSource = MangaSource("NATIVE_KOTATSU"),
+	val source: MangaSource = MangaSource("LOCAL"),
 ) {
 	val title: String
 		get() = name
@@ -43,8 +58,9 @@ data class Manga(
 	val coverUrl: String? = null,
 	val largeCoverUrl: String? = null,
 	val description: String? = null,
+	val tags: Set<MangaTag> = emptySet(),
 	val author: String? = null,
 	val state: MangaState? = MangaState.ONGOING,
-	val source: MangaSource = MangaSource("NATIVE_KOTATSU"),
+	val source: MangaSource = MangaSource("LOCAL"),
 	val chapters: List<MangaChapter>? = emptyList(),
 )

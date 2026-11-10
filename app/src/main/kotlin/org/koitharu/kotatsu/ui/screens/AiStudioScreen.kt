@@ -231,6 +231,7 @@ fun AiStudioScreen(
 				duplicateCandidates = duplicateCandidates,
 				batchRule = batchRule,
 				checkAndSwapEnabled = displayConfig.checkAndSwapOnAdd,
+				hasDebugMock = libraryItems.any { it.isDebugMock },
 				onSetBatchRule = onSetBatchRule,
 				onResolveOneByOne = onResolveDuplicateOneByOne,
 				onIgnoreDuplicate = onIgnoreDuplicate,
@@ -253,6 +254,7 @@ fun AiStudioScreen(
 
 			else -> AiPageUpscalerStudioTab(
 				readerConfig = readerConfig,
+				libraryItems = libraryItems,
 				onUpdateReaderConfig = onUpdateReaderConfig,
 			)
 		}
@@ -285,6 +287,7 @@ private fun DuplicateResolutionTab(
 	duplicateCandidates: List<DuplicateCandidatePair>,
 	batchRule: BatchDeduplicationRule,
 	checkAndSwapEnabled: Boolean,
+	hasDebugMock: Boolean = false,
 	onSetBatchRule: (BatchDeduplicationRule) -> Unit,
 	onResolveOneByOne: (DuplicateCandidatePair, Boolean) -> Unit,
 	onIgnoreDuplicate: (DuplicateCandidatePair) -> Unit,
@@ -391,9 +394,18 @@ private fun DuplicateResolutionTab(
 						}
 					}
 
+					val availableSourceCandidates = remember(hasDebugMock) {
+						buildMihonSourceCatalog(30, includeDebugMock = hasDebugMock)
+					}
 					var showDuplicatesMihonSelector by remember { mutableStateOf(false) }
-					var priorityOrderSummary by remember {
-						mutableStateOf("ComicK → MangaDex → MangaFire → Bato.to")
+					var priorityOrderSummary by remember(availableSourceCandidates) {
+						mutableStateOf(
+							if (availableSourceCandidates.isEmpty()) {
+								"No sources installed yet"
+							} else {
+								availableSourceCandidates.take(4).joinToString(" → ") { it.displayName }
+							},
+						)
 					}
 					OutlinedButton(
 						onClick = { showDuplicatesMihonSelector = true },
@@ -404,7 +416,7 @@ private fun DuplicateResolutionTab(
 							.testTag("duplicates_open_mihon_source_selector_button"),
 					) {
 						Text(
-							text = "⚙ Configure & Select Sources (Mihon Selector) ▸",
+							text = "⚙ Configure & Select Sources (Source Selector) ▸",
 							fontSize = 11.sp,
 							fontWeight = FontWeight.Bold,
 							maxLines = 1,
@@ -423,9 +435,14 @@ private fun DuplicateResolutionTab(
 					if (showDuplicatesMihonSelector) {
 						MigrationSourceSelectorScreen(
 							baseChapterCount = 30,
-							initialSelectedSourceNames = listOf("ComicK", "MangaDex", "MangaFire", "Bato.to"),
+							initialSelectedSourceNames = availableSourceCandidates.take(4).map { it.displayName },
+							includeDebugMock = hasDebugMock,
 							onContinueWithSelected = { selected ->
-								priorityOrderSummary = selected.joinToString(" → ") { it.displayName }
+								priorityOrderSummary = if (selected.isEmpty()) {
+									"No sources selected"
+								} else {
+									selected.joinToString(" → ") { it.displayName }
+								}
 								showDuplicatesMihonSelector = false
 							},
 							onDismiss = { showDuplicatesMihonSelector = false },
@@ -1085,10 +1102,13 @@ private fun SourceRepairAndFixItTab(
 @Composable
 private fun AiPageUpscalerStudioTab(
 	readerConfig: ReaderCustomizationConfig,
+	libraryItems: List<LibraryMangaItem> = emptyList(),
 	onUpdateReaderConfig: ((ReaderCustomizationConfig) -> ReaderCustomizationConfig) -> Unit,
 ) {
 	var splitFraction by remember { mutableFloatStateOf(0.5f) }
 	var canvasWidthPx by remember { mutableFloatStateOf(1f) }
+	val hasDebugMock = remember(libraryItems) { libraryItems.any { it.isDebugMock } }
+	val previewItem = remember(libraryItems) { libraryItems.firstOrNull() }
 
 	val activeRightBadgeLabel = when (readerConfig.aiUpscaleMode) {
 		AiUpscaleMode.OFF -> "AI Crisp Ink 1.5x"
@@ -1120,14 +1140,12 @@ private fun AiPageUpscalerStudioTab(
 					modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
 					verticalArrangement = Arrangement.spacedBy(10.dp),
 				) {
-					// 1. Preset Chips (2 clean horizontal rows with padding(top = 2.dp) so top borders are never clipped)
 					Column(
 						modifier = Modifier
 							.fillMaxWidth()
 							.padding(top = 2.dp),
 						verticalArrangement = Arrangement.spacedBy(6.dp),
 					) {
-						// Row 1: Standard Native Decode + AI Crisp Ink (1.5x)
 						Row(
 							modifier = Modifier.fillMaxWidth(),
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1155,7 +1173,6 @@ private fun AiPageUpscalerStudioTab(
 							}
 						}
 
-						// Row 2: Super-Res (2.0x) and De-Noise & Ink Restore side by side on a single horizontal row
 						Row(
 							modifier = Modifier.fillMaxWidth(),
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1184,7 +1201,6 @@ private fun AiPageUpscalerStudioTab(
 						}
 					}
 
-					// 2. Quick Color Filter Chips
 					Row(
 						modifier = Modifier.fillMaxWidth(),
 						horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1209,9 +1225,6 @@ private fun AiPageUpscalerStudioTab(
 						)
 					}
 
-					// 3. Unified Interactive Split-Comparison Preview Canvas
-					// Driven strictly from the draggable vertical divider line (splitFraction state)
-					// with Top-Left ("Original 1.0x") and Top-Right ("AI Crisp Ink 1.5x") corner badges.
 					Box(
 						modifier = Modifier
 							.fillMaxWidth()
@@ -1233,23 +1246,67 @@ private fun AiPageUpscalerStudioTab(
 							}
 							.testTag("studio_upscale_split_slider"),
 					) {
-						MangaReaderPageCanvas(
-							mangaTitle = "Omniscient Reader's Viewpoint",
-							chapterNumber = 42f,
-							pageNumber = 7,
-							totalPages = 18,
-							upscaleMode = if (readerConfig.aiUpscaleMode == AiUpscaleMode.OFF) {
-								AiUpscaleMode.FAST_CRISP_INK_1_5X
-							} else {
-								readerConfig.aiUpscaleMode
-							},
-							showBeforeAfterSplit = true,
-							splitRatio = splitFraction,
-							warmPaperTint = readerConfig.warmPaperTint,
-							invertColors = readerConfig.invertColors,
-							grayscale = readerConfig.grayscale,
-							modifier = Modifier.fillMaxSize(),
-						)
+						if (hasDebugMock) {
+							MangaReaderPageCanvas(
+								mangaTitle = previewItem?.manga?.title ?: "Sandbox Sample",
+								chapterNumber = 1f,
+								pageNumber = 1,
+								totalPages = 18,
+								upscaleMode = if (readerConfig.aiUpscaleMode == AiUpscaleMode.OFF) {
+									AiUpscaleMode.FAST_CRISP_INK_1_5X
+								} else {
+									readerConfig.aiUpscaleMode
+								},
+								showBeforeAfterSplit = true,
+								splitRatio = splitFraction,
+								warmPaperTint = readerConfig.warmPaperTint,
+								invertColors = readerConfig.invertColors,
+								grayscale = readerConfig.grayscale,
+								isDebugMock = true,
+								modifier = Modifier.fillMaxSize(),
+							)
+						} else if (previewItem != null) {
+							MangaCoverArtwork(
+								title = previewItem.manga.title,
+								coverUrl = previewItem.manga.coverUrl,
+								modifier = Modifier.fillMaxSize(),
+							)
+						} else {
+							Box(
+								modifier = Modifier
+									.fillMaxSize()
+									.background(
+										if (readerConfig.invertColors) Color(0xFF141821)
+										else if (readerConfig.warmPaperTint) Color(0xFF231F1A)
+										else Color(0xFF0E131B),
+									),
+								contentAlignment = Alignment.Center,
+							) {
+								Column(
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(8.dp),
+									modifier = Modifier.padding(24.dp),
+								) {
+									Icon(
+										imageVector = Icons.Default.AutoAwesome,
+										contentDescription = null,
+										tint = Color(0xFF5CE1E6),
+										modifier = Modifier.size(32.dp),
+									)
+									Text(
+										text = "Upscaler Shader Active",
+										style = MaterialTheme.typography.titleSmall,
+										fontWeight = FontWeight.Bold,
+										color = Color.White,
+									)
+									Text(
+										text = "Add a manga series or import a .CBZ archive to preview live page enhancement.",
+										style = MaterialTheme.typography.bodySmall,
+										color = Color(0xFF94A3B8),
+									)
+								}
+							}
+						}
 
 						// Top-Left Corner Badge: "Original 1.0x"
 						Surface(

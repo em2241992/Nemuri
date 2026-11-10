@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.db.entity.MangaEntity
 import org.koitharu.kotatsu.core.model.MangaSource
-import org.koitharu.kotatsu.core.parser.HybridMangaRepositoryFactory
+import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.util.TitleNormalizer
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
@@ -25,13 +25,13 @@ data class FailoverNotification(
 @Singleton
 class SilentFailoverChapterLoader @Inject constructor(
 	private val db: MangaDatabase,
-	private val repositoryFactory: HybridMangaRepositoryFactory = HybridMangaRepositoryFactory(),
+	private val repositoryFactory: MangaRepository.Factory = MangaRepository.Factory(),
 ) {
 	private val _failoverEvents = MutableSharedFlow<FailoverNotification>(extraBufferCapacity = 16)
 	val failoverEvents: SharedFlow<FailoverNotification> = _failoverEvents.asSharedFlow()
 
 	/**
-	 * Attempts to load pages from the active `chapter.source` via `HybridMangaRepositoryFactory`.
+	 * Attempts to load pages from the active `chapter.source` via `MangaRepository.Factory`.
 	 * If `getPages(chapter)` throws an exception or returns an empty list, automatically queries
 	 * `manga_merge_links` and `manga` matching the parent manga's `normalized_slug` or `canonical_id`
 	 * (ordered by `priority_weight ASC`), locates the matching canonical chapter key, and silently
@@ -42,7 +42,7 @@ class SilentFailoverChapterLoader @Inject constructor(
 		parentMangaId: Long? = null,
 	): List<MangaPage> {
 		val primaryPages = runCatching {
-			val primaryRepo = repositoryFactory.getOrCreateAsync(chapter.source)
+			val primaryRepo = repositoryFactory.createAsync(chapter.source)
 			primaryRepo.getPages(chapter)
 		}.getOrNull()
 
@@ -57,25 +57,25 @@ class SilentFailoverChapterLoader @Inject constructor(
 		for (candidateManga in candidates) {
 			val fallbackPages = runCatching {
 				val fallbackSource = MangaSource(candidateManga.source)
-				val repo = repositoryFactory.getOrCreateAsync(fallbackSource)
+				val repo = repositoryFactory.createAsync(fallbackSource)
 				val domainManga = candidateManga.toDomainManga(fallbackSource)
 				val details = repo.getDetails(domainManga)
-				val remoteChapters = details.chapters.orEmpty().ifEmpty {
-					db.getChaptersDao().findAll(candidateManga.id).map { chEntity ->
-						MangaChapter(
-							id = chEntity.chapterId,
-							name = chEntity.title,
-							number = chEntity.number,
-							volume = chEntity.volume,
-							url = chEntity.url,
-							scanlator = chEntity.scanlator,
-							uploadDate = chEntity.uploadDate,
-							branch = chEntity.branch,
-							source = fallbackSource,
-						)
-					}
-				}
+				val remoteChapters = details.chapters.orEmpty()
 				val matchingChapter = remoteChapters.firstOrNull {
+					TitleNormalizer.toCanonicalChapterKey(it.number, it.name) == targetKey
+				} ?: db.getChaptersDao().findAll(candidateManga.id).map { chEntity ->
+					MangaChapter(
+						id = chEntity.chapterId,
+						name = chEntity.title,
+						number = chEntity.number,
+						volume = chEntity.volume,
+						url = chEntity.url,
+						scanlator = chEntity.scanlator,
+						uploadDate = chEntity.uploadDate,
+						branch = chEntity.branch,
+						source = fallbackSource,
+					)
+				}.firstOrNull {
 					TitleNormalizer.toCanonicalChapterKey(it.number, it.name) == targetKey
 				} ?: return@runCatching emptyList<MangaPage>()
 

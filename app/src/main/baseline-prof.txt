@@ -1,6 +1,6 @@
 HSPLorg/koitharu/kotatsu/core/db/MangaDatabase**;->**(**)**
 HSPLorg/koitharu/kotatsu/core/util/TitleNormalizer**;->**(**)**
-HSPLorg/koitharu/kotatsu/core/parser/HybridMangaRepositoryFactory**;->**(**)**
+HSPLorg/koitharu/kotatsu/core/parser/MangaRepository**;->**(**)**
 HSPLorg/koitharu/kotatsu/core/ui/image/MangaCoverRequest**;->**(**)**
 HSPLorg/koitharu/kotatsu/reader/domain/ReaderPagePreloader**;->**(**)**
 HSPLorg/koitharu/kotatsu/reader/domain/WidePageProcessor**;->**(**)**

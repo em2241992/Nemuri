@@ -1,6 +1,7 @@
 plugins {
 	alias(libs.plugins.android.application)
 	alias(libs.plugins.kotlin.compose)
+	alias(libs.plugins.kotlin.serialization)
 	alias(libs.plugins.ksp)
 }
 
@@ -12,7 +13,7 @@ android {
 		applicationId = 'org.nemuri.manga'
 		minSdk = 24
 		targetSdk = 36
-		versionCode = 1040
+		versionCode = 1042
 		versionName = '10.0.0-neo'
 		testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
 	}
@@ -100,13 +101,15 @@ dependencies {
 	implementation libs.androidx.room.ktx
 	ksp libs.androidx.room.compiler
 
-	// implementation libs.androidx.datastore.preferences
-	// implementation libs.coil.compose
+	implementation libs.coil.compose
 	implementation libs.okhttp
-	// implementation libs.okio
+	implementation libs.okio
 	implementation libs.kotlinx.coroutines.android
-	// implementation libs.kotlinx.serialization.json
-	// implementation libs.gson
+	implementation libs.kotlinx.serialization.json
+	implementation libs.kotlinx.serialization.protobuf
+	implementation libs.jsoup
+	implementation libs.androidx.webkit
+	implementation libs.rxjava
 
 	debugImplementation libs.androidx.ui.tooling
 	debugImplementation libs.androidx.ui.test.manifest

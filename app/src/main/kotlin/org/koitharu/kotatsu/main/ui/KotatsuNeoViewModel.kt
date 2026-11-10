@@ -313,10 +313,12 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 		aiEngine.detectDuplicates(items, ignoredSet)
 	}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-	val brokenMangaProposals: StateFlow<List<BrokenMangaFixProposal>> = rawLibraryItems.combine(
+	val brokenMangaProposals: StateFlow<List<BrokenMangaFixProposal>> = combine(
+		rawLibraryItems,
 		_discoveredExtensions,
-	) { items, _ ->
-		aiEngine.diagnoseBrokenLibraryItems(items)
+		_debugSandboxEnabled,
+	) { items, _, sandboxEnabled ->
+		aiEngine.diagnoseBrokenLibraryItems(items, includeDebugMock = sandboxEnabled)
 	}.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 	val historyItems: StateFlow<List<LibraryMangaItem>> = rawLibraryItems.map { items ->
@@ -1166,6 +1168,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 				extensionManager.fetchCatalogForSourceOrSearch(
 					sourceName = sourceName,
 					query = query,
+					includeDebugMock = _debugSandboxEnabled.value,
 				)
 			}
 			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
@@ -1175,7 +1178,10 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	fun installOrUpdateExtension(ext: ExternalExtensionInfo) {
 		viewModelScope.launch {
 			val wasUpdate = ext.hasUpdate
-			val completedTask = extensionManager.downloadAndInstallExtension(ext) { progressTask ->
+			val completedTask = extensionManager.downloadAndInstallExtension(
+				ext = ext,
+				includeDebugMock = _debugSandboxEnabled.value,
+			) { progressTask ->
 				_extensionInstallTasks.update { it + (ext.pkgName to progressTask) }
 			}
 			_extensionInstallTasks.update { it + (ext.pkgName to completedTask) }
@@ -1186,10 +1192,19 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 			)
 			_extensionCatalog.value = extensionManager.getExtensionCatalogItems(includeDebugMock = _debugSandboxEnabled.value)
 			val targetVer = ext.latestVersionName ?: ext.versionName
-			val actionLabel = if (wasUpdate) "Updated" else "Installed & activated"
-			postBanner(
-				"$actionLabel '${ext.name.removePrefix("EXT:")}' v$targetVer (FileProvider URI ready).",
-			)
+			val cleanName = ext.name.removePrefix("EXT:")
+			when (completedTask.status) {
+				ExtensionInstallStatus.INSTALLED -> {
+					val actionLabel = if (wasUpdate) "Updated" else "Installed & activated"
+					postBanner("$actionLabel '$cleanName' v$targetVer.")
+				}
+				ExtensionInstallStatus.FAILED -> {
+					postBanner("Could not download '$cleanName'. Check repository URL or network connection.")
+				}
+				else -> {
+					postBanner("Opened APK download for '$cleanName' v$targetVer — complete OS install to activate source.")
+				}
+			}
 		}
 	}
 
@@ -1225,12 +1240,27 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 	fun createUninstallPackageIntent(ext: ExternalExtensionInfo): android.content.Intent =
 		extensionManager.createUninstallPackageIntent(ext.pkgName)
 
-	fun importCbzFromUri(uri: Uri?, fallbackName: String = "Lone_Wolf_And_Cub_Vol1.cbz") {
+	fun importCbzFromUri(uri: Uri?, fallbackName: String = "Imported_Archive.cbz") {
+		if (uri == null && !_debugSandboxEnabled.value) {
+			postBanner("Select a local .CBZ or .ZIP archive to import.")
+			return
+		}
 		viewModelScope.launch {
 			val app = getApplication<Application>()
 			val stream = uri?.let { runCatching { app.contentResolver.openInputStream(it) }.getOrNull() }
 				?: ByteArrayInputStream(ByteArray(0))
-			val imported = stream.use { extensionManager.importCbzArchive(it, fallbackName) }
+			val imported = runCatching {
+				stream.use {
+					extensionManager.importCbzArchive(
+						inputStream = it,
+						fileName = fallbackName,
+						allowDebugSampleWhenEmpty = _debugSandboxEnabled.value,
+					)
+				}
+			}.getOrElse { err ->
+				postBanner("Could not import archive: ${err.message ?: "invalid file"}")
+				return@launch
+			}
 			db.getFavouritesDao().upsert(
 				org.koitharu.kotatsu.core.db.entity.FavouriteEntity(
 					mangaId = imported.id,
@@ -1240,7 +1270,7 @@ class KotatsuNeoViewModel(application: Application) : AndroidViewModel(applicati
 				),
 			)
 			refreshDiagnostics()
-			postBanner("Indexed local archive '${imported.title}' into Local CBZ Vault.")
+			postBanner("Indexed local archive '${imported.title}' into Library.")
 		}
 	}
 

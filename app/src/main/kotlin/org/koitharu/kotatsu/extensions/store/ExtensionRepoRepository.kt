@@ -184,7 +184,7 @@ class ExtensionRepoRepository(
         }
 
         val candidateUrls = buildList {
-            // As in DropSauce/Mihon: a repo whose repo.json names an index_v2 has moved there
+            // A repo whose repo.json names an index_v2 has moved there
             // (Keiyoushi's index.min.json is now just a 2-item "Outdated App / Update to Mihon" stub).
             val indexV2 = repoJson?.indexV2?.takeIf { it.isNotBlank() }
             if (indexV2 != null) {
