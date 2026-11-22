@@ -1,0 +1,252 @@
+package org.koitharu.kotatsu.local.data.importer
+
+import android.content.Context
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
+import dagger.Reusable
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
+import okio.ByteString.Companion.decodeHex
+import okio.buffer
+import okio.sink
+import okio.source
+import org.koitharu.kotatsu.core.exceptions.UnsupportedFileException
+import org.koitharu.kotatsu.core.util.ext.openSource
+import org.koitharu.kotatsu.core.util.ext.printStackTraceDebug
+import org.koitharu.kotatsu.core.util.ext.resolveName
+import org.koitharu.kotatsu.core.util.ext.writeAllCancellable
+import org.koitharu.kotatsu.local.data.hasImageExtension
+import org.koitharu.kotatsu.local.data.hasPdfExtension
+import org.koitharu.kotatsu.local.data.hasRarExtension
+import org.koitharu.kotatsu.local.data.hasZipExtension
+import org.koitharu.kotatsu.local.data.isEpubFile
+import org.koitharu.kotatsu.local.data.LocalStorageChanges
+import org.koitharu.kotatsu.local.data.LocalStorageManager
+import org.koitharu.kotatsu.local.data.isSupportedArchive
+import org.koitharu.kotatsu.local.data.input.LocalMangaParser
+import org.koitharu.kotatsu.local.domain.model.LocalManga
+import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import java.io.File
+import java.io.IOException
+import javax.inject.Inject
+
+@Reusable
+class SingleMangaImporter @Inject constructor(
+	@ApplicationContext private val context: Context,
+	private val storageManager: LocalStorageManager,
+	@LocalStorageChanges private val localStorageChanges: MutableSharedFlow<LocalManga?>,
+) {
+
+	private val contentResolver = context.contentResolver
+
+	suspend fun import(uri: Uri): List<LocalManga> {
+		val result = if (isDirectory(uri)) {
+			importDirectory(uri)
+		} else {
+			listOf(importFile(uri))
+		}
+		for (manga in result) {
+			localStorageChanges.emit(manga)
+		}
+		return result
+	}
+
+	private suspend fun importFile(uri: Uri): LocalManga = withContext(Dispatchers.IO) {
+		val contentResolver = storageManager.contentResolver
+		val name = contentResolver.resolveName(uri) ?: throw IOException("Cannot fetch name from uri: $uri")
+		if (!isSupportedArchive(name)) {
+			throw UnsupportedFileException("Unsupported file $name on $uri")
+		}
+		val dest = File(getOutputDir(), name).also { outputFile ->
+			if (outputFile.isDirectory && outputFile.listFiles()?.isEmpty() == true && !outputFile.delete()) {
+				throw IOException("Cannot remove empty import directory: $outputFile")
+			}
+			runInterruptible {
+				contentResolver.openSource(uri)
+			}.use { source ->
+				outputFile.sink().buffer().use { output ->
+					output.writeAllCancellable(source)
+				}
+			}
+		}.let { if (hasRarExtension(name)) runInterruptible { it.repackRarToCbz() } else it }
+		LocalMangaParser(dest).getManga(withDetails = false)
+	}
+
+	/**
+	 * CBR is only an import format: it is kept as a CBZ, so nothing past the importer has to read RAR.
+	 * Many .cbr files are zips under another name and only need renaming. Replaces this file either way.
+	 */
+	private fun File.repackRarToCbz(): File {
+		val cbz = File(parentFile, "$nameWithoutExtension.cbz")
+		try {
+			if (source().buffer().use { it.rangeEquals(0, ZIP_MAGIC) }) {
+				if (!renameTo(cbz)) {
+					throw IOException("Cannot rename $this to $cbz")
+				}
+				return cbz
+			}
+			repackRar(this, cbz) // real RAR: GitHub version only (src/github, src/fdroid)
+			return cbz
+		} catch (e: Exception) {
+			cbz.delete()
+			throw e
+		} finally {
+			delete()
+		}
+	}
+
+	private suspend fun importDirectory(uri: Uri): List<LocalManga> = withContext(Dispatchers.IO) {
+		val root = requireNotNull(DocumentFile.fromTreeUri(context, uri)) {
+			"Provided uri $uri is not a tree"
+		}
+		// A Mihon downloads root or source folder holds many titles, each of which becomes its own manga
+		val mangaDirs = root.findMangaDirs(contentResolver)
+		if (mangaDirs.isNotEmpty()) {
+			// Two sources can hold the same title, so each one needs a folder of its own here.
+			// One unreadable title must not cost the rest of the batch; only an all-failed batch fails.
+			val results = mangaDirs.map { runCatchingCancellable { importMangaDirectory(it, unique = true) } }
+			results.forEach { it.exceptionOrNull()?.printStackTraceDebug() }
+			results.mapNotNull { it.getOrNull() }.ifEmpty { listOf(results.first().getOrThrow()) }.flatten()
+		} else {
+			importMangaDirectory(root, unique = false)
+		}
+	}
+
+	private suspend fun importMangaDirectory(root: DocumentFile, unique: Boolean): List<LocalManga> {
+		val allFiles = root.listFiles().filterNot { isImportJunk(it.name.orEmpty()) }
+		val dest = destinationDir(root.requireName(), unique)
+		dest.mkdirs()
+		try {
+			for (docFile in allFiles) {
+				docFile.copyTo(dest)
+			}
+			// No-op unless the folder came from Mihon and carries ComicInfo.xml
+			runInterruptible { writeMihonIndex(dest) }
+			val novel = splitOffNovels(dest)
+			return listOfNotNull(
+				LocalMangaParser(dest).getManga(withDetails = false),
+				novel?.let { LocalMangaParser(it).getManga(withDetails = false) },
+			)
+		} catch (e: Exception) {
+			// A half-copied fresh folder would show up as a broken title. A re-import merges into an
+			// existing folder, which must never be wiped.
+			if (unique) {
+				dest.deleteRecursively()
+			}
+			throw e
+		}
+	}
+
+	private suspend fun DocumentFile.copyTo(destDir: File) {
+		if (isImportJunk(name.orEmpty())) {
+			return
+		}
+		if (isDirectory) {
+			val subDir = File(destDir, requireName())
+			subDir.mkdirs()
+			for (docFile in listFiles()) {
+				docFile.copyTo(subDir)
+			}
+		} else {
+			val file = File(destDir, requireName())
+			source().use { input ->
+				file.sink().buffer().use { output ->
+					output.writeAllCancellable(input)
+				}
+			}
+			if (hasRarExtension(file.name)) {
+				runInterruptible { file.repackRarToCbz() }
+			}
+		}
+	}
+
+	/**
+	 * A folder with EPUBs reads as a novel and would hide its comics, so when it holds both the EPUBs
+	 * move out to an entry of their own: a lone book as its own file, several in a "(novel)" folder.
+	 * Returns where they went, or null when nothing was split.
+	 */
+	private suspend fun splitOffNovels(dest: File): File? {
+		val epubs = dest.listFiles { f -> f.isEpubFile }.orEmpty()
+		val hasManga = epubs.isNotEmpty() && runInterruptible(Dispatchers.IO) {
+			// Loose images next to the books are a cover (Calibre keeps cover.jpg there), not a chapter
+			dest.walkTopDown().any { f ->
+				f.isFile && (hasZipExtension(f.name) || hasPdfExtension(f.name) ||
+					(hasImageExtension(f.name) && f.parentFile != dest))
+			}
+		}
+		if (!hasManga) {
+			return null
+		}
+		val target = if (epubs.size == 1) {
+			uniqueFile(getOutputDir(), epubs.single().name)
+		} else {
+			destinationDir("${dest.name} (novel)", unique = true).also { it.mkdirs() }
+		}
+		runInterruptible(Dispatchers.IO) {
+			for (epub in epubs) {
+				val to = if (target.isDirectory) File(target, epub.name) else target
+				if (!epub.renameTo(to)) {
+					throw IOException("Cannot move ${epub.name} to $to")
+				}
+			}
+		}
+		return target
+	}
+
+	private fun uniqueFile(dir: File, name: String): File {
+		val base = name.substringBeforeLast('.')
+		val ext = name.substringAfterLast('.', "")
+		var file = File(dir, name)
+		var i = 1
+		while (file.exists()) {
+			file = File(dir, "${base}_$i.$ext")
+			i++
+		}
+		return file
+	}
+
+	/**
+	 * Re-importing the same folder keeps merging into it, as it always has. Only a batch import
+	 * sidesteps a folder that is already taken, so two same-named titles do not end up merged.
+	 */
+	private suspend fun destinationDir(name: String, unique: Boolean): File {
+		val outputDir = getOutputDir()
+		val dest = File(outputDir, name)
+		if (!unique || !dest.exists()) {
+			return dest
+		}
+		var i = 1
+		while (true) {
+			val candidate = File(outputDir, "${name}_$i")
+			if (!candidate.exists()) {
+				return candidate
+			}
+			i++
+		}
+	}
+
+	private suspend fun getOutputDir(): File {
+		return storageManager.getDefaultWriteableDir() ?: throw IOException("External files dir unavailable")
+	}
+
+	private suspend fun DocumentFile.source() = runInterruptible(Dispatchers.IO) {
+		contentResolver.openSource(uri)
+	}
+
+	private fun DocumentFile.requireName(): String {
+		return name ?: throw IOException("Cannot fetch name from uri: $uri")
+	}
+
+	private fun isDirectory(uri: Uri): Boolean {
+		return runCatching {
+			DocumentFile.fromTreeUri(context, uri)?.isDirectory == true
+		}.getOrDefault(false)
+	}
+
+	private companion object {
+		private val ZIP_MAGIC = "504b0304".decodeHex()
+	}
+}

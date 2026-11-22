@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest
+	xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:tools="http://schemas.android.com/tools">
+
+	<!-- Shizuku 13.1.5's APIs used here remain Android 6 compatible; its published AAR
+	     conservatively declares API 24 even though Shizuku itself supports API 23. -->
+	<uses-sdk tools:overrideLibrary="rikka.shizuku.api,rikka.shizuku.provider" />
+
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+	<uses-permission
+		android:name="android.permission.FOREGROUND_SERVICE"
+		tools:ignore="ForegroundServicesPolicy" />
+	<uses-permission android:name="android.permission.WAKE_LOCK" />
+	<uses-permission android:name="android.permission.VIBRATE" />
+	<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+	<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+	<uses-permission
+		android:name="android.permission.REQUEST_INSTALL_PACKAGES"
+		tools:ignore="RequestInstallPackagesPolicy" />
+	<uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+	<uses-permission
+		android:name="android.permission.QUERY_ALL_PACKAGES"
+		tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission" />
+	<uses-permission
+		android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+		android:maxSdkVersion="29" />
+	<uses-permission
+		android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+		tools:ignore="AllFilesAccessPolicy,ScopedStorage" />
+
+	<queries>
+		<package android:name="moe.shizuku.privileged.api" />
+		<intent>
+			<action android:name="android.intent.action.PROCESS_TEXT" />
+			<data android:mimeType="text/plain" />
+		</intent>
+	</queries>
+
+	<application>
+
+		<provider
+			android:name="rikka.shizuku.ShizukuProvider"
+			android:authorities="${applicationId}.shizuku"
+			android:enabled="true"
+			android:exported="true"
+			android:multiprocess="false"
+			android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+		<activity
+			android:name="eu.kanade.tachiyomi.ui.webview.WebViewActivity"
+			android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+			android:noHistory="true"
+			android:windowSoftInputMode="adjustResize" />
+
+		<service
+			android:name="androidx.work.impl.foreground.SystemForegroundService"
+			android:foregroundServiceType="dataSync"
+			tools:node="merge" />
+		<service
+			android:name="org.koitharu.kotatsu.local.ui.LocalChaptersRemoveService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync"
+			android:label="@string/local_manga_processing" />
+		<service
+			android:name="org.koitharu.kotatsu.kotatsumigration.ui.KotatsuMigrationService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync"
+			android:label="@string/migrate_from_kotatsu" />
+		<service
+			android:name="org.koitharu.kotatsu.local.ui.LocalIndexUpdateService"
+			android:exported="false"
+			android:label="@string/local_manga_processing" />
+		<service
+			android:name="org.koitharu.kotatsu.local.ui.ImportService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync"
+			android:label="@string/importing_manga" />
+		<service
+			android:name="org.koitharu.kotatsu.backup.local.ui.backup.BackupService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync"
+			android:label="@string/creating_backup" />
+		<service
+			android:name="org.koitharu.kotatsu.backup.local.ui.restore.RestoreService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync"
+			android:label="@string/restoring_backup" />
+
+		<provider
+			android:name="org.koitharu.kotatsu.search.ui.MangaSuggestionsProvider"
+			android:authorities="${applicationId}.MangaSuggestionsProvider"
+			android:exported="false" />
+
+		<receiver
+			android:name="org.koitharu.kotatsu.core.exceptions.resolve.CaptchaHandler$DiscardReceiver"
+			android:exported="false">
+			<intent-filter>
+				<action android:name="org.koitharu.kotatsu.CAPTCHA_DISCARD" />
+			</intent-filter>
+		</receiver>
+
+		<receiver
+			android:name="org.koitharu.kotatsu.tracker.work.TrackerNotificationHelper$MarkAsReadReceiver"
+			android:exported="false" />
+
+	</application>
+
+</manifest>

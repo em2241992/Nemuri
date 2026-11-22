@@ -1,0 +1,3 @@
+[submodule "engine/src/main/cpp/libjxl"]
+	path = engine/src/main/cpp/libjxl
+	url = https://github.com/libjxl/libjxl.git

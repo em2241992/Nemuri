@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<style name="Theme.Nemuri" parent="Theme.Material3.Dark.NoActionBar">
+		<item name="android:windowBackground">#090C10</item>
+		<item name="android:statusBarColor">#090C10</item>
+		<item name="android:navigationBarColor">#090C10</item>
+	</style>
+</resources>

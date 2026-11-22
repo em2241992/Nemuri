@@ -1,0 +1,170 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+	id 'com.android.library'
+	id 'com.google.devtools.ksp'
+	id 'org.jetbrains.kotlin.plugin.parcelize'
+	id 'com.google.dagger.hilt.android'
+	id 'androidx.room'
+	id 'org.jetbrains.kotlin.plugin.serialization'
+}
+
+android {
+	compileSdk {
+		version = release(37) {
+			minorApiLevel = 0
+		}
+	}
+	namespace = 'org.koitharu.kotatsu'
+	ndkVersion = '28.2.13676358'
+	externalNativeBuild {
+		cmake {
+			path = file('src/main/cpp/CMakeLists.txt')
+			version = '3.22.1'
+		}
+	}
+
+	defaultConfig {
+		minSdk = 26
+		consumerProguardFiles 'proguard-rules.pro'
+		ksp {
+			arg('room.generateKotlin', 'true')
+		}
+		externalNativeBuild {
+			cmake {
+				arguments '-DCMAKE_BUILD_TYPE=MinSizeRel'
+			}
+		}
+		buildConfigField 'String', 'APPLICATION_ID', '"org.nemuri.app"'
+		buildConfigField 'int', 'VERSION_CODE', '1'
+		buildConfigField 'String', 'VERSION_NAME', '"0.1.0-alpha1"'
+	}
+
+	buildTypes {
+		debug {
+		}
+		release {
+			minifyEnabled = false
+		}
+		preview {
+			initWith release
+			matchingFallbacks = ['release']
+		}
+	}
+
+	flavorDimensions = ['store']
+	productFlavors {
+		github {
+			dimension = 'store'
+			isDefault = true
+		}
+		fdroid {
+			dimension = 'store'
+		}
+	}
+
+	buildFeatures {
+		buildConfig = true
+		aidl = true
+	}
+
+	sourceSets {
+		preview.kotlin.srcDirs += 'src/release/kotlin'
+		preview.res.srcDirs += 'src/release/res'
+	}
+
+	compileOptions {
+		coreLibraryDesugaringEnabled = true
+		sourceCompatibility JavaVersion.VERSION_11
+		targetCompatibility JavaVersion.VERSION_11
+	}
+
+	room {
+		schemaDirectory "$projectDir/schemas"
+	}
+}
+
+kotlin {
+	compilerOptions {
+		jvmTarget = JvmTarget.JVM_11
+		freeCompilerArgs.addAll([
+			'-opt-in=kotlin.ExperimentalStdlibApi',
+			'-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi',
+			'-opt-in=kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi',
+			'-opt-in=kotlinx.coroutines.InternalForInheritanceCoroutinesApi',
+			'-opt-in=kotlinx.coroutines.FlowPreview',
+			'-opt-in=kotlin.contracts.ExperimentalContracts',
+			'-opt-in=coil3.annotation.ExperimentalCoilApi',
+			'-opt-in=coil3.annotation.InternalCoilApi',
+			'-opt-in=kotlinx.serialization.ExperimentalSerializationApi',
+			'-opt-in=org.koitharu.kotatsu.parsers.InternalParsersApi',
+			'-Xjspecify-annotations=strict'
+		])
+	}
+}
+
+dependencies {
+	coreLibraryDesugaring libs.desugar.jdk.libs
+	api libs.kotlinx.coroutines.android
+	api libs.kotlinx.coroutines.core
+	api libs.kotlinx.coroutines.guava
+
+	implementation libs.androidx.appcompat
+	implementation libs.material
+	api libs.androidx.core
+	api libs.androidx.collection
+	api libs.lifecycle.viewmodel
+	api libs.lifecycle.service
+	api libs.lifecycle.process
+	api libs.androidx.documentfile
+	api libs.androidx.preference
+	api libs.androidx.webkit
+	api libs.androidx.work.runtime
+	api libs.guava
+
+	api libs.androidx.room.runtime
+	api libs.androidx.room.ktx
+	ksp libs.androidx.room.compiler
+
+	// Google Drive sign-in; the F-Droid version has no Drive sync and no Play Services.
+	githubImplementation libs.play.services.auth
+
+	api libs.okhttp
+	implementation libs.okhttp.brotli
+	implementation libs.okhttp.zstd
+	implementation libs.okhttp.tls
+	implementation libs.okhttp.dnsoverhttps
+	api libs.okio
+	implementation libs.rxjava
+	implementation libs.quickJs
+	// Real RAR (.cbr) import; non-free license, so not in the F-Droid version.
+	githubImplementation libs.junrar
+	api libs.unifile
+	implementation libs.injekt.core
+	implementation libs.jsoup
+	api libs.kotlinx.serialization.json
+	api libs.kotlinx.serialization.json.okio
+	api libs.kotlinx.serialization.protobuf
+	implementation libs.shizuku.api
+	implementation libs.shizuku.provider
+	implementation libs.xmlutil.core
+	implementation libs.xmlutil.serialization
+
+	implementation libs.hilt.android
+	ksp libs.hilt.compiler
+	implementation libs.androidx.hilt.work
+	ksp libs.androidx.hilt.compiler
+
+	api libs.coil.core
+	implementation libs.coil.network
+	implementation libs.coil.gif
+	implementation libs.coil.svg
+	implementation libs.avif.decoder
+	api libs.ssiv
+	implementation libs.disk.lru.cache
+	implementation libs.markwon
+	implementation libs.kizzyrpc
+
+	testImplementation libs.junit
+	testImplementation libs.kotlinx.coroutines.test
+}

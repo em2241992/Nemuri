@@ -1,0 +1,112 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+	id 'com.android.application'
+	id 'com.google.devtools.ksp'
+	id 'com.google.dagger.hilt.android'
+	id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+android {
+	compileSdk {
+		version = release(37) {
+			minorApiLevel = 0
+		}
+	}
+	namespace = 'org.nemuri.app'
+
+	defaultConfig {
+		applicationId = 'org.nemuri.app'
+		minSdk = 26
+		targetSdk = 37
+		versionCode = 1
+		versionName = '0.1.0-alpha1'
+		androidResources {
+			generateLocaleConfig = false
+		}
+	}
+
+	buildTypes {
+		debug {
+			applicationIdSuffix = '.debug'
+		}
+		release {
+			minifyEnabled = true
+			shrinkResources = true
+			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+		}
+		preview {
+			initWith release
+			applicationIdSuffix = '.preview'
+			matchingFallbacks = ['release']
+			signingConfig = signingConfigs.debug
+		}
+	}
+
+	flavorDimensions = ['store']
+	productFlavors {
+		github {
+			dimension = 'store'
+			isDefault = true
+		}
+		fdroid {
+			dimension = 'store'
+		}
+	}
+
+	buildFeatures {
+		buildConfig = true
+		compose = true
+	}
+
+	packaging {
+		resources {
+			exclude 'META-INF/README.md'
+			exclude 'META-INF/NOTICE.md'
+		}
+		jniLibs {
+			useLegacyPackaging = true
+		}
+	}
+
+	dependenciesInfo {
+		includeInApk = false
+		includeInBundle = false
+	}
+
+	compileOptions {
+		coreLibraryDesugaringEnabled = true
+		sourceCompatibility JavaVersion.VERSION_11
+		targetCompatibility JavaVersion.VERSION_11
+	}
+}
+
+kotlin {
+	compilerOptions {
+		jvmTarget = JvmTarget.JVM_11
+		freeCompilerArgs.addAll([
+			'-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi',
+		])
+	}
+}
+
+dependencies {
+	implementation project(':engine')
+
+	coreLibraryDesugaring libs.desugar.jdk.libs
+
+	implementation libs.androidx.appcompat
+	implementation libs.material
+
+	implementation platform(libs.androidx.compose.bom)
+	implementation libs.androidx.compose.runtime
+	implementation libs.androidx.compose.ui
+	implementation libs.androidx.compose.foundation
+	implementation libs.androidx.compose.material3
+	implementation libs.androidx.compose.activity
+
+	implementation libs.hilt.android
+	ksp libs.hilt.compiler
+	implementation libs.androidx.hilt.work
+	ksp libs.androidx.hilt.compiler
+}
