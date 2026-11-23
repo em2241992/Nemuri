@@ -58,7 +58,7 @@ private val scrobbleMutex = Mutex()
 class HistoryRepository @Inject constructor(
 	private val db: MangaDatabase,
 	private val settings: AppSettings,
-	private val scrobblers: Set<@JvmSuppressWildcards Scrobbler>,
+	private val scrobblersProvider: Provider<Set<@JvmSuppressWildcards Scrobbler>>,
 	private val mangaRepository: MangaDataRepository,
 	private val localObserver: HistoryLocalObserver,
 	private val newChaptersUseCaseProvider: Provider<CheckNewChaptersUseCase>,
@@ -271,11 +271,11 @@ class HistoryRepository @Inject constructor(
 	private suspend fun onHistoryChanged(manga: Manga, chapterId: Long, updateScrobblers: Boolean) {
 		newChaptersUseCaseProvider.get()(manga, chapterId)
 		if (updateScrobblers) {
-			// Fire and forget: opening the reader used to wait on every tracker's network write.
-			// UNDISPATCHED queues on the mutex in call order, so an older chapter never lands last.
-			processLifecycleScope.launch(Dispatchers.Default, CoroutineStart.UNDISPATCHED) {
+			// Fire and forget off the main thread so opening the reader or initializing OkHttp
+			// scrobbler clients never runs on Main or waits on network I/O.
+			processLifecycleScope.launch(Dispatchers.Default) {
 				scrobbleMutex.withLock {
-					scrobblers.forEach { it.tryScrobble(manga, chapterId) }
+					scrobblersProvider.get().forEach { it.tryScrobble(manga, chapterId) }
 				}
 			}
 		}

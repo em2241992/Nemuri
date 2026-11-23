@@ -37,6 +37,7 @@ import uy.kohesive.injekt.api.InjektRegistrar
 import uy.kohesive.injekt.api.addSingleton
 import uy.kohesive.injekt.api.addSingletonFactory
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 class KotoNetworkHelper(
@@ -125,7 +126,7 @@ class KotoNetworkHelper(
 @Singleton
 class KotoInjektBridge @Inject constructor(
 	@ApplicationContext private val context: Context,
-	@MangaHttpClient private val httpClient: OkHttpClient,
+	@MangaHttpClient private val httpClientProvider: Provider<OkHttpClient>,
 	private val webViewExecutor: WebViewExecutor,
 	private val settings: AppSettings,
 ) {
@@ -142,7 +143,7 @@ class KotoInjektBridge @Inject constructor(
 		val application = context.applicationContext as Application
 		val networkHelper = KotoNetworkHelper(
 			context = context,
-			baseClient = httpClient,
+			baseClient = httpClientProvider.get(),
 			androidCookieJar = androidCookieJar,
 			// Cloudflare binds cf_clearance to the UA that earned it.  configureForParser()
 			// strips "Version/x.x" and normalises the device string in the WebView UA, so

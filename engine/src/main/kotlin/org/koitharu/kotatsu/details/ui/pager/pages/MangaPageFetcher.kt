@@ -32,9 +32,10 @@ import org.koitharu.kotatsu.parsers.util.mimeType
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
 import org.koitharu.kotatsu.reader.domain.PageLoader
 import javax.inject.Inject
+import javax.inject.Provider
 
 class MangaPageFetcher(
-	private val okHttpClient: OkHttpClient,
+	private val okHttpClientProvider: Provider<OkHttpClient>,
 	private val pagesCache: LocalStorageCache,
 	private val options: Options,
 	private val page: MangaPage,
@@ -85,7 +86,7 @@ class MangaPageFetcher(
 		// Direct OkHttp fetch for non-extension sources (getImageStream returned null).
 		val response = imageProxyInterceptor.interceptPageRequest(
 			PageLoader.createPageRequest(pageUrl, page.source, imageHeaders),
-			okHttpClient,
+			okHttpClientProvider.get(),
 		)
 		return consumeResponse(response, pageUrl)
 	}
@@ -125,14 +126,14 @@ class MangaPageFetcher(
 	}
 
 	class Factory @Inject constructor(
-		@MangaHttpClient private val okHttpClient: OkHttpClient,
+		@MangaHttpClient private val okHttpClientProvider: Provider<OkHttpClient>,
 		@PageCache private val pagesCache: LocalStorageCache,
 		private val mangaRepositoryFactory: MangaRepository.Factory,
 		private val imageProxyInterceptor: ImageProxyInterceptor,
 	) : Fetcher.Factory<MangaPage> {
 
 		override fun create(data: MangaPage, options: Options, imageLoader: ImageLoader) = MangaPageFetcher(
-			okHttpClient = okHttpClient,
+			okHttpClientProvider = okHttpClientProvider,
 			pagesCache = pagesCache,
 			options = options,
 			page = data,

@@ -12,12 +12,22 @@ import org.koitharu.kotatsu.mihon.MihonExtensionLoader
 import org.koitharu.kotatsu.mihon.model.ExternalRepoInfo
 import java.util.zip.GZIPInputStream
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 @Singleton
 class ExternalExtensionRepoRepository @Inject constructor(
-	@BaseHttpClient private val okHttpClient: OkHttpClient,
+	@BaseHttpClient private val okHttpClientProvider: Provider<OkHttpClient>,
 ) {
+
+	constructor(okHttpClient: OkHttpClient) : this(
+		object : Provider<OkHttpClient> {
+			override fun get(): OkHttpClient = okHttpClient
+		},
+	)
+
+	private val okHttpClient: OkHttpClient
+		get() = okHttpClientProvider.get()
 
 	private val json = Json {
 		ignoreUnknownKeys = true

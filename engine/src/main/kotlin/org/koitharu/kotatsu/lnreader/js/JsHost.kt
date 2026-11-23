@@ -36,6 +36,7 @@ import org.koitharu.kotatsu.parsers.network.UserAgents
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 /**
@@ -54,7 +55,7 @@ import javax.inject.Singleton
 @Singleton
 class JsHost @Inject constructor(
 	@ApplicationContext private val context: Context,
-	@MangaHttpClient private val okHttpClient: OkHttpClient,
+	@MangaHttpClient private val okHttpClientProvider: Provider<OkHttpClient>,
 	private val webViewExecutor: WebViewExecutor,
 ) {
 
@@ -72,7 +73,7 @@ class JsHost @Inject constructor(
 	// instead throws, which aborts plugins that legitimately hit a 429-happy site (LNReader has no
 	// such limiter at all). Every other interceptor - Cloudflare, DoH, proxy, headers - is kept.
 	private val fetchClient: OkHttpClient by lazy {
-		okHttpClient.newBuilder().apply {
+		okHttpClientProvider.get().newBuilder().apply {
 			val kept = interceptors().filterNot { it is RateLimitInterceptor }
 			interceptors().clear()
 			interceptors().addAll(kept)

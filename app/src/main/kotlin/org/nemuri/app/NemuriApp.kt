@@ -25,7 +25,6 @@ import org.koitharu.kotatsu.local.domain.model.LocalManga
 import org.koitharu.kotatsu.mihon.MihonExtensionManager
 import org.koitharu.kotatsu.settings.sources.catalog.EXTENSION_APK_PREFIX
 import org.koitharu.kotatsu.settings.work.WorkScheduleManager
-import org.koitharu.kotatsu.sync.SyncFeature
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -51,7 +50,7 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 	lateinit var appLogger: AppLogger
 
 	@Inject
-	lateinit var workScheduleManager: WorkScheduleManager
+	lateinit var workScheduleManager: Provider<WorkScheduleManager>
 
 	@Inject
 	lateinit var localMangaIndexProvider: Provider<LocalMangaIndex>
@@ -64,13 +63,10 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 	lateinit var coilImageLoader: Provider<ImageLoader>
 
 	@Inject
-	lateinit var mihonExtensionManager: MihonExtensionManager
+	lateinit var mihonExtensionManager: Provider<MihonExtensionManager>
 
 	@Inject
-	lateinit var lnPluginManager: LnPluginManager
-
-	@Inject
-	lateinit var syncFeature: SyncFeature
+	lateinit var lnPluginManager: Provider<LnPluginManager>
 
 	override val workManagerConfiguration: Configuration
 		get() = Configuration.Builder()
@@ -90,16 +86,17 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 		PlatformRegistry.applicationContext = this
 		appLogger.setEnabled(settings.isVerboseLoggingEnabled)
 		activityLifecycleCallbacks.forEach(::registerActivityLifecycleCallbacks)
-		mihonExtensionManager.initialize()
-		lnPluginManager.initialize()
-		syncFeature.startTriggers()
 		cleanupDownloadedExtensionApks()
+		workScheduleManager.get().init()
+		processLifecycleScope.launch(Dispatchers.IO) {
+			mihonExtensionManager.get().initialize()
+			lnPluginManager.get().initialize()
+		}
 		processLifecycleScope.launch(Dispatchers.Default) {
 			val tracker = database.get().invalidationTracker
 			databaseObserversProvider.get().forEach(tracker::addObserver)
 			localStorageChanges.collect(localMangaIndexProvider.get())
 		}
-		workScheduleManager.init()
 	}
 
 	private fun cleanupDownloadedExtensionApks() {

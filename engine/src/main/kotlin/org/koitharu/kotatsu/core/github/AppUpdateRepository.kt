@@ -21,13 +21,14 @@ import org.koitharu.kotatsu.parsers.util.parseJsonArray
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
 import org.koitharu.kotatsu.parsers.util.suspendlazy.getOrNull
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 private const val CONTENT_TYPE_APK = "application/vnd.android.package-archive"
 
 @Singleton
 class AppUpdateRepository @Inject constructor(
-	@BaseHttpClient private val okHttp: OkHttpClient,
+	@BaseHttpClient private val okHttpProvider: Provider<OkHttpClient>,
 	@ApplicationContext context: Context,
 ) {
 
@@ -54,7 +55,7 @@ class AppUpdateRepository @Inject constructor(
 		val request = Request.Builder()
 			.get()
 			.url(releasesUrl)
-		val jsonArray = okHttp.newCall(request.build()).await().parseJsonArray()
+		val jsonArray = okHttpProvider.get().newCall(request.build()).await().parseJsonArray()
 		return jsonArray.mapJSONNotNull { json ->
 			val asset = json.optJSONArray("assets")?.find { jo ->
 				jo.optString("content_type") == CONTENT_TYPE_APK
