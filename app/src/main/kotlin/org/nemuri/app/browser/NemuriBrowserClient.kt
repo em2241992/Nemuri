@@ -1,0 +1,79 @@
+package org.nemuri.app.browser
+
+import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.os.Looper
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.annotation.AnyThread
+import androidx.annotation.WorkerThread
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import org.koitharu.kotatsu.core.network.webview.adblock.AdBlock
+import java.io.ByteArrayInputStream
+
+open class NemuriBrowserClient(
+	private val onLoadingStateChanged: (Boolean) -> Unit,
+	private val onTitleChanged: (String, String) -> Unit,
+	private val onHistoryChanged: (Boolean) -> Unit,
+	private val adBlock: AdBlock?,
+) : WebViewClient() {
+
+	override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+		super.onPageStarted(view, url, favicon)
+		onLoadingStateChanged(true)
+	}
+
+	override fun onPageCommitVisible(view: WebView, url: String) {
+		super.onPageCommitVisible(view, url)
+		onTitleChanged(view.title.orEmpty(), url)
+	}
+
+	override fun onPageFinished(webView: WebView, url: String) {
+		super.onPageFinished(webView, url)
+		onLoadingStateChanged(false)
+	}
+
+	override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+		super.doUpdateVisitedHistory(view, url, isReload)
+		onHistoryChanged(view?.canGoBack() == true)
+	}
+
+	@WorkerThread
+	@Suppress("DEPRECATION")
+	@Deprecated("Deprecated in Java")
+	override fun shouldInterceptRequest(
+		view: WebView?,
+		url: String?,
+	): WebResourceResponse? = if (url.isNullOrEmpty() || adBlock?.shouldLoadUrl(url, view?.getUrlSafe()) ?: true) {
+		super.shouldInterceptRequest(view, url)
+	} else {
+		emptyResponse()
+	}
+
+	@WorkerThread
+	override fun shouldInterceptRequest(
+		view: WebView?,
+		request: WebResourceRequest?,
+	): WebResourceResponse? =
+		if (request == null || adBlock?.shouldLoadUrl(request.url.toString(), view?.getUrlSafe()) ?: true) {
+			super.shouldInterceptRequest(view, request)
+		} else {
+			emptyResponse()
+		}
+
+	private fun emptyResponse(): WebResourceResponse =
+		WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(byteArrayOf()))
+
+	@SuppressLint("WrongThread")
+	@AnyThread
+	private fun WebView.getUrlSafe(): String? = if (Looper.myLooper() == Looper.getMainLooper()) {
+		url
+	} else {
+		runBlocking(Dispatchers.Main.immediate) {
+			url
+		}
+	}
+}

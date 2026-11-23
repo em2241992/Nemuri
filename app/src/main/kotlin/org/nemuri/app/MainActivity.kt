@@ -29,16 +29,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -58,7 +52,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,6 +71,10 @@ import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriFloatingDockBar
 import org.nemuri.app.ui.components.NemuriNavigationRail
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
+import org.nemuri.app.ui.explore.ExploreScreen
+import org.nemuri.app.ui.explore.GlobalSearchScreen
+import org.nemuri.app.ui.explore.SourceBrowseScreen
+import org.nemuri.app.ui.extensions.ExtensionsCatalogScreen
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @AndroidEntryPoint
@@ -155,27 +152,55 @@ private fun NemuriAppRoot(
 
 			Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
 				when (destination) {
-					is AppDestination.TabRoot -> TabShellScreen(
-						tab = destination.tab,
-						shellState = shellState,
-						navController = navController,
-						onShowToast = shellViewModel::showToast,
-					)
-					is AppDestination.ExtensionsCatalog -> SubRouteScaffold(
-						title = "Extensions Catalog",
-						subtitle = destination.initialRepoUrl?.let { "Pending repo: $it" }
-							?: "Phase 2 will wire stores, APKs, Shizuku & LN plugins here.",
+					is AppDestination.TabRoot -> if (destination.tab == AppTab.EXPLORE) {
+						ExploreScreen(
+							onOpenExtensions = { navController.navigate(AppDestination.ExtensionsCatalog()) },
+							onOpenLocalFiles = { navController.navigate(AppDestination.LocalStorage) },
+							onOpenBookmarks = { navController.navigate(AppDestination.Bookmarks) },
+							onOpenDownloads = { navController.navigate(AppDestination.Downloads) },
+							onOpenSourceBrowse = { sourceName ->
+								navController.navigate(AppDestination.SourceBrowse(sourceName))
+							},
+							onOpenGlobalSearch = { query ->
+								navController.navigate(AppDestination.GlobalSearch(query))
+							},
+							onOpenDetails = { manga ->
+								MangaTransferCache.put(manga)
+								navController.navigate(AppDestination.MangaDetails(manga.id, manga.source.name))
+							},
+							onOpenSettings = { navController.navigate(AppDestination.Settings()) },
+						)
+					} else {
+						TabShellScreen(
+							tab = destination.tab,
+							shellState = shellState,
+							navController = navController,
+							onShowToast = shellViewModel::showToast,
+						)
+					}
+					is AppDestination.ExtensionsCatalog -> ExtensionsCatalogScreen(
+						initialRepoUrl = destination.initialRepoUrl,
 						onBack = { navController.popBackStack() },
 					)
-					is AppDestination.SourceBrowse -> SubRouteScaffold(
-						title = destination.sourceName,
-						subtitle = "Phase 2 source catalog & dynamic filters target.",
+					is AppDestination.SourceBrowse -> SourceBrowseScreen(
+						sourceName = destination.sourceName,
+						initialQuery = destination.initialQuery,
 						onBack = { navController.popBackStack() },
+						onOpenDetails = { manga ->
+							MangaTransferCache.put(manga)
+							navController.navigate(AppDestination.MangaDetails(manga.id, manga.source.name))
+						},
 					)
-					is AppDestination.GlobalSearch -> SubRouteScaffold(
-						title = "Global Search",
-						subtitle = "Query: ${destination.initialQuery.ifBlank { "(empty)" }}",
+					is AppDestination.GlobalSearch -> GlobalSearchScreen(
+						initialQuery = destination.initialQuery,
 						onBack = { navController.popBackStack() },
+						onOpenDetails = { manga ->
+							MangaTransferCache.put(manga)
+							navController.navigate(AppDestination.MangaDetails(manga.id, manga.source.name))
+						},
+						onOpenSourceBrowse = { sourceName, query ->
+							navController.navigate(AppDestination.SourceBrowse(sourceName, query))
+						},
 					)
 					is AppDestination.LocalStorage -> SubRouteScaffold(
 						title = "Local Storage",
@@ -362,55 +387,7 @@ private fun TabShellScreen(
 						)
 					}
 				}
-				AppTab.EXPLORE -> {
-					item {
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(10.dp),
-						) {
-							QuickPillButton(
-								icon = Icons.Default.Extension,
-								label = "Extensions",
-								onClick = { navController.navigate(AppDestination.ExtensionsCatalog()) },
-								modifier = Modifier.weight(1f),
-							)
-							QuickPillButton(
-								icon = Icons.Default.Folder,
-								label = "Local files",
-								onClick = { navController.navigate(AppDestination.LocalStorage) },
-								modifier = Modifier.weight(1f),
-							)
-						}
-					}
-					item {
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.spacedBy(10.dp),
-						) {
-							QuickPillButton(
-								icon = Icons.Default.Bookmark,
-								label = "Bookmarks",
-								onClick = { navController.navigate(AppDestination.Bookmarks) },
-								modifier = Modifier.weight(1f),
-							)
-							QuickPillButton(
-								icon = Icons.Default.Download,
-								label = "Downloads",
-								onClick = { navController.navigate(AppDestination.Downloads) },
-								modifier = Modifier.weight(1f),
-							)
-						}
-					}
-					item {
-						NemuriEmptyState(
-							icon = Icons.Default.Explore,
-							title = "${shellState.enabledSourcesCount} active sources ready",
-							subtitle = "Phase 2 wires Extension Stores, Source Browse grids, Global Search & CloudFlare WebView.",
-							actionLabel = "Open Extensions Catalog",
-							onAction = { navController.navigate(AppDestination.ExtensionsCatalog()) },
-						)
-					}
-				}
+				AppTab.EXPLORE -> Unit
 				AppTab.ENHANCE -> {
 					item {
 						NemuriEmptyState(
@@ -511,44 +488,6 @@ private fun SectionLabel(text: String) {
 		color = NemuriTheme.colors.cyan,
 		modifier = Modifier.padding(top = 4.dp),
 	)
-}
-
-@Composable
-private fun QuickPillButton(
-	icon: ImageVector,
-	label: String,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	Surface(
-		color = NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(24.dp),
-		modifier = modifier
-			.height(54.dp)
-			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(24.dp))
-			.clip(RoundedCornerShape(24.dp))
-			.clickable(onClick = onClick),
-	) {
-		Row(
-			modifier = Modifier.padding(horizontal = 16.dp),
-			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(10.dp),
-		) {
-			Icon(
-				imageVector = icon,
-				contentDescription = null,
-				tint = NemuriTheme.colors.cyan,
-				modifier = Modifier.size(20.dp),
-			)
-			Text(
-				text = label,
-				style = MaterialTheme.typography.titleSmall,
-				color = NemuriTheme.colors.textPrimary,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-		}
-	}
 }
 
 @Composable

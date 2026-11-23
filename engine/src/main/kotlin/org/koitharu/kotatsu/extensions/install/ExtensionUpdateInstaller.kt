@@ -35,6 +35,7 @@ import org.koitharu.kotatsu.settings.sources.catalog.StoreHealth
 import org.koitharu.kotatsu.settings.sources.catalog.isNewerThan
 import java.io.File
 import java.io.IOException
+import javax.inject.Provider
 
 /**
  * Downloads and installs a newer build of one already-installed extension, in place, without
@@ -55,7 +56,7 @@ class ExtensionUpdateInstaller @AssistedInject constructor(
 	private val shizukuInstaller: ShizukuExtensionInstaller,
 	private val extensionLoader: MihonExtensionLoader,
 	private val extensionManager: MihonExtensionManager,
-	@BaseHttpClient private val httpClient: OkHttpClient,
+	@BaseHttpClient private val httpClientProvider: Provider<OkHttpClient>,
 ) {
 
 	private var pendingResult: CompletableDeferred<Boolean>? = null
@@ -138,7 +139,7 @@ class ExtensionUpdateInstaller @AssistedInject constructor(
 		val tmp = File(destination.parentFile, "${destination.name}.tmp")
 		try {
 			val request = Request.Builder().url(url).get().build()
-			httpClient.newCall(request).execute().use { response ->
+			httpClientProvider.get().newCall(request).execute().use { response ->
 				if (!response.isSuccessful) {
 					throw IOException("HTTP ${response.code}")
 				}

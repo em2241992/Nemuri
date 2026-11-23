@@ -23,6 +23,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
+import javax.inject.Provider
 
 @Reusable
 class AdBlock @Inject constructor(
@@ -70,7 +71,7 @@ class AdBlock @Inject constructor(
 
 	class Updater @Inject constructor(
 		@ApplicationContext private val context: Context,
-		@BaseHttpClient private val okHttpClient: OkHttpClient,
+		@BaseHttpClient private val okHttpClientProvider: Provider<OkHttpClient>,
 	) {
 
 		suspend fun updateList() {
@@ -83,7 +84,7 @@ class AdBlock @Inject constructor(
 				val lastModified = file.lastModified()
 				requestBuilder.header(CommonHeaders.IF_MODIFIED_SINCE, dateFormat.format(Date(lastModified)))
 			}
-			okHttpClient.newCall(
+			okHttpClientProvider.get().newCall(
 				requestBuilder.build(),
 			).await().use { response ->
 				if (response.code == HttpURLConnection.HTTP_NOT_MODIFIED) {
