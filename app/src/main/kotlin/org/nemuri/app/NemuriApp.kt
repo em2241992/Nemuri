@@ -4,6 +4,9 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.room.InvalidationTracker
 import androidx.work.Configuration
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -15,16 +18,19 @@ import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.nav.EngineRuntimeConfig
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.util.ext.processLifecycleScope
+import org.koitharu.kotatsu.lnreader.LnPluginManager
 import org.koitharu.kotatsu.local.data.LocalStorageChanges
 import org.koitharu.kotatsu.local.data.index.LocalMangaIndex
 import org.koitharu.kotatsu.local.domain.model.LocalManga
+import org.koitharu.kotatsu.mihon.MihonExtensionManager
 import org.koitharu.kotatsu.settings.sources.catalog.EXTENSION_APK_PREFIX
 import org.koitharu.kotatsu.settings.work.WorkScheduleManager
+import org.koitharu.kotatsu.sync.SyncFeature
 import javax.inject.Inject
 import javax.inject.Provider
 
 @HiltAndroidApp
-class NemuriApp : Application(), Configuration.Provider {
+class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Factory {
 
 	@Inject
 	lateinit var workerFactory: HiltWorkerFactory
@@ -54,10 +60,24 @@ class NemuriApp : Application(), Configuration.Provider {
 	@LocalStorageChanges
 	lateinit var localStorageChanges: MutableSharedFlow<LocalManga?>
 
+	@Inject
+	lateinit var coilImageLoader: Provider<ImageLoader>
+
+	@Inject
+	lateinit var mihonExtensionManager: MihonExtensionManager
+
+	@Inject
+	lateinit var lnPluginManager: LnPluginManager
+
+	@Inject
+	lateinit var syncFeature: SyncFeature
+
 	override val workManagerConfiguration: Configuration
 		get() = Configuration.Builder()
 			.setWorkerFactory(workerFactory)
 			.build()
+
+	override fun newImageLoader(context: PlatformContext): ImageLoader = coilImageLoader.get()
 
 	override fun onCreate() {
 		super.onCreate()
@@ -70,6 +90,9 @@ class NemuriApp : Application(), Configuration.Provider {
 		PlatformRegistry.applicationContext = this
 		appLogger.setEnabled(settings.isVerboseLoggingEnabled)
 		activityLifecycleCallbacks.forEach(::registerActivityLifecycleCallbacks)
+		mihonExtensionManager.initialize()
+		lnPluginManager.initialize()
+		syncFeature.startTriggers()
 		cleanupDownloadedExtensionApks()
 		processLifecycleScope.launch(Dispatchers.Default) {
 			val tracker = database.get().invalidationTracker

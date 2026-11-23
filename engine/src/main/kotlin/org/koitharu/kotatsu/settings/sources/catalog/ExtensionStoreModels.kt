@@ -68,7 +68,7 @@ internal fun shouldShowCatalogFilters(pages: List<ExtensionCatalogPage>): Boolea
 internal fun shouldShowStoreTabDivider(position: Int, page: ExtensionCatalogPage): Boolean =
 	position == 1 && page is ExtensionCatalogPage.Store
 
-internal fun canUseStoreCatalogForUpdates(health: StoreHealth): Boolean =
+fun canUseStoreCatalogForUpdates(health: StoreHealth): Boolean =
 	health != StoreHealth.UNAVAILABLE
 
 @Serializable

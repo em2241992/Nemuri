@@ -5,10 +5,12 @@ import android.content.Intent
 import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.nav.EngineNavigator
+import org.koitharu.kotatsu.core.network.CommonHeaders
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaListFilter
 import org.koitharu.kotatsu.parsers.model.MangaSource
 import org.koitharu.kotatsu.parsers.model.SortOrder
+import org.nemuri.app.navigation.MangaTransferCache
 
 class NemuriEngineNavigator : EngineNavigator {
 
@@ -22,10 +24,12 @@ class NemuriEngineNavigator : EngineNavigator {
 	override fun detailsIntent(context: Context, mangaId: Long): Intent =
 		baseIntent(context, "details").putExtra(AppRouter.KEY_ID, mangaId)
 
-	override fun detailsIntent(context: Context, manga: Manga): Intent =
-		baseIntent(context, "details")
+	override fun detailsIntent(context: Context, manga: Manga): Intent {
+		MangaTransferCache.put(manga)
+		return baseIntent(context, "details")
 			.putExtra(AppRouter.KEY_ID, manga.id)
 			.putExtra(AppRouter.KEY_SOURCE, manga.source.name)
+	}
 
 	override fun listIntent(
 		context: Context,
@@ -70,5 +74,8 @@ class NemuriEngineNavigator : EngineNavigator {
 	): Intent = baseIntent(context, "cloudflare")
 		.putExtra(AppRouter.KEY_SOURCE, exception.source.name)
 		.putExtra(AppRouter.KEY_DATA, exception.url)
+		.putExtra(AppRouter.EXTRA_ORIGINAL_URL, exception.url)
+		.putExtra(AppRouter.KEY_USER_AGENT, exception.headers[CommonHeaders.USER_AGENT])
+		.putExtra(AppRouter.EXTRA_HIDDEN, hidden)
 		.putExtra(AppRouter.EXTRA_AUTO_RESOLVE, hidden)
 }

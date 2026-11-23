@@ -33,3 +33,6 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Local VS Code / IDE workspace
+*.code-workspace

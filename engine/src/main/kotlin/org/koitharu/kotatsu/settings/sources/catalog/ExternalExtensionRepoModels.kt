@@ -277,7 +277,7 @@ const val EXTENSION_APK_PREFIX = "extension_"
  * Dotted-number comparison. Plugins have no version code, and a plain string `!=` would advertise a
  * downgrade as an update whenever a store rolls a plugin back.
  */
-internal fun isNewerPluginVersion(available: String, local: String): Boolean {
+fun isNewerPluginVersion(available: String, local: String): Boolean {
 	val a = available.split('.', '-').mapNotNull { it.toIntOrNull() }
 	val b = local.split('.', '-').mapNotNull { it.toIntOrNull() }
 	for (i in 0 until maxOf(a.size, b.size)) {

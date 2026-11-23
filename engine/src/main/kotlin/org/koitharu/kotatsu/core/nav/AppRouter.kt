@@ -67,6 +67,8 @@ class AppRouter private constructor() {
 			.build()
 
 		const val EXTRA_AUTO_RESOLVE = "auto_resolve"
+		const val EXTRA_HIDDEN = "hidden"
+		const val EXTRA_ORIGINAL_URL = "original_url"
 		const val KEY_DATA = "data"
 		const val KEY_ENTRIES = "entries"
 		const val KEY_ERROR = "error"
@@ -88,7 +90,10 @@ class AppRouter private constructor() {
 		const val KEY_ROUTE = "nemuri_route"
 		const val KEY_SORT_ORDER = "sort_order"
 		const val KEY_SOURCE = "source"
+		const val KEY_SUCCESS_COOKIE_NAME = "success_cookie_name"
+		const val KEY_SUCCESS_COOKIE_URL = "success_cookie_url"
 		const val KEY_TAB = "tab"
 		const val KEY_TITLE = "title"
+		const val KEY_USER_AGENT = "user_agent"
 	}
 }

@@ -48,6 +48,9 @@ class AppUpdateRepository @Inject constructor(
 	fun observeAvailableUpdate() = availableUpdate.asStateFlow()
 
 	suspend fun getAvailableVersions(): List<AppVersion> {
+		if (!isUpdateSupported()) {
+			return emptyList()
+		}
 		val request = Request.Builder()
 			.get()
 			.url(releasesUrl)
@@ -69,6 +72,7 @@ class AppUpdateRepository @Inject constructor(
 
 	suspend fun fetchUpdate(): AppVersion? = withContext(Dispatchers.Default) {
 		if (!isUpdateSupported()) {
+			availableUpdate.value = null
 			return@withContext null
 		}
 		runCatchingCancellable {
@@ -87,8 +91,8 @@ class AppUpdateRepository @Inject constructor(
 		}.getOrNull()
 	}
 
-	// The F-Droid version is updated by F-Droid only (F-Droid policy).
-	fun isUpdateSupported(): Boolean = BuildConfig.FLAVOR != "fdroid"
+	// Disabled so upstream DropSauce releases are never prompted over Nemuri builds.
+	fun isUpdateSupported(): Boolean = false
 
 	private inline fun JSONArray.find(predicate: (JSONObject) -> Boolean): JSONObject? {
 		val size = length()

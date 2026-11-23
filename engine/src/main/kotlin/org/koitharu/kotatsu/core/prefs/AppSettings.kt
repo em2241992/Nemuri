@@ -1361,6 +1361,8 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		migrateUiScale()
 	}
 
+	fun editPrefs(block: SharedPreferences.Editor.() -> Unit) = prefs.edit(action = block)
+
 	companion object {
 
 		/**
