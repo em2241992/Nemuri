@@ -680,7 +680,7 @@ class MangaDetailsViewModel @Inject constructor(
 					manga.isEpub -> "EPUB"
 					manga.url.endsWith(".pdf", ignoreCase = true) -> "PDF"
 					details.isLocal -> "LOCAL"
-					manga.source.isNovelSource() -> "NOVEL"
+					manga.source.isNovelSource -> "NOVEL"
 					else -> null
 				}
 
@@ -714,7 +714,7 @@ class MangaDetailsViewModel @Inject constructor(
 					descriptionText = cleanDescription,
 					publicUrl = details?.sourceManga?.publicUrl.orEmpty(),
 					isLocalOnly = details?.isLocal == true,
-					isNovel = manga?.source?.isNovelSource() == true || manga?.isEpub == true,
+					isNovel = manga?.source?.isNovelSource == true || manga?.isEpub == true,
 					isInLibrary = user.memberCategoryIds.isNotEmpty(),
 					memberCategoryIds = user.memberCategoryIds,
 					allCategories = user.allCategories,

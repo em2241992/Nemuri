@@ -365,7 +365,7 @@ fun MangaDetailsScreen(
 												Text(
 													text = uiState.ratingLabel!!,
 													style = MaterialTheme.typography.labelSmall,
-													color = NemuriTheme.colors.warning,
+													color = NemuriTheme.colors.amber,
 												)
 											}
 										}
@@ -1246,7 +1246,7 @@ private fun ChapterRowView(
 						Icon(
 							imageVector = Icons.Default.Bookmark,
 							contentDescription = "Bookmarked",
-							tint = NemuriTheme.colors.warning,
+							tint = NemuriTheme.colors.amber,
 							modifier = Modifier.size(14.dp),
 						)
 					}
@@ -1369,7 +1369,7 @@ private fun DetailsInlineChallengeBanner(
 		modifier = Modifier
 			.fillMaxWidth()
 			.padding(horizontal = 16.dp, vertical = 6.dp)
-			.border(1.dp, NemuriTheme.colors.warning.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
+			.border(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
 	) {
 		Row(
 			modifier = Modifier.padding(12.dp),
@@ -1377,7 +1377,7 @@ private fun DetailsInlineChallengeBanner(
 			horizontalArrangement = Arrangement.spacedBy(10.dp),
 		) {
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(title, style = MaterialTheme.typography.titleSmall, color = NemuriTheme.colors.warning)
+				Text(title, style = MaterialTheme.typography.titleSmall, color = NemuriTheme.colors.amber)
 				Text(message, style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
 			}
 			TextButton(onClick = onAction) {

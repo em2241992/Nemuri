@@ -174,7 +174,6 @@ class ReaderViewModel @Inject constructor(
 	init {
 		viewModelScope.launch {
 			bookmarkTargetFlow
-				.distinctUntilChanged()
 				.flatMapLatest { target ->
 					if (target == null) {
 						flowOf(false)
@@ -452,7 +451,7 @@ class ReaderViewModel @Inject constructor(
 					activeDetails = loaded
 					val manga = loaded.toManga()
 					MangaTransferCache.put(manga)
-					effectiveIncognito = extraIncognito || settings.isIncognitoModeEnabled(manga.isNsfw)
+					effectiveIncognito = extraIncognito || settings.isIncognitoModeEnabled(manga.isNsfw())
 
 					val history = runCatchingCancellable { historyRepository.getOne(manga) }.getOrNull()
 					val branch = requestedBranch?.takeIf { loaded.chapters.containsKey(it) }
@@ -528,7 +527,7 @@ class ReaderViewModel @Inject constructor(
 		activeChapter = chapter
 		val manga = details.toManga()
 		val isTextMode = manga.isEpub ||
-			manga.source.isNovelSource() ||
+			manga.source.isNovelSource ||
 			chapter.url.substringBefore('#').endsWith(".epub", ignoreCase = true)
 
 		chapterLoadJob = viewModelScope.launch(Dispatchers.IO) {

@@ -41,20 +41,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -337,7 +336,7 @@ private fun ReaderRootScreen(
 						Icon(
 							imageVector = if (uiState.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
 							contentDescription = "Bookmark",
-							tint = if (uiState.isBookmarked) NemuriTheme.colors.warning else NemuriTheme.colors.textSecondary,
+							tint = if (uiState.isBookmarked) NemuriTheme.colors.amber else NemuriTheme.colors.textSecondary,
 						)
 					}
 					val manga = uiState.manga
@@ -788,9 +787,8 @@ private fun SsivPageView(
 							?.isLowRamDevice == true
 						ssiv.bitmapDecoderFactory = AvifCapableImageDecoder.Factory(bitmapConfig)
 						ssiv.regionDecoderFactory = AvifCapableRegionDecoder.Factory(bitmapConfig, isLowRam)
-						val source = ImageSource.uri(uri)
-						if (uri.isPdfUri() && bounds != null) {
-							source.region(bounds)
+						val source = ImageSource.uri(uri).let { src ->
+							if (uri.isPdfUri() && bounds != null) src.region(bounds) else src
 						}
 						ssiv.setImage(source)
 					}
@@ -910,7 +908,7 @@ private fun NovelReaderViewport(
 						horizontalArrangement = Arrangement.spacedBy(6.dp),
 					) {
 						Icon(
-							imageVector = Icons.AutoMirrored.Filled.MenuBook,
+							imageVector = Icons.Default.MenuBook,
 							contentDescription = null,
 							tint = accentColor,
 							modifier = Modifier.size(16.dp),
@@ -940,7 +938,7 @@ private fun NovelReaderViewport(
 							text = block.text,
 							fontFamily = fontFamily,
 							fontSize = ((20 - (block.level - 1) * 1.5f).coerceAtLeast(15f) * (uiState.epubFontSize / 100f)).sp,
-							lineHeight = lineHeightSp * 1.1f,
+							lineHeight = (lineHeightSp.value * 1.1f).sp,
 							fontWeight = FontWeight.Bold,
 							color = textColor,
 							modifier = Modifier.padding(top = 6.dp),

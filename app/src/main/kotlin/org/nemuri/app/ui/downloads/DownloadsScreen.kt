@@ -134,7 +134,7 @@ fun DownloadsScreen(
 						item(key = "dl_header_active") {
 							DownloadSectionHeader("In Progress (${uiState.activeItems.size})")
 						}
-						items(uiState.activeItems, key = { it.id }) { item ->
+						items(uiState.activeItems, key = { it.id.toString() }) { item ->
 							DownloadItemCard(
 								item = item,
 								onOpenDetails = {
@@ -157,7 +157,7 @@ fun DownloadsScreen(
 						item(key = "dl_header_queued") {
 							DownloadSectionHeader("Queued (${uiState.queuedItems.size})")
 						}
-						items(uiState.queuedItems, key = { it.id }) { item ->
+						items(uiState.queuedItems, key = { it.id.toString() }) { item ->
 							DownloadItemCard(
 								item = item,
 								onOpenDetails = {
@@ -180,7 +180,7 @@ fun DownloadsScreen(
 						item(key = "dl_header_history") {
 							DownloadSectionHeader("Completed & Recent (${uiState.historyItems.size})")
 						}
-						items(uiState.historyItems, key = { it.id }) { item ->
+						items(uiState.historyItems, key = { it.id.toString() }) { item ->
 							DownloadItemCard(
 								item = item,
 								onOpenDetails = {

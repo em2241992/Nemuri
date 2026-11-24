@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -72,9 +73,7 @@ class FeedViewModel @Inject constructor(
 	private val unreadOnlyFlow = settings.observeChanges()
 		.filter { it == null || it == AppSettings.KEY_FEED_UNREAD_ONLY }
 		.onStart { emit(null) }
-		.let { flow ->
-			combine(flow) { settings.isFeedUnreadOnly }
-		}
+		.map { settings.isFeedUnreadOnly }
 
 	val uiState: StateFlow<FeedUiState> = combine(
 		trackingRepository.observeTrackingLog(limit = 500, filterOptions = emptySet()),
@@ -117,7 +116,7 @@ class FeedViewModel @Inject constructor(
 					2 -> "${item.chapters[0].name} • ${item.chapters[1].name}"
 					else -> "${item.chapters.first().name} + ${item.chapters.size - 1} more"
 				}
-				val sourcePrefix = if (item.manga.source.isNovelSource()) "Novel" else null
+				val sourcePrefix = if (item.manga.source.isNovelSource) "Novel" else null
 				val sourceName = listOfNotNull(sourcePrefix, item.manga.source.getTitle(context))
 					.joinToString(" • ")
 

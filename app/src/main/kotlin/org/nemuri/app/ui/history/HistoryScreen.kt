@@ -216,7 +216,7 @@ fun HistoryScreen(
 				val sortChoices = listOf(
 					ListSortOrder.LAST_READ to "Recently read",
 					ListSortOrder.LONG_AGO_READ to "Oldest read",
-					ListSortOrder.ALPHABETICAL to "Alphabetical A–Z",
+					ListSortOrder.ALPHABETIC to "Alphabetical A–Z",
 					ListSortOrder.PROGRESS to "Reading progress",
 				)
 				sortChoices.forEach { (order, label) ->
