@@ -37,13 +37,20 @@ android {
 	}
 
 	signingConfigs {
-		if (hasPersistentSigning) {
-			debug {
+		debug {
+			if (hasPersistentSigning) {
 				storeFile = file(ksPath)
 				storePassword = ksPass
 				keyAlias = ksAlias
 				keyPassword = ksKeyPass
+			} else {
+				storeFile = file('debug.keystore')
+				storePassword = 'android'
+				keyAlias = 'androiddebugkey'
+				keyPassword = 'android'
 			}
+		}
+		if (hasPersistentSigning) {
 			release {
 				storeFile = file(ksPath)
 				storePassword = ksPass
@@ -56,9 +63,7 @@ android {
 	buildTypes {
 		debug {
 			applicationIdSuffix = '.debug'
-			if (hasPersistentSigning) {
-				signingConfig = signingConfigs.debug
-			}
+			signingConfig = signingConfigs.debug
 		}
 		release {
 			minifyEnabled = true

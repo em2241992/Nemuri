@@ -6,7 +6,6 @@
 	<application
 		android:name=".NemuriApp"
 		android:allowBackup="true"
-		android:hasFragileUserData="true"
 		android:restoreAnyVersion="true"
 		android:icon="@mipmap/ic_launcher"
 		android:roundIcon="@mipmap/ic_launcher"

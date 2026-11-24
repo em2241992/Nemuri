@@ -51,7 +51,7 @@ jobs:
             echo "NEMURI_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
             echo "Using persistent signing keystore from GitHub Secrets"
           else
-            echo "::warning::KEYSTORE_BASE64 secret is not set; falling back to ephemeral debug keystore (in-place updates will not work until secrets are configured)."
+            echo "KEYSTORE_BASE64 not set; using committed app/debug.keystore for persistent beta/debug signing."
           fi
 
       - name: Build GitHub Debug APK
@@ -76,8 +76,11 @@ jobs:
           ls -lh "$APK_NAME"
           echo "=== Packaged native ABIs ==="
           unzip -l "$APK_NAME" | awk '/lib\/[^\/]+\//{split($4,a,"/"); print a[2]}' | sort -u || true
-          echo "=== APK Signing Certificate ==="
-          keytool -printcert -jarfile "$APK_NAME" | grep -E 'Owner:|SHA256:' || true
+          echo "=== APK Signing Certificate (v2/v3) ==="
+          APKSIGNER_BIN=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -n "$APKSIGNER_BIN" ]; then
+            "$APKSIGNER_BIN" verify --print-certs "$APK_NAME" || true
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
