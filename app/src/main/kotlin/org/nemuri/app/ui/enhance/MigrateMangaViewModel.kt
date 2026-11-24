@@ -15,15 +15,21 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.SemanticTitleMatcher
 import org.koitharu.kotatsu.alternatives.domain.AlternativesUseCase
 import org.koitharu.kotatsu.alternatives.domain.MigrateUseCase
 import org.koitharu.kotatsu.core.model.chaptersCount
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.parser.MangaDataRepository
+import org.koitharu.kotatsu.core.parser.MangaRepository
+import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.koitharu.kotatsu.search.domain.SearchKind
+import org.koitharu.kotatsu.search.domain.SearchV2Helper
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
 import javax.inject.Inject
@@ -57,6 +63,10 @@ data class MigrateMangaUiState(
 	val candidates: List<MigrationCandidateItem> = emptyList(),
 	val pendingConfirm: MigrationCandidateItem? = null,
 	val isMigrating: Boolean = false,
+	val isAiEnabled: Boolean = false,
+	val isRunningAiFallback: Boolean = false,
+	val aiSuggestedQueries: List<String> = emptyList(),
+	val aiEngineUsed: String? = null,
 )
 
 @HiltViewModel
@@ -66,6 +76,10 @@ class MigrateMangaViewModel @Inject constructor(
 	private val sourcesRepository: MangaSourcesRepository,
 	private val alternativesUseCaseProvider: Provider<AlternativesUseCase>,
 	private val migrateUseCaseProvider: Provider<MigrateUseCase>,
+	private val semanticTitleMatcherProvider: Provider<SemanticTitleMatcher>,
+	private val searchHelperFactory: SearchV2Helper.Factory,
+	private val mangaRepositoryFactoryProvider: Provider<MangaRepository.Factory>,
+	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
 
@@ -101,6 +115,7 @@ class MigrateMangaViewModel @Inject constructor(
 					seedSourceTitle = seed.source.getTitle(context),
 					availableSources = targets,
 					selectedSourceNames = defaultSelected,
+					isAiEnabled = AiMode.fromKey(settings.aiMode) != AiMode.OFF,
 				)
 			}
 		}
@@ -143,7 +158,13 @@ class MigrateMangaViewModel @Inject constructor(
 		searchJob?.cancel()
 		searchJob = viewModelScope.launch(Dispatchers.IO) {
 			_uiState.update {
-				it.copy(isSearching = true, hasSearched = true, candidates = emptyList())
+				it.copy(
+					isSearching = true,
+					hasSearched = true,
+					candidates = emptyList(),
+					aiSuggestedQueries = emptyList(),
+					aiEngineUsed = null,
+				)
 			}
 			val found = ArrayList<MigrationCandidateItem>()
 			alternativesUseCaseProvider.get()
@@ -161,6 +182,77 @@ class MigrateMangaViewModel @Inject constructor(
 					_uiState.update { it.copy(candidates = found.sortedByDescending { c -> c.chaptersCount }) }
 				}
 			_uiState.update { it.copy(isSearching = false) }
+		}
+	}
+
+	/**
+	 * Strictly single-title Tier 3 AI Semantic Matcher fallback: only runs after Tier 1 & 2 search
+	 * returns 0 matches for this single title, suggests up to 3 alternate localized/romanized
+	 * queries, and searches selected targets for explicit user confirmation.
+	 */
+	fun runAiFallbackSearch() {
+		val state = _uiState.value
+		val seed = state.seed ?: return
+		if (!state.hasSearched || state.isSearching || state.isRunningAiFallback || state.candidates.isNotEmpty()) {
+			return
+		}
+		if (AiMode.fromKey(settings.aiMode) == AiMode.OFF) {
+			toastManager.show("AI features are turned off")
+			return
+		}
+		val targets = state.selectedSourceNames
+		if (targets.isEmpty()) {
+			toastManager.show("Select at least one target source")
+			return
+		}
+		searchJob?.cancel()
+		searchJob = viewModelScope.launch(Dispatchers.IO) {
+			_uiState.update { it.copy(isRunningAiFallback = true, aiSuggestedQueries = emptyList(), aiEngineUsed = null) }
+			val suggestionRes = semanticTitleMatcherProvider.get().suggestAlternateQueries(
+				title = seed.title,
+				altTitles = seed.altTitles,
+				isNovel = seed.source.isNovelSource,
+			)
+			suggestionRes.onFailure { err ->
+				_uiState.update { it.copy(isRunningAiFallback = false) }
+				toastManager.show(err.localizedMessage ?: "AI title suggestion unavailable")
+				return@launch
+			}
+			val (queries, engineUsed) = suggestionRes.getOrThrow()
+			_uiState.update { it.copy(aiSuggestedQueries = queries, aiEngineUsed = engineUsed) }
+
+			val isNovel = seed.source.isNovelSource
+			val enabledSources = sourcesRepository.observeEnabledSources().first()
+				.filter { it.mangaSource != seed.source && it.isNovelSource == isNovel && it.name in targets }
+			val seenKeys = HashSet<String>()
+			val found = ArrayList<MigrationCandidateItem>()
+			val repoFactory = mangaRepositoryFactoryProvider.get()
+
+			for (sourceInfo in enabledSources) {
+				val searchHelper = searchHelperFactory.create(sourceInfo.mangaSource)
+				for (query in queries) {
+					val hits = runCatchingCancellable {
+						searchHelper(query, SearchKind.SIMPLE)?.manga.orEmpty()
+					}.getOrDefault(emptyList())
+					val topHit = hits.firstOrNull { it.id != seed.id && it.source.isNovelSource == isNovel } ?: continue
+					val dedupeKey = "${topHit.source.name}:${topHit.id}"
+					if (!seenKeys.add(dedupeKey)) continue
+					val detailed = runCatchingCancellable {
+						repoFactory.create(topHit.source).getDetails(topHit)
+					}.getOrDefault(topHit)
+					found += MigrationCandidateItem(
+						manga = detailed,
+						sourceTitle = detailed.source.getTitle(context),
+						chaptersCount = detailed.chaptersCount(),
+					)
+					_uiState.update { it.copy(candidates = found.sortedByDescending { c -> c.chaptersCount }) }
+					break
+				}
+			}
+			_uiState.update { it.copy(isRunningAiFallback = false) }
+			if (found.isEmpty()) {
+				toastManager.show("AI queries tried (${queries.joinToString()}), no source matches found")
+			}
 		}
 	}
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -44,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koitharu.kotatsu.ai.domain.SemanticPairResult
+import org.koitharu.kotatsu.ai.domain.SemanticVerdict
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.MangaCoverImage
@@ -127,18 +130,59 @@ fun DuplicateScannerScreen(
 				) {
 					if (uiState.activeBucket == DuplicateConfidenceBucket.REVIEW_CAREFULLY) {
 						item {
+							val unverifiedCount = shownPairs.count { it.key !in uiState.aiVerdicts }
 							Surface(
 								color = NemuriTheme.colors.amber.copy(alpha = 0.12f),
 								shape = RoundedCornerShape(12.dp),
 								border = BorderStroke(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.4f)),
 								modifier = Modifier.fillMaxWidth(),
 							) {
-								Text(
-									text = "Careful Review: Substring or loose matches may be sequels or spin-offs. Confirm carefully before merging. Phase 5B will unlock capped AI semantic verification here.",
-									style = MaterialTheme.typography.bodySmall,
-									color = NemuriTheme.colors.amber,
+								Column(
 									modifier = Modifier.padding(12.dp),
-								)
+									verticalArrangement = Arrangement.spacedBy(8.dp),
+								) {
+									Text(
+										text = "Careful Review: Substring or loose matches may be sequels or spin-offs. Confirm carefully before merging.",
+										style = MaterialTheme.typography.bodySmall,
+										color = NemuriTheme.colors.amber,
+									)
+									if (uiState.isAiEnabled && (unverifiedCount > 0 || uiState.isBatchAiRunning)) {
+										Row(
+											modifier = Modifier.fillMaxWidth(),
+											horizontalArrangement = Arrangement.SpaceBetween,
+											verticalAlignment = Alignment.CenterVertically,
+										) {
+											if (uiState.isBatchAiRunning) {
+												Text(
+													text = "AI verifying ${uiState.batchAiDone}/${uiState.batchAiTotal}…",
+													style = MaterialTheme.typography.labelMedium,
+													color = NemuriTheme.colors.mergePurple,
+												)
+												TextButton(onClick = viewModel::cancelBatchAi) {
+													Text("Cancel", color = NemuriTheme.colors.danger)
+												}
+											} else {
+												Text(
+													text = "$unverifiedCount unchecked pair(s)",
+													style = MaterialTheme.typography.labelSmall,
+													color = NemuriTheme.colors.textMuted,
+												)
+												Button(
+													onClick = viewModel::verifyNextFiveWithAi,
+													colors = ButtonDefaults.buttonColors(
+														containerColor = NemuriTheme.colors.mergePurple.copy(alpha = 0.22f),
+														contentColor = NemuriTheme.colors.mergePurple,
+													),
+													shape = RoundedCornerShape(10.dp),
+												) {
+													Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+													Spacer(Modifier.width(6.dp))
+													Text("AI Verify Next ${minOf(5, unverifiedCount)}")
+												}
+											}
+										}
+									}
+								}
 							}
 						}
 					}
@@ -147,6 +191,10 @@ fun DuplicateScannerScreen(
 						DuplicatePairCard(
 							pair = pair,
 							enabled = !uiState.isMerging,
+							showAiAction = uiState.activeBucket == DuplicateConfidenceBucket.REVIEW_CAREFULLY && uiState.isAiEnabled,
+							aiResult = uiState.aiVerdicts[pair.key],
+							isVerifyingAi = pair.key in uiState.verifyingPairKeys,
+							onAskAi = { viewModel.verifyPairWithAi(pair) },
 							onOpenDetails = { manga ->
 								MangaTransferCache.put(manga)
 								onOpenDetails(manga)
@@ -254,6 +302,10 @@ private fun BucketChip(
 private fun DuplicatePairCard(
 	pair: DuplicatePairItem,
 	enabled: Boolean,
+	showAiAction: Boolean,
+	aiResult: SemanticPairResult?,
+	isVerifyingAi: Boolean,
+	onAskAi: () -> Unit,
 	onOpenDetails: (Manga) -> Unit,
 	onKeepFirst: () -> Unit,
 	onKeepSecond: () -> Unit,
@@ -293,8 +345,53 @@ private fun DuplicatePairCard(
 						modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
 					)
 				}
-				TextButton(onClick = onDismiss, enabled = enabled) {
-					Text("Dismiss", color = NemuriTheme.colors.textDim)
+				Row(verticalAlignment = Alignment.CenterVertically) {
+					if (showAiAction && aiResult == null) {
+						TextButton(onClick = onAskAi, enabled = enabled && !isVerifyingAi) {
+							if (isVerifyingAi) {
+								CircularProgressIndicator(
+									color = NemuriTheme.colors.mergePurple,
+									strokeWidth = 2.dp,
+									modifier = Modifier.size(14.dp),
+								)
+							} else {
+								Text("Ask AI", color = NemuriTheme.colors.mergePurple)
+							}
+						}
+					}
+					TextButton(onClick = onDismiss, enabled = enabled) {
+						Text("Dismiss", color = NemuriTheme.colors.textDim)
+					}
+				}
+			}
+
+			if (aiResult != null) {
+				val (badgeLabel, badgeTint) = when (aiResult.verdict) {
+					SemanticVerdict.SAME_SERIES -> "AI: Same Series" to NemuriTheme.colors.healthy
+					SemanticVerdict.DIFFERENT_WORK -> "AI: Different Work" to NemuriTheme.colors.danger
+					SemanticVerdict.UNCERTAIN -> "AI: Uncertain" to NemuriTheme.colors.amber
+				}
+				Surface(
+					color = badgeTint.copy(alpha = 0.12f),
+					shape = RoundedCornerShape(10.dp),
+					border = BorderStroke(1.dp, badgeTint.copy(alpha = 0.45f)),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Column(
+						modifier = Modifier.padding(10.dp),
+						verticalArrangement = Arrangement.spacedBy(2.dp),
+					) {
+						Text(
+							text = "$badgeLabel • ${aiResult.engineUsed}",
+							style = MaterialTheme.typography.labelMedium,
+							color = badgeTint,
+						)
+						Text(
+							text = aiResult.reason,
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.textSecondary,
+						)
+					}
 				}
 			}
 

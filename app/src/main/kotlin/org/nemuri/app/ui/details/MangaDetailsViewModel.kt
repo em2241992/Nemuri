@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.ai.data.MangaAiRecapEntity
+import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.WhereWasIRecapUseCase
 import org.koitharu.kotatsu.alternatives.domain.MigrateUseCase
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
 import org.koitharu.kotatsu.bookmarks.domain.BookmarksRepository
@@ -158,6 +161,10 @@ data class MangaDetailsUiState(
 	val pendingDuplicatePrompt: PendingDuplicatePrompt? = null,
 	val isReplacingDuplicate: Boolean = false,
 	val titleStats: MangaTitleStats = MangaTitleStats(),
+	val aiRecap: MangaAiRecapEntity? = null,
+	val isGeneratingRecap: Boolean = false,
+	val isRecapCardEnabled: Boolean = true,
+	val aiModeLabel: String = "Auto",
 )
 
 private data class DetailsChapterControls(
@@ -193,6 +200,7 @@ class MangaDetailsViewModel @Inject constructor(
 	private val migrateUseCaseProvider: Provider<MigrateUseCase>,
 	private val statsRepository: StatsRepository,
 	private val databaseProvider: Provider<MangaDatabase>,
+	private val recapUseCaseProvider: Provider<WhereWasIRecapUseCase>,
 	@LocalStorageChanges private val localStorageChanges: SharedFlow<LocalManga?>,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
@@ -214,6 +222,8 @@ class MangaDetailsViewModel @Inject constructor(
 	private val duplicatePromptFlow = MutableStateFlow<PendingDuplicatePrompt?>(null)
 	private val replacingDuplicateFlow = MutableStateFlow(false)
 	private val titleStatsFlow = MutableStateFlow(MangaTitleStats())
+	private val generatingRecapFlow = MutableStateFlow(false)
+	private var recapJob: Job? = null
 
 	private val _uiState = MutableStateFlow(MangaDetailsUiState())
 	val uiState: StateFlow<MangaDetailsUiState> = _uiState.asStateFlow()
@@ -245,6 +255,8 @@ class MangaDetailsViewModel @Inject constructor(
 		boundMangaId = mangaId
 		loadJob?.cancel()
 		auxiliaryJob?.cancel()
+		recapJob?.cancel()
+		generatingRecapFlow.value = false
 		selectedChaptersFlow.value = emptySet()
 		relatedFlow.value = emptyList()
 
@@ -450,6 +462,42 @@ class MangaDetailsViewModel @Inject constructor(
 				firstReadAt = firstReadAt,
 				recentDailyPages = dailyList,
 			)
+		}
+	}
+
+	fun generateRecap(forceRefresh: Boolean = false) {
+		val details = rawDetailsFlow.value ?: return
+		val state = uiState.value
+		val manga = details.toManga()
+		val branchChapters = details.chapters[state.selectedBranch] ?: details.allChapters
+		val orderedAscending = if (branchChapters.size >= 2 && branchChapters.first().number > branchChapters.last().number) {
+			branchChapters.asReversed()
+		} else {
+			branchChapters
+		}
+		recapJob?.cancel()
+		recapJob = viewModelScope.launch(Dispatchers.IO) {
+			generatingRecapFlow.value = true
+			runCatchingCancellable {
+				recapUseCaseProvider.get().generateRecap(
+					manga = manga,
+					orderedChapters = orderedAscending,
+					currentChapterId = state.history?.chapterId,
+					descriptionText = details.description,
+					forceRefresh = forceRefresh,
+				)
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to build recap")
+			}
+			generatingRecapFlow.value = false
+		}
+	}
+
+	fun clearRecap() {
+		val id = boundMangaId
+		if (id == 0L) return
+		viewModelScope.launch(Dispatchers.IO) {
+			recapUseCaseProvider.get().clearCache(id)
 		}
 	}
 
@@ -676,6 +724,26 @@ class MangaDetailsViewModel @Inject constructor(
 			snapshot.copy(isReversed = settings.isChaptersReverse)
 		}
 
+		val aiPrefFlow = settings.observeChanges()
+			.filter {
+				it == null ||
+					it == AppSettings.KEY_AI_MODE ||
+					it == AppSettings.KEY_AI_SHOW_RECAP_CARD
+			}
+			.onStart { emit(null) }
+
+		val recapBundleFlow = combine(
+			recapUseCaseProvider.get().observeCached(mangaId).catch { emit(null) },
+			generatingRecapFlow,
+			aiPrefFlow,
+		) { recap, isGen, _ ->
+			Triple(
+				recap,
+				isGen,
+				settings.isAiShowRecapCard to AiMode.fromKey(settings.aiMode).label,
+			)
+		}
+
 		val metaFlow = combine(
 			relatedFlow,
 			loadingFlow,
@@ -699,6 +767,13 @@ class MangaDetailsViewModel @Inject constructor(
 			meta.copy(isReplacingDuplicate = replacing)
 		}.combine(titleStatsFlow) { meta, titleStats ->
 			meta.copy(titleStats = titleStats)
+		}.combine(recapBundleFlow) { meta, recapBundle ->
+			meta.copy(
+				aiRecap = recapBundle.first,
+				isGeneratingRecap = recapBundle.second,
+				isRecapCardEnabled = recapBundle.third.first,
+				aiModeLabel = recapBundle.third.second,
+			)
 		}
 
 		auxiliaryJob = viewModelScope.launch {
@@ -869,6 +944,10 @@ class MangaDetailsViewModel @Inject constructor(
 					pendingDuplicatePrompt = meta.duplicatePrompt,
 					isReplacingDuplicate = meta.isReplacingDuplicate,
 					titleStats = meta.titleStats,
+					aiRecap = meta.aiRecap,
+					isGeneratingRecap = meta.isGeneratingRecap,
+					isRecapCardEnabled = meta.isRecapCardEnabled,
+					aiModeLabel = meta.aiModeLabel,
 				)
 			}.flowOn(Dispatchers.Default)
 				.collect { state ->
@@ -892,5 +971,9 @@ class MangaDetailsViewModel @Inject constructor(
 		val duplicatePrompt: PendingDuplicatePrompt? = null,
 		val isReplacingDuplicate: Boolean = false,
 		val titleStats: MangaTitleStats = MangaTitleStats(),
+		val aiRecap: MangaAiRecapEntity? = null,
+		val isGeneratingRecap: Boolean = false,
+		val isRecapCardEnabled: Boolean = true,
+		val aiModeLabel: String = "Auto",
 	)
 }

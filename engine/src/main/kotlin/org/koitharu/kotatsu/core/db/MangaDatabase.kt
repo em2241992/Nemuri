@@ -11,6 +11,8 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.ai.data.MangaAiRecapDao
+import org.koitharu.kotatsu.ai.data.MangaAiRecapEntity
 import org.koitharu.kotatsu.bookmarks.data.BookmarkEntity
 import org.koitharu.kotatsu.bookmarks.data.BookmarksDao
 import org.koitharu.kotatsu.core.db.dao.ChaptersDao
@@ -56,6 +58,7 @@ import org.koitharu.kotatsu.core.db.migrations.Migration36To37
 import org.koitharu.kotatsu.core.db.migrations.Migration37To38
 import org.koitharu.kotatsu.core.db.migrations.Migration38To39
 import org.koitharu.kotatsu.core.db.migrations.Migration39To40
+import org.koitharu.kotatsu.core.db.migrations.Migration40To41
 import org.koitharu.kotatsu.core.db.migrations.Migration2To3
 import org.koitharu.kotatsu.core.db.migrations.Migration3To4
 import org.koitharu.kotatsu.core.db.migrations.Migration4To5
@@ -87,7 +90,7 @@ import org.koitharu.kotatsu.tracker.data.TrackEntity
 import org.koitharu.kotatsu.tracker.data.TrackLogEntity
 import org.koitharu.kotatsu.tracker.data.TracksDao
 
-const val DATABASE_VERSION = 40
+const val DATABASE_VERSION = 41
 
 @Database(
 	entities = [
@@ -95,7 +98,7 @@ const val DATABASE_VERSION = 40
 		FavouriteCategoryEntity::class, FavouriteEntity::class, MangaPrefsEntity::class, TrackEntity::class,
 		TrackLogEntity::class, SuggestionEntity::class, BookmarkEntity::class, ScrobblingEntity::class,
 		MangaSourceEntity::class, StatsEntity::class, LocalMangaIndexEntity::class,
-		SyncRowEntity::class, SyncPrefEntity::class, SyncRemoteEntity::class,
+		SyncRowEntity::class, SyncPrefEntity::class, SyncRemoteEntity::class, MangaAiRecapEntity::class,
 	],
 	version = DATABASE_VERSION,
 )
@@ -132,6 +135,8 @@ abstract class MangaDatabase : RoomDatabase() {
 	abstract fun getChaptersDao(): ChaptersDao
 
 	abstract fun getSyncDao(): SyncDao
+
+	abstract fun getMangaAiRecapDao(): MangaAiRecapDao
 }
 
 fun getDatabaseMigrations(context: Context): Array<Migration> = arrayOf(
@@ -174,6 +179,7 @@ fun getDatabaseMigrations(context: Context): Array<Migration> = arrayOf(
 	Migration37To38(),
 	Migration38To39(),
 	Migration39To40(),
+	Migration40To41(),
 )
 
 fun MangaDatabase(context: Context): MangaDatabase = Room

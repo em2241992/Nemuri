@@ -42,6 +42,7 @@ import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriNavigationRail
 import org.nemuri.app.ui.details.MangaDetailsScreen
 import org.nemuri.app.ui.downloads.DownloadsScreen
+import org.nemuri.app.ui.enhance.AiSettingsScreen
 import org.nemuri.app.ui.enhance.BrokenSourcesScreen
 import org.nemuri.app.ui.enhance.DuplicateScannerScreen
 import org.nemuri.app.ui.enhance.EnhanceHubScreen
@@ -215,6 +216,7 @@ private fun NemuriAppRoot(
 							onOpenReadingSettings = {
 								navController.navigate(AppDestination.Settings(SettingsSection.READING))
 							},
+							onOpenAiSettings = { navController.navigate(AppDestination.AiSettings) },
 							onOpenSettings = { navController.navigate(AppDestination.Settings()) },
 						)
 					}
@@ -297,6 +299,10 @@ private fun NemuriAppRoot(
 						onBack = { navController.popBackStack() },
 					)
 
+					is AppDestination.AiSettings -> AiSettingsScreen(
+						onBack = { navController.popBackStack() },
+					)
+
 					is AppDestination.MigrateManga -> MigrateMangaScreen(
 						mangaId = destination.mangaId,
 						onMigrated = { migrated ->
@@ -334,6 +340,9 @@ private fun NemuriAppRoot(
 						},
 						onOpenMigrate = { id ->
 							navController.navigate(AppDestination.MigrateManga(id))
+						},
+						onOpenAiSettings = {
+							navController.navigate(AppDestination.AiSettings)
 						},
 					)
 

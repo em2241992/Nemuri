@@ -34,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
@@ -55,6 +56,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -125,6 +127,7 @@ fun MangaDetailsScreen(
 	onOpenDetails: (Manga) -> Unit,
 	onOpenSourceBrowse: (String, String?) -> Unit,
 	onOpenMigrate: (Long) -> Unit = {},
+	onOpenAiSettings: () -> Unit = {},
 	viewModel: MangaDetailsViewModel = viewModel(),
 ) {
 	val context = LocalContext.current
@@ -653,6 +656,19 @@ fun MangaDetailsScreen(
 									}
 								}
 							}
+						}
+					}
+
+					// "Where Was I?" Spoiler-Quarantined Recap Card
+					if (uiState.isRecapCardEnabled && uiState.history != null) {
+						item(key = "details_ai_recap") {
+							WhereWasIRecapCard(
+								recap = uiState.aiRecap,
+								isGenerating = uiState.isGeneratingRecap,
+								aiModeLabel = uiState.aiModeLabel,
+								onGenerate = { viewModel.generateRecap(forceRefresh = uiState.aiRecap != null) },
+								onOpenSettings = onOpenAiSettings,
+							)
 						}
 					}
 
@@ -1378,6 +1394,128 @@ fun MangaDetailsScreen(
 								)
 							}
 						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun WhereWasIRecapCard(
+	recap: org.koitharu.kotatsu.ai.data.MangaAiRecapEntity?,
+	isGenerating: Boolean,
+	aiModeLabel: String,
+	onGenerate: () -> Unit,
+	onOpenSettings: () -> Unit,
+) {
+	Surface(
+		color = NemuriTheme.colors.card,
+		shape = RoundedCornerShape(16.dp),
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 16.dp, vertical = 4.dp)
+			.border(1.dp, NemuriTheme.colors.mergePurple.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
+	) {
+		Column(
+			modifier = Modifier.padding(14.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
+					modifier = Modifier.weight(1f),
+				) {
+					Icon(
+						imageVector = Icons.Default.AutoAwesome,
+						contentDescription = null,
+						tint = NemuriTheme.colors.mergePurple,
+						modifier = Modifier.size(18.dp),
+					)
+					Text(
+						text = "Where Was I?",
+						style = MaterialTheme.typography.titleSmall,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Surface(
+						color = if (recap?.isAiGenerated == true) {
+							NemuriTheme.colors.mergePurple.copy(alpha = 0.18f)
+						} else {
+							NemuriTheme.colors.surfaceElevated
+						},
+						shape = RoundedCornerShape(999.dp),
+					) {
+						Text(
+							text = recap?.engineUsed ?: aiModeLabel,
+							style = MaterialTheme.typography.labelSmall,
+							color = if (recap?.isAiGenerated == true) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textMuted,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+							modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+						)
+					}
+				}
+				IconButton(
+					onClick = onOpenSettings,
+					modifier = Modifier.size(28.dp),
+				) {
+					Icon(
+						imageVector = Icons.Default.Tune,
+						contentDescription = "AI Settings",
+						tint = NemuriTheme.colors.textMuted,
+						modifier = Modifier.size(16.dp),
+					)
+				}
+			}
+
+			if (recap != null) {
+				Text(
+					text = recap.summaryText,
+					style = MaterialTheme.typography.bodySmall,
+					color = NemuriTheme.colors.textSecondary,
+				)
+			} else {
+				Text(
+					text = "Spoiler-free recap up to your current read chapter. Never passes unread chapters.",
+					style = MaterialTheme.typography.bodySmall,
+					color = NemuriTheme.colors.textMuted,
+				)
+			}
+
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.End,
+			) {
+				Button(
+					onClick = onGenerate,
+					enabled = !isGenerating,
+					colors = ButtonDefaults.buttonColors(
+						containerColor = NemuriTheme.colors.tealContainer,
+						contentColor = NemuriTheme.colors.cyan,
+					),
+					shape = RoundedCornerShape(10.dp),
+				) {
+					if (isGenerating) {
+						CircularProgressIndicator(
+							color = NemuriTheme.colors.cyan,
+							strokeWidth = 2.dp,
+							modifier = Modifier.size(14.dp),
+						)
+						Spacer(Modifier.width(6.dp))
+						Text("Generating…")
+					} else {
+						Icon(
+							imageVector = Icons.Default.Refresh,
+							contentDescription = null,
+							modifier = Modifier.size(15.dp),
+						)
+						Spacer(Modifier.width(5.dp))
+						Text(if (recap == null) "Generate Recap" else "Refresh Recap")
 					}
 				}
 			}

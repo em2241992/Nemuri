@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -222,13 +223,66 @@ fun MigrateMangaScreen(
 
 				if (uiState.hasSearched && !uiState.isSearching && uiState.candidates.isEmpty()) {
 					item {
-						NemuriEmptyState(
-							icon = Icons.Default.SearchOff,
-							title = "No matching entries found",
-							subtitle = "Try enabling Loose Match, selecting more sources, or wait for Phase 5B Tier 3 AI semantic title matching.",
-						)
+						Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+							NemuriEmptyState(
+								icon = Icons.Default.SearchOff,
+								title = "No matching entries found",
+								subtitle = if (uiState.aiSuggestedQueries.isNotEmpty()) {
+									"Tried AI aliases (${uiState.aiSuggestedQueries.joinToString()}) via ${uiState.aiEngineUsed ?: "AI"}."
+								} else if (uiState.isAiEnabled) {
+									"Try enabling Loose Match, selecting more sources, or run single-title AI alias discovery."
+								} else {
+									"Try enabling Loose Match or selecting additional target sources."
+								},
+							)
+							if (uiState.isAiEnabled) {
+								Button(
+									onClick = viewModel::runAiFallbackSearch,
+									enabled = !uiState.isRunningAiFallback && !uiState.isMigrating,
+									colors = ButtonDefaults.buttonColors(
+										containerColor = NemuriTheme.colors.mergePurple.copy(alpha = 0.22f),
+										contentColor = NemuriTheme.colors.mergePurple,
+									),
+									shape = RoundedCornerShape(12.dp),
+									modifier = Modifier
+										.fillMaxWidth()
+										.border(1.dp, NemuriTheme.colors.mergePurple.copy(alpha = 0.55f), RoundedCornerShape(12.dp)),
+								) {
+									if (uiState.isRunningAiFallback) {
+										CircularProgressIndicator(
+											color = NemuriTheme.colors.mergePurple,
+											strokeWidth = 2.dp,
+											modifier = Modifier.size(18.dp),
+										)
+										Spacer(Modifier.width(8.dp))
+										Text("Finding alternate titles with AI…")
+									} else {
+										Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+										Spacer(Modifier.width(8.dp))
+										Text("Ask AI for Alternate Titles (1 Title)")
+									}
+								}
+							}
+						}
 					}
 				} else if (uiState.candidates.isNotEmpty()) {
+					if (uiState.aiSuggestedQueries.isNotEmpty()) {
+						item {
+							Surface(
+								color = NemuriTheme.colors.mergePurple.copy(alpha = 0.14f),
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(1.dp, NemuriTheme.colors.mergePurple.copy(alpha = 0.45f)),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Text(
+									text = "Matched via ${uiState.aiEngineUsed ?: "AI"} queries: ${uiState.aiSuggestedQueries.joinToString(" • ")}",
+									style = MaterialTheme.typography.bodySmall,
+									color = NemuriTheme.colors.mergePurple,
+									modifier = Modifier.padding(10.dp),
+								)
+							}
+						}
+					}
 					item {
 						Text(
 							text = "MATCHES (${uiState.candidates.size})",

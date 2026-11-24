@@ -7,12 +7,17 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.SemanticPairResult
+import org.koitharu.kotatsu.ai.domain.SemanticTitleMatcher
 import org.koitharu.kotatsu.alternatives.domain.MigrateUseCase
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.model.getTitle
@@ -64,6 +69,12 @@ data class DuplicateScannerUiState(
 	val highConfidencePairs: List<DuplicatePairItem> = emptyList(),
 	val reviewCarefullyPairs: List<DuplicatePairItem> = emptyList(),
 	val pendingMerge: PendingDuplicateMerge? = null,
+	val isAiEnabled: Boolean = false,
+	val aiVerdicts: Map<String, SemanticPairResult> = emptyMap(),
+	val verifyingPairKeys: Set<String> = emptySet(),
+	val isBatchAiRunning: Boolean = false,
+	val batchAiDone: Int = 0,
+	val batchAiTotal: Int = 0,
 )
 
 @HiltViewModel
@@ -72,6 +83,7 @@ class DuplicateScannerViewModel @Inject constructor(
 	private val databaseProvider: Provider<MangaDatabase>,
 	private val favouritesRepository: FavouritesRepository,
 	private val migrateUseCaseProvider: Provider<MigrateUseCase>,
+	private val semanticTitleMatcherProvider: Provider<SemanticTitleMatcher>,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
@@ -80,6 +92,7 @@ class DuplicateScannerViewModel @Inject constructor(
 	val uiState: StateFlow<DuplicateScannerUiState> = _uiState.asStateFlow()
 
 	private val dismissedKeys = HashSet<String>()
+	private var batchAiJob: Job? = null
 
 	init {
 		scanLibrary()
@@ -146,18 +159,100 @@ class DuplicateScannerViewModel @Inject constructor(
 	}
 
 	fun scanLibrary() {
+		batchAiJob?.cancel()
 		viewModelScope.launch(Dispatchers.IO) {
-			_uiState.update { it.copy(isScanning = true) }
+			_uiState.update {
+				it.copy(
+					isScanning = true,
+					isAiEnabled = AiMode.fromKey(settings.aiMode) != AiMode.OFF,
+					isBatchAiRunning = false,
+				)
+			}
 			val pairs = runCatchingCancellable { buildDuplicatePairs() }.getOrDefault(emptyList())
 			val filtered = pairs.filterNot { it.key in dismissedKeys }
 			_uiState.update {
 				it.copy(
 					isScanning = false,
+					isAiEnabled = AiMode.fromKey(settings.aiMode) != AiMode.OFF,
 					highConfidencePairs = filtered.filter { p -> p.bucket == DuplicateConfidenceBucket.HIGH_CONFIDENCE },
 					reviewCarefullyPairs = filtered.filter { p -> p.bucket == DuplicateConfidenceBucket.REVIEW_CAREFULLY },
 				)
 			}
 		}
+	}
+
+	fun verifyPairWithAi(pair: DuplicatePairItem) {
+		if (AiMode.fromKey(settings.aiMode) == AiMode.OFF) {
+			toastManager.show("AI features are turned off")
+			return
+		}
+		if (pair.key in _uiState.value.verifyingPairKeys) return
+		viewModelScope.launch(Dispatchers.IO) {
+			_uiState.update { it.copy(verifyingPairKeys = it.verifyingPairKeys + pair.key) }
+			val res = semanticTitleMatcherProvider.get().verifyDuplicatePair(
+				titleA = pair.first.manga.title,
+				altTitlesA = pair.first.manga.altTitles,
+				titleB = pair.second.manga.title,
+				altTitlesB = pair.second.manga.altTitles,
+			)
+			_uiState.update { state ->
+				val nextVerdicts = res.getOrNull()?.let { state.aiVerdicts + (pair.key to it) } ?: state.aiVerdicts
+				state.copy(
+					verifyingPairKeys = state.verifyingPairKeys - pair.key,
+					aiVerdicts = nextVerdicts,
+				)
+			}
+			res.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "AI verification failed")
+			}
+		}
+	}
+
+	fun verifyNextFiveWithAi() {
+		val state = _uiState.value
+		if (state.isBatchAiRunning || AiMode.fromKey(settings.aiMode) == AiMode.OFF) return
+		val targets = state.reviewCarefullyPairs
+			.filterNot { it.key in state.aiVerdicts }
+			.take(MAX_BATCH_AI_PAIRS)
+		if (targets.isEmpty()) {
+			toastManager.show("All ambiguous pairs have already been checked")
+			return
+		}
+		batchAiJob?.cancel()
+		batchAiJob = viewModelScope.launch(Dispatchers.IO) {
+			_uiState.update {
+				it.copy(isBatchAiRunning = true, batchAiDone = 0, batchAiTotal = targets.size)
+			}
+			val matcher = semanticTitleMatcherProvider.get()
+			for ((idx, pair) in targets.withIndex()) {
+				if (!isActive) break
+				_uiState.update { it.copy(verifyingPairKeys = it.verifyingPairKeys + pair.key) }
+				val res = matcher.verifyDuplicatePair(
+					titleA = pair.first.manga.title,
+					altTitlesA = pair.first.manga.altTitles,
+					titleB = pair.second.manga.title,
+					altTitlesB = pair.second.manga.altTitles,
+				)
+				_uiState.update { cur ->
+					val nextVerdicts = res.getOrNull()?.let { cur.aiVerdicts + (pair.key to it) } ?: cur.aiVerdicts
+					cur.copy(
+						verifyingPairKeys = cur.verifyingPairKeys - pair.key,
+						aiVerdicts = nextVerdicts,
+						batchAiDone = idx + 1,
+					)
+				}
+				if (res.isFailure) {
+					toastManager.show(res.exceptionOrNull()?.localizedMessage ?: "AI verification stopped")
+					break
+				}
+			}
+			_uiState.update { it.copy(isBatchAiRunning = false) }
+		}
+	}
+
+	fun cancelBatchAi() {
+		batchAiJob?.cancel()
+		_uiState.update { it.copy(isBatchAiRunning = false) }
 	}
 
 	private suspend fun buildDuplicatePairs(): List<DuplicatePairItem> {
@@ -307,6 +402,7 @@ class DuplicateScannerViewModel @Inject constructor(
 	}
 
 	private companion object {
+		const val MAX_BATCH_AI_PAIRS = 5
 		val BRACKETED_REGEX = Regex("""\([^)]*\)|\[[^]]*]""")
 		val NON_WORD_REGEX = Regex("""[^\p{L}\p{N}]+""")
 		val LEADING_THE_REGEX = Regex("""^\s*the\s+""")

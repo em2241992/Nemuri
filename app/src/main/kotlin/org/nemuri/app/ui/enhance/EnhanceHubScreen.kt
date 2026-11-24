@@ -55,6 +55,7 @@ fun EnhanceHubScreen(
 	onOpenDuplicates: () -> Unit,
 	onOpenStats: () -> Unit,
 	onOpenReadingSettings: () -> Unit,
+	onOpenAiSettings: () -> Unit,
 	onOpenSettings: () -> Unit,
 	viewModel: EnhanceHubViewModel = viewModel(),
 ) {
@@ -193,6 +194,14 @@ fun EnhanceHubScreen(
 						onClick = onOpenStats,
 					)
 					EnhanceToolCard(
+						icon = Icons.Default.AutoAwesome,
+						title = "AI Engine & \"Where Was I?\" Recaps",
+						subtitle = "Gemini Nano, Ollama / OpenAI-compatible LAN, or Gemini REST API",
+						badge = uiState.aiModeLabel,
+						badgeTint = NemuriTheme.colors.mergePurple,
+						onClick = onOpenAiSettings,
+					)
+					EnhanceToolCard(
 						icon = Icons.Default.GraphicEq,
 						title = "Universal GPU Reader Shaders",
 						subtitle = "Active preset: ${uiState.activeShaderLabel} (Anime4K, AMD FSR 1.0, Descreen, Ink+)",
@@ -239,12 +248,12 @@ fun EnhanceHubScreen(
 						)
 						Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 							Text(
-								text = "Upcoming in Phase 5B / 5C",
+								text = "Upcoming in Phase 5B-2 / 5C",
 								style = MaterialTheme.typography.titleSmall,
 								color = NemuriTheme.colors.textPrimary,
 							)
 							Text(
-								text = "Pluggable AI Engine (Gemini Nano, LiteRT-LM, llama.cpp, Ollama/API), \"Where Was I?\" spoiler-free recaps, and LiteRT Neural Upscaler.",
+								text = "Opt-in on-device CPU/GPU GGUF/LiteRT-LM fallback models and tiled LiteRT NPU/GPU neural page upscaler.",
 								style = MaterialTheme.typography.bodySmall,
 								color = NemuriTheme.colors.textMuted,
 							)

@@ -131,6 +131,7 @@ dependencies {
 
 	// Google Drive sign-in; the F-Droid version has no Drive sync and no Play Services.
 	githubImplementation libs.play.services.auth
+	githubImplementation libs.mlkit.genai.prompt
 
 	api libs.okhttp
 	implementation libs.okhttp.brotli

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.ai.domain.AiMode
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.prefs.AppSettings
@@ -35,6 +36,7 @@ data class EnhanceHubUiState(
 	val totalReadingTimeMs: Long = 0L,
 	val currentStreakDays: Int = 0,
 	val activeShaderLabel: String = "Off",
+	val aiModeLabel: String = "Auto",
 	val isDuplicateCheckOnAdd: Boolean = true,
 	val isDuplicateProgressMigrated: Boolean = true,
 	val isStatsEnabled: Boolean = true,
@@ -86,6 +88,7 @@ class EnhanceHubViewModel @Inject constructor(
 			totalReadingTimeMs = scan.totalReadingTimeMs,
 			currentStreakDays = scan.currentStreakDays,
 			activeShaderLabel = shaderCfg.summaryLabel(),
+			aiModeLabel = AiMode.fromKey(settings.aiMode).label,
 			isDuplicateCheckOnAdd = settings.isDuplicateCheckEnabled,
 			isDuplicateProgressMigrated = settings.isDuplicateProgressMigrated,
 			isStatsEnabled = settings.isStatsEnabled,

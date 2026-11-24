@@ -1465,6 +1465,33 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getFloat(KEY_READER_SHADER_STRENGTH, 0.75f).coerceIn(0.3f, 1.0f)
 		set(value) = prefs.edit { putFloat(KEY_READER_SHADER_STRENGTH, value.coerceIn(0.3f, 1.0f)) }
 
+	var aiMode: String
+		get() = prefs.getString(KEY_AI_MODE, "AUTO")?.takeIf { it.isNotBlank() } ?: "AUTO"
+		set(value) = prefs.edit { putString(KEY_AI_MODE, value) }
+
+	var aiRemoteUrl: String
+		get() = prefs.getString(KEY_AI_REMOTE_URL, "http://127.0.0.1:11434/v1")?.trim().orEmpty()
+			.ifEmpty { "http://127.0.0.1:11434/v1" }
+		set(value) = prefs.edit { putString(KEY_AI_REMOTE_URL, value.trim()) }
+
+	var aiRemoteModel: String
+		get() = prefs.getString(KEY_AI_REMOTE_MODEL, "llama3.2")?.trim().orEmpty()
+			.ifEmpty { "llama3.2" }
+		set(value) = prefs.edit { putString(KEY_AI_REMOTE_MODEL, value.trim()) }
+
+	var aiGeminiModel: String
+		get() = prefs.getString(KEY_AI_GEMINI_MODEL, "gemini-2.5-flash")?.trim().orEmpty()
+			.ifEmpty { "gemini-2.5-flash" }
+		set(value) = prefs.edit { putString(KEY_AI_GEMINI_MODEL, value.trim()) }
+
+	var isAiShowRecapCard: Boolean
+		get() = prefs.getBoolean(KEY_AI_SHOW_RECAP_CARD, true)
+		set(value) = prefs.edit { putBoolean(KEY_AI_SHOW_RECAP_CARD, value) }
+
+	var isAiIncludeNovelExcerpt: Boolean
+		get() = prefs.getBoolean(KEY_AI_INCLUDE_NOVEL_EXCERPT, true)
+		set(value) = prefs.edit { putBoolean(KEY_AI_INCLUDE_NOVEL_EXCERPT, value) }
+
 	fun getMangaListBadges(): Int {
 		val raw = prefs.getStringSet(KEY_MANGA_LIST_BADGES, mangaListBadgesDefault).orEmpty()
 		var result = 0
@@ -1693,6 +1720,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_READER_SHADER_STRENGTH = "reader_shader_strength"
 		const val KEY_FEED_HUB_MODE = "feed_hub_mode"
 		const val KEY_EXPLORE_HOME_SOURCE = "explore_home_source"
+		const val KEY_AI_MODE = "ai_mode"
+		const val KEY_AI_REMOTE_URL = "ai_remote_url"
+		const val KEY_AI_REMOTE_MODEL = "ai_remote_model"
+		const val KEY_AI_GEMINI_MODEL = "ai_gemini_model"
+		const val KEY_AI_SHOW_RECAP_CARD = "ai_show_recap_card"
+		const val KEY_AI_INCLUDE_NOVEL_EXCERPT = "ai_include_novel_excerpt"
 		const val KEY_LOCAL_LIST_ORDER = "local_order"
 		const val KEY_HISTORY_ORDER = "history_order"
 		const val KEY_FAVORITES_ORDER = "fav_order"
@@ -1870,6 +1903,10 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			KEY_APP_VERSION,
 			KEY_UPDATE_PROMPT_DISMISSED,
 			KEY_PRELOAD_POLICIES_RESET,
+			KEY_AI_MODE,
+			KEY_AI_REMOTE_URL,
+			KEY_AI_REMOTE_MODEL,
+			KEY_AI_GEMINI_MODEL,
 		)
 
 		fun isSyncableKey(key: String): Boolean = key !in SENSITIVE_BACKUP_KEYS &&
