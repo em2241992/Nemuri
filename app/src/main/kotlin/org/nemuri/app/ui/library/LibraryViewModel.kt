@@ -60,7 +60,7 @@ data class LibraryMangaItem(
 @Immutable
 data class LibraryUiState(
 	val categories: List<FavouriteCategory> = emptyList(),
-	val selectedCategoryId: Long = ALL_CATEGORIES_ID,
+	val selectedCategoryId: Long = LibraryViewModel.ALL_CATEGORIES_ID,
 	val items: List<LibraryMangaItem> = emptyList(),
 	val query: String = "",
 	val quickFilter: LibraryQuickFilter = LibraryQuickFilter.ALL,
@@ -74,7 +74,7 @@ data class LibraryUiState(
 )
 
 private data class LibraryControls(
-	val categoryId: Long = ALL_CATEGORIES_ID,
+	val categoryId: Long = LibraryViewModel.ALL_CATEGORIES_ID,
 	val query: String = "",
 	val quickFilter: LibraryQuickFilter = LibraryQuickFilter.ALL,
 	val sortOrderOverride: ListSortOrder? = null,
