@@ -53,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
+import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -335,6 +337,7 @@ fun ReadingSettingsScreen(
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 	var showModeDialog by remember { mutableStateOf(false) }
+	var showShaderDialog by remember { mutableStateOf(false) }
 
 	SettingsLazyPage(
 		title = SettingsSection.READING.title,
@@ -382,6 +385,44 @@ fun ReadingSettingsScreen(
 					subtitle = "Display subtle page counter while reading",
 					checked = state.isPagesNumbersEnabled,
 					onCheckedChange = viewModel::setPagesNumbers,
+				)
+			}
+		}
+
+		item {
+			SettingsGroupCard("Universal GPU Shaders") {
+				SettingsChoiceRow(
+					title = "Primary Upscale Shader",
+					subtitle = if (UpscaleEffect.isSupported) {
+						"Runs via AGSL GPU across Adreno, Mali, and Xclipse"
+					} else {
+						"Requires Android 13+ for RuntimeShader GPU effects"
+					},
+					currentLabel = state.readerShaderPreset.label,
+					onClick = { if (UpscaleEffect.isSupported) showShaderDialog = true },
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Screentone Descreen",
+					subtitle = "Smooths halftone dot noise while keeping line art sharp",
+					checked = state.isReaderDescreenEnabled,
+					onCheckedChange = viewModel::setReaderDescreen,
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Crisp Ink & Paper Levels",
+					subtitle = "Deepens faded blacks and cleans muddy scan backgrounds",
+					checked = state.isReaderInkLevelsEnabled,
+					onCheckedChange = viewModel::setReaderInkLevels,
+				)
+				SettingsRowDivider()
+				SettingsSliderRow(
+					title = "Shader Strength",
+					valueLabel = "${(state.readerShaderStrength * 100f).roundToInt()}%",
+					value = state.readerShaderStrength,
+					valueRange = 0.3f..1.0f,
+					steps = 6,
+					onValueChange = viewModel::setReaderShaderStrength,
 				)
 			}
 		}
@@ -497,6 +538,16 @@ fun ReadingSettingsScreen(
 			selected = state.defaultReaderMode,
 			onSelect = viewModel::setDefaultReaderMode,
 			onDismiss = { showModeDialog = false },
+		)
+	}
+
+	if (showShaderDialog) {
+		SettingsOptionDialog(
+			title = "Primary Upscale Shader",
+			options = ReaderShaderPreset.entries.map { it to it.label },
+			selected = state.readerShaderPreset,
+			onSelect = viewModel::setReaderShaderPreset,
+			onDismiss = { showShaderDialog = false },
 		)
 	}
 }

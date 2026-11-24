@@ -26,8 +26,10 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.alternatives.domain.MigrateUseCase
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
 import org.koitharu.kotatsu.bookmarks.domain.BookmarksRepository
+import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
 import org.koitharu.kotatsu.core.exceptions.InteractiveActionRequiredException
 import org.koitharu.kotatsu.core.model.FavouriteCategory
@@ -52,7 +54,9 @@ import org.koitharu.kotatsu.details.domain.DetailsLoadUseCase
 import org.koitharu.kotatsu.details.domain.RelatedMangaUseCase
 import org.koitharu.kotatsu.download.ui.worker.DownloadTask
 import org.koitharu.kotatsu.download.ui.worker.DownloadWorker
+import org.koitharu.kotatsu.favourites.domain.DuplicatesUseCase
 import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
+import org.koitharu.kotatsu.favourites.domain.MangaDuplicate
 import org.koitharu.kotatsu.history.data.HistoryRepository
 import org.koitharu.kotatsu.list.domain.ReadingProgress
 import org.koitharu.kotatsu.local.data.LocalMangaRepository
@@ -62,10 +66,12 @@ import org.koitharu.kotatsu.local.domain.model.LocalManga
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.koitharu.kotatsu.stats.data.StatsRepository
 import org.koitharu.kotatsu.tracker.domain.TrackingRepository
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
 import javax.inject.Inject
+import javax.inject.Provider
 import kotlin.math.roundToInt
 
 @Immutable
@@ -85,6 +91,26 @@ data class ChapterRowItem(
 	val isRead: Boolean,
 	val isNew: Boolean,
 	val isBookmarked: Boolean,
+)
+
+@Immutable
+data class PendingDuplicatePrompt(
+	val incoming: Manga,
+	val targetCategory: FavouriteCategory,
+	val duplicates: List<MangaDuplicate>,
+	val incomingChaptersCount: Int?,
+	val migrateProgressOnReplace: Boolean = true,
+)
+
+@Immutable
+data class MangaTitleStats(
+	val isLoading: Boolean = false,
+	val totalDurationMs: Long = 0L,
+	val totalPages: Int = 0,
+	val totalChapters: Int = 0,
+	val activeDays: Int = 0,
+	val firstReadAt: Long = 0L,
+	val recentDailyPages: List<Pair<Long, Int>> = emptyList(),
 )
 
 @Immutable
@@ -129,6 +155,9 @@ data class MangaDetailsUiState(
 	val errorMessage: String? = null,
 	val pendingCloudFlare: CloudFlareProtectedException? = null,
 	val pendingInteractive: InteractiveActionRequiredException? = null,
+	val pendingDuplicatePrompt: PendingDuplicatePrompt? = null,
+	val isReplacingDuplicate: Boolean = false,
+	val titleStats: MangaTitleStats = MangaTitleStats(),
 )
 
 private data class DetailsChapterControls(
@@ -160,6 +189,10 @@ class MangaDetailsViewModel @Inject constructor(
 	private val localMangaRepository: LocalMangaRepository,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
 	private val bookmarksRepository: BookmarksRepository,
+	private val duplicatesUseCaseProvider: Provider<DuplicatesUseCase>,
+	private val migrateUseCaseProvider: Provider<MigrateUseCase>,
+	private val statsRepository: StatsRepository,
+	private val databaseProvider: Provider<MangaDatabase>,
 	@LocalStorageChanges private val localStorageChanges: SharedFlow<LocalManga?>,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
@@ -178,6 +211,9 @@ class MangaDetailsViewModel @Inject constructor(
 	private val errorFlow = MutableStateFlow<String?>(null)
 	private val cfFlow = MutableStateFlow<CloudFlareProtectedException?>(null)
 	private val interactiveFlow = MutableStateFlow<InteractiveActionRequiredException?>(null)
+	private val duplicatePromptFlow = MutableStateFlow<PendingDuplicatePrompt?>(null)
+	private val replacingDuplicateFlow = MutableStateFlow(false)
+	private val titleStatsFlow = MutableStateFlow(MangaTitleStats())
 
 	private val _uiState = MutableStateFlow(MangaDetailsUiState())
 	val uiState: StateFlow<MangaDetailsUiState> = _uiState.asStateFlow()
@@ -312,23 +348,108 @@ class MangaDetailsViewModel @Inject constructor(
 						isNewChaptersDownloadEnabled = false,
 						isVisibleOnShelf = true,
 					)
-				favouritesRepository.addToCategory(targetCategory.id, listOf(manga))
-				toastManager.show("Added to ${targetCategory.title}")
+				addWithDuplicateCheck(manga, targetCategory)
 			}
 		}
 	}
 
 	fun toggleCategoryMembership(category: FavouriteCategory) {
 		val manga = rawDetailsFlow.value?.toManga() ?: return
-		val isMember = category.id in uiState.value.memberCategoryIds
+		val memberIds = uiState.value.memberCategoryIds
+		val isMember = category.id in memberIds
 		viewModelScope.launch(Dispatchers.IO) {
 			if (isMember) {
 				favouritesRepository.removeFromCategory(category.id, listOf(manga.id))
 				toastManager.show("Removed from ${category.title}")
+			} else if (memberIds.isEmpty()) {
+				addWithDuplicateCheck(manga, category)
 			} else {
 				favouritesRepository.addToCategory(category.id, listOf(manga))
 				toastManager.show("Added to ${category.title}")
 			}
+		}
+	}
+
+	private suspend fun addWithDuplicateCheck(manga: Manga, category: FavouriteCategory) {
+		if (settings.isDuplicateCheckEnabled) {
+			val useCase = duplicatesUseCaseProvider.get()
+			val duplicates = runCatchingCancellable { useCase(manga) }.getOrDefault(emptyList())
+			if (duplicates.isNotEmpty()) {
+				val incomingCount = useCase.getLocalChaptersCount(manga)
+				duplicatePromptFlow.value = PendingDuplicatePrompt(
+					incoming = manga,
+					targetCategory = category,
+					duplicates = duplicates,
+					incomingChaptersCount = incomingCount,
+					migrateProgressOnReplace = settings.isDuplicateProgressMigrated,
+				)
+				return
+			}
+		}
+		favouritesRepository.addToCategory(category.id, listOf(manga))
+		toastManager.show("Added to ${category.title}")
+	}
+
+	fun dismissDuplicatePrompt() {
+		duplicatePromptFlow.value = null
+	}
+
+	fun addDespiteDuplicates() {
+		val prompt = duplicatePromptFlow.value ?: return
+		duplicatePromptFlow.value = null
+		viewModelScope.launch(Dispatchers.IO) {
+			favouritesRepository.addToCategory(prompt.targetCategory.id, listOf(prompt.incoming))
+			toastManager.show("Added to ${prompt.targetCategory.title}")
+		}
+	}
+
+	fun replaceDuplicate(existing: MangaDuplicate) {
+		val prompt = duplicatePromptFlow.value ?: return
+		if (!existing.canReplace || replacingDuplicateFlow.value) return
+		duplicatePromptFlow.value = null
+		viewModelScope.launch(Dispatchers.IO) {
+			replacingDuplicateFlow.value = true
+			val result = runCatchingCancellable {
+				migrateUseCaseProvider.get().invoke(
+					oldManga = existing.manga,
+					newManga = prompt.incoming,
+					migrateProgress = settings.isDuplicateProgressMigrated,
+				)
+			}
+			replacingDuplicateFlow.value = false
+			result.onSuccess {
+				toastManager.show("Replaced ${existing.manga.title} from ${existing.manga.source.getTitle(context)}")
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to replace existing entry")
+			}
+		}
+	}
+
+	fun loadMangaStats() {
+		val id = boundMangaId
+		if (id == 0L) return
+		viewModelScope.launch(Dispatchers.IO) {
+			titleStatsFlow.value = MangaTitleStats(isLoading = true)
+			val sessions = runCatchingCancellable {
+				databaseProvider.get().getStatsDao().findAll(id)
+			}.getOrDefault(emptyList())
+			val timeline = runCatchingCancellable {
+				statsRepository.getMangaTimeline(id)
+			}.getOrDefault(java.util.TreeMap())
+			val totalDuration = sessions.sumOf { it.duration }
+			val totalPages = sessions.sumOf { it.pages }
+			val totalChapters = sessions.sumOf { it.chapters }
+			val firstReadAt = sessions.minOfOrNull { it.startedAt } ?: 0L
+			val dailyList = timeline.entries.toList().takeLast(14).map { it.key to it.value }
+			titleStatsFlow.value = MangaTitleStats(
+				isLoading = false,
+				totalDurationMs = totalDuration,
+				totalPages = totalPages,
+				totalChapters = totalChapters,
+				activeDays = timeline.size,
+				firstReadAt = firstReadAt,
+				recentDailyPages = dailyList,
+			)
 		}
 	}
 
@@ -572,6 +693,12 @@ class MangaDetailsViewModel @Inject constructor(
 				cf = triple.third.second,
 				interactive = interactive,
 			)
+		}.combine(duplicatePromptFlow) { meta, dupPrompt ->
+			meta.copy(duplicatePrompt = dupPrompt)
+		}.combine(replacingDuplicateFlow) { meta, replacing ->
+			meta.copy(isReplacingDuplicate = replacing)
+		}.combine(titleStatsFlow) { meta, titleStats ->
+			meta.copy(titleStats = titleStats)
 		}
 
 		auxiliaryJob = viewModelScope.launch {
@@ -739,6 +866,9 @@ class MangaDetailsViewModel @Inject constructor(
 					errorMessage = meta.error,
 					pendingCloudFlare = meta.cf,
 					pendingInteractive = meta.interactive,
+					pendingDuplicatePrompt = meta.duplicatePrompt,
+					isReplacingDuplicate = meta.isReplacingDuplicate,
+					titleStats = meta.titleStats,
 				)
 			}.flowOn(Dispatchers.Default)
 				.collect { state ->
@@ -759,5 +889,8 @@ class MangaDetailsViewModel @Inject constructor(
 		val error: String?,
 		val cf: CloudFlareProtectedException?,
 		val interactive: InteractiveActionRequiredException?,
+		val duplicatePrompt: PendingDuplicatePrompt? = null,
+		val isReplacingDuplicate: Boolean = false,
+		val titleStats: MangaTitleStats = MangaTitleStats(),
 	)
 }

@@ -30,9 +30,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
@@ -51,6 +53,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -92,10 +95,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
+import java.text.DateFormat
+import java.util.Date
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.navigation.MangaTransferCache
@@ -116,6 +124,7 @@ fun MangaDetailsScreen(
 	onStartReader: (Manga, Long?, String?) -> Unit,
 	onOpenDetails: (Manga) -> Unit,
 	onOpenSourceBrowse: (String, String?) -> Unit,
+	onOpenMigrate: (Long) -> Unit = {},
 	viewModel: MangaDetailsViewModel = viewModel(),
 ) {
 	val context = LocalContext.current
@@ -137,6 +146,7 @@ fun MangaDetailsScreen(
 	var showCategorySheet by remember { mutableStateOf(false) }
 	var showDownloadSheet by remember { mutableStateOf(false) }
 	var showChaptersFilterSheet by remember { mutableStateOf(false) }
+	var showStatsSheet by remember { mutableStateOf(false) }
 	var showCreateCategoryDialog by rememberSaveable { mutableStateOf(false) }
 	var newCategoryName by rememberSaveable { mutableStateOf("") }
 	var chapterMenuTarget by remember { mutableStateOf<ChapterRowItem?>(null) }
@@ -307,6 +317,27 @@ fun MangaDetailsScreen(
 												imageVector = Icons.Default.Download,
 												contentDescription = "Download options",
 												tint = NemuriTheme.colors.cyan,
+											)
+										}
+									}
+									IconButton(
+										onClick = {
+											viewModel.loadMangaStats()
+											showStatsSheet = true
+										},
+									) {
+										Icon(
+											imageVector = Icons.Default.BarChart,
+											contentDescription = "Reading stats",
+											tint = NemuriTheme.colors.textSecondary,
+										)
+									}
+									if (!uiState.isLocalOnly) {
+										IconButton(onClick = { onOpenMigrate(uiState.mangaId) }) {
+											Icon(
+												imageVector = Icons.Default.SwapHoriz,
+												contentDescription = "Migrate source",
+												tint = NemuriTheme.colors.textSecondary,
 											)
 										}
 									}
@@ -1161,6 +1192,225 @@ fun MangaDetailsScreen(
 				}
 			},
 		)
+	}
+
+	uiState.pendingDuplicatePrompt?.let { prompt ->
+		NemuriModalSheet(
+			title = "Possible Duplicate in Library",
+			subtitle = "Choose whether to replace an existing entry or add anyway",
+			onDismiss = viewModel::dismissDuplicatePrompt,
+		) {
+			Column(
+				modifier = Modifier
+					.verticalScroll(rememberScrollState())
+					.padding(horizontal = 20.dp, vertical = 8.dp),
+				verticalArrangement = Arrangement.spacedBy(10.dp),
+			) {
+				Text(
+					text = "Adding: ${prompt.incoming.title} (${prompt.incoming.source.getTitle(context)}" +
+						(prompt.incomingChaptersCount?.let { " • $it ch" } ?: "") + ")",
+					style = MaterialTheme.typography.labelLarge,
+					color = NemuriTheme.colors.cyan,
+				)
+				prompt.duplicates.forEach { dup ->
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(14.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp)),
+					) {
+						Column(
+							modifier = Modifier.padding(12.dp),
+							verticalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Row(
+								horizontalArrangement = Arrangement.spacedBy(10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								MangaCoverImage(
+									manga = dup.manga,
+									coverUrl = dup.manga.coverUrl,
+									modifier = Modifier
+										.size(width = 48.dp, height = 68.dp)
+										.clip(RoundedCornerShape(8.dp)),
+								)
+								Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+									Text(
+										text = dup.manga.title,
+										style = MaterialTheme.typography.titleSmall,
+										color = NemuriTheme.colors.textPrimary,
+										maxLines = 2,
+										overflow = TextOverflow.Ellipsis,
+									)
+									Text(
+										text = "${dup.manga.source.getTitle(context)} • ${dup.chaptersCount} ch",
+										style = MaterialTheme.typography.bodySmall,
+										color = NemuriTheme.colors.textMuted,
+									)
+									if (dup.categories.isNotEmpty()) {
+										Text(
+											text = "Categories: ${dup.categories.joinToString()}",
+											style = MaterialTheme.typography.labelSmall,
+											color = NemuriTheme.colors.textDim,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
+										)
+									}
+									if (dup.progress >= 0f) {
+										Text(
+											text = "Progress: ${(dup.progress * 100f).roundToInt().coerceIn(0, 100)}%",
+											style = MaterialTheme.typography.labelSmall,
+											color = NemuriTheme.colors.healthy,
+										)
+									}
+								}
+							}
+							if (dup.canReplace) {
+								Button(
+									onClick = { viewModel.replaceDuplicate(dup) },
+									colors = ButtonDefaults.buttonColors(
+										containerColor = NemuriTheme.colors.cyan,
+										contentColor = NemuriTheme.colors.onCyan,
+									),
+									shape = RoundedCornerShape(10.dp),
+									modifier = Modifier.fillMaxWidth(),
+								) {
+									Text(
+										if (prompt.migrateProgressOnReplace) {
+											"Replace This Entry (Carry Progress)"
+										} else {
+											"Replace This Entry"
+										},
+									)
+								}
+							}
+						}
+					}
+				}
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(10.dp),
+				) {
+					TextButton(
+						onClick = viewModel::dismissDuplicatePrompt,
+						modifier = Modifier.weight(1f),
+					) {
+						Text("Skip", color = NemuriTheme.colors.textMuted)
+					}
+					Button(
+						onClick = viewModel::addDespiteDuplicates,
+						colors = ButtonDefaults.buttonColors(
+							containerColor = NemuriTheme.colors.surfaceElevated,
+							contentColor = NemuriTheme.colors.textPrimary,
+						),
+						shape = RoundedCornerShape(10.dp),
+						modifier = Modifier.weight(1f),
+					) {
+						Text("Add Anyway")
+					}
+				}
+			}
+		}
+	}
+
+	if (showStatsSheet) {
+		val stats = uiState.titleStats
+		NemuriModalSheet(
+			title = "Title Reading Stats",
+			subtitle = uiState.title,
+			onDismiss = { showStatsSheet = false },
+		) {
+			if (stats.isLoading) {
+				NemuriLoadingState(message = "Loading reading history…")
+			} else if (stats.totalDurationMs == 0L && stats.totalPages == 0) {
+				Column(
+					modifier = Modifier.padding(horizontal = 24.dp, vertical = 18.dp),
+					verticalArrangement = Arrangement.spacedBy(6.dp),
+				) {
+					Text("No reading sessions recorded yet", style = MaterialTheme.typography.titleSmall, color = NemuriTheme.colors.textPrimary)
+					Text("Sessions are tracked automatically while reading with Statistics enabled.", style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textMuted)
+				}
+			} else {
+				Column(
+					modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+					verticalArrangement = Arrangement.spacedBy(12.dp),
+				) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(10.dp),
+					) {
+						MiniStatBox("Time Read", formatDurationShort(stats.totalDurationMs), Modifier.weight(1f))
+						MiniStatBox("Chapters", "${stats.totalChapters}", Modifier.weight(1f))
+					}
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(10.dp),
+					) {
+						MiniStatBox("Pages", "${stats.totalPages}", Modifier.weight(1f))
+						MiniStatBox("Active Days", "${stats.activeDays}", Modifier.weight(1f))
+					}
+					if (stats.firstReadAt > 0L) {
+						Text(
+							text = "First read: ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(stats.firstReadAt))}",
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+					}
+					if (stats.recentDailyPages.isNotEmpty()) {
+						val maxPages = stats.recentDailyPages.maxOf { it.second }.coerceAtLeast(1)
+						Text("Recent Daily Activity (Pages)", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan)
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.height(64.dp),
+							horizontalArrangement = Arrangement.spacedBy(4.dp),
+							verticalAlignment = Alignment.Bottom,
+						) {
+							stats.recentDailyPages.forEach { (_, count) ->
+								val frac = (count.toFloat() / maxPages).coerceIn(0.12f, 1f)
+								Box(
+									modifier = Modifier
+										.weight(1f)
+										.height((56 * frac).dp)
+										.clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+										.background(NemuriTheme.colors.cyan),
+								)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun MiniStatBox(
+	label: String,
+	value: String,
+	modifier: Modifier = Modifier,
+) {
+	Surface(
+		color = NemuriTheme.colors.surfaceElevated,
+		shape = RoundedCornerShape(12.dp),
+		modifier = modifier.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
+	) {
+		Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+			Text(value, style = MaterialTheme.typography.titleMedium, color = NemuriTheme.colors.cyan)
+			Text(label, style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+		}
+	}
+}
+
+private fun formatDurationShort(durationMs: Long): String {
+	val totalMinutes = TimeUnit.MILLISECONDS.toMinutes(durationMs)
+	val hours = totalMinutes / 60
+	val mins = totalMinutes % 60
+	return when {
+		hours > 0 -> "${hours}h ${mins}m"
+		totalMinutes > 0 -> "${totalMinutes}m"
+		else -> "${TimeUnit.MILLISECONDS.toSeconds(durationMs)}s"
 	}
 }
 

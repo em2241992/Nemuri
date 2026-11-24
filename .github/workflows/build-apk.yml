@@ -70,7 +70,7 @@ jobs:
             echo "::error::No APK found under app/build/outputs/apk/github/debug"
             exit 1
           fi
-          APK_NAME="Nemuri-v0.1.${{ github.run_number }}-debug.apk"
+          APK_NAME="Nemuri-v0.1.${{ github.run_number }}-arm64-debug.apk"
           cp "$APK_SRC" "$APK_NAME"
           echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
           ls -lh "$APK_NAME"

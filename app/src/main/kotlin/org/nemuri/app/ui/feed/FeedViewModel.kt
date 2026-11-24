@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.core.model.MangaHistory
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.prefs.AppSettings
@@ -25,6 +26,10 @@ import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
 import org.koitharu.kotatsu.download.ui.worker.DownloadTask
 import org.koitharu.kotatsu.download.ui.worker.DownloadWorker
+import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
+import org.koitharu.kotatsu.history.data.HistoryRepository
+import org.koitharu.kotatsu.list.domain.ListSortOrder
+import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.tracker.domain.TrackingRepository
 import org.koitharu.kotatsu.tracker.domain.model.TrackingLogItem
 import org.koitharu.kotatsu.tracker.work.TrackWorker
@@ -34,6 +39,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 @Immutable
 data class FeedEntryItem(
@@ -48,7 +54,19 @@ data class FeedEntryItem(
 )
 
 @Immutable
+data class ContinueReadingItem(
+	val manga: Manga,
+	val history: MangaHistory,
+	val progressPercentLabel: String,
+	val sourceTitle: String,
+)
+
+@Immutable
 data class FeedUiState(
+	val isHubMode: Boolean = true,
+	val continueReading: List<ContinueReadingItem> = emptyList(),
+	val recentlyAdded: List<Manga> = emptyList(),
+	val hubUpdates: List<FeedEntryItem> = emptyList(),
 	val groups: Map<String, List<FeedEntryItem>> = emptyMap(),
 	val totalCount: Int = 0,
 	val unreadCount: Int = 0,
@@ -58,10 +76,17 @@ data class FeedUiState(
 	val isLoaded: Boolean = false,
 )
 
+private data class FeedPrefsSnapshot(
+	val unreadOnly: Boolean,
+	val isHubMode: Boolean,
+)
+
 @HiltViewModel
 class FeedViewModel @Inject constructor(
 	@ApplicationContext private val context: Context,
 	private val trackingRepository: TrackingRepository,
+	private val historyRepository: HistoryRepository,
+	private val favouritesRepository: FavouritesRepository,
 	private val trackScheduler: TrackWorker.Scheduler,
 	private val downloadScheduler: DownloadWorker.Scheduler,
 	private val settings: AppSettings,
@@ -70,17 +95,30 @@ class FeedViewModel @Inject constructor(
 
 	private val queryFlow = MutableStateFlow("")
 
-	private val unreadOnlyFlow = settings.observeChanges()
-		.filter { it == null || it == AppSettings.KEY_FEED_UNREAD_ONLY }
+	private val prefsFlow = settings.observeChanges()
+		.filter { it == null || it == AppSettings.KEY_FEED_UNREAD_ONLY || it == AppSettings.KEY_FEED_HUB_MODE }
 		.onStart { emit(null) }
-		.map { settings.isFeedUnreadOnly }
+		.map {
+			FeedPrefsSnapshot(
+				unreadOnly = settings.isFeedUnreadOnly,
+				isHubMode = settings.isFeedHubMode,
+			)
+		}
+
+	private val localHubDataFlow = combine(
+		historyRepository.observeAllWithHistory(ListSortOrder.LAST_READ, emptySet(), 12),
+		favouritesRepository.observeAll(ListSortOrder.NEWEST, emptySet(), 12),
+	) { historyList, recentFavs ->
+		historyList to recentFavs
+	}
 
 	val uiState: StateFlow<FeedUiState> = combine(
 		trackingRepository.observeTrackingLog(limit = 500, filterOptions = emptySet()),
-		unreadOnlyFlow,
+		localHubDataFlow,
+		prefsFlow,
 		queryFlow,
 		trackScheduler.observeIsRunning(),
-	) { logs, unreadOnly, query, isTrackerRunning ->
+	) { logs, (historyList, recentFavs), prefs, query, isTrackerRunning ->
 		val trimmed = query.trim()
 		val unreadEntriesCount = logs.count { it.isNew }
 		val zoneId = ZoneId.systemDefault()
@@ -88,9 +126,8 @@ class FeedViewModel @Inject constructor(
 		val yesterday = today.minusDays(1)
 		val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())
 
-		val filtered = logs
+		val allEntries = logs
 			.asSequence()
-			.filter { !unreadOnly || it.isNew }
 			.filter { item ->
 				trimmed.isEmpty() ||
 					item.manga.title.contains(trimmed, ignoreCase = true) ||
@@ -133,12 +170,42 @@ class FeedViewModel @Inject constructor(
 			}
 			.toList()
 
+		val filtered = if (prefs.unreadOnly) {
+			allEntries.filter { it.logItem.isNew }
+		} else {
+			allEntries
+		}
+
+		val continueItems = historyList
+			.filter { item ->
+				trimmed.isEmpty() || item.manga.title.contains(trimmed, ignoreCase = true)
+			}
+			.map { item ->
+				val pct = (item.history.percent.coerceIn(0f, 1f) * 100f).roundToInt()
+				ContinueReadingItem(
+					manga = item.manga,
+					history = item.history,
+					progressPercentLabel = "$pct%",
+					sourceTitle = item.manga.source.getTitle(context),
+				)
+			}
+
+		val recentAddedItems = recentFavs.filter { manga ->
+			trimmed.isEmpty() || manga.title.contains(trimmed, ignoreCase = true)
+		}
+
+		val hubUpdates = (allEntries.filter { it.logItem.isNew }.ifEmpty { allEntries }).take(8)
+
 		FeedUiState(
+			isHubMode = prefs.isHubMode,
+			continueReading = continueItems,
+			recentlyAdded = recentAddedItems,
+			hubUpdates = hubUpdates,
 			groups = filtered.groupBy { it.dateGroup },
 			totalCount = filtered.size,
 			unreadCount = unreadEntriesCount,
 			query = query,
-			unreadOnly = unreadOnly,
+			unreadOnly = prefs.unreadOnly,
 			isTrackerRunning = isTrackerRunning,
 			isLoaded = true,
 		)
@@ -155,6 +222,10 @@ class FeedViewModel @Inject constructor(
 
 	fun setUnreadOnly(enabled: Boolean) {
 		settings.isFeedUnreadOnly = enabled
+	}
+
+	fun setHubMode(enabled: Boolean) {
+		settings.isFeedHubMode = enabled
 	}
 
 	fun checkForUpdatesNow() {

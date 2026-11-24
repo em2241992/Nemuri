@@ -4,11 +4,15 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.view.KeyEvent
 import android.view.WindowManager
+import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -22,29 +26,37 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
@@ -66,6 +78,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -74,12 +88,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -89,6 +106,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -96,8 +115,10 @@ import com.davemorrissey.labs.subscaleview.DefaultOnImageEventListener
 import com.davemorrissey.labs.subscaleview.ImageSource
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
 import org.koitharu.kotatsu.core.image.AvifCapableImageDecoder
 import org.koitharu.kotatsu.core.image.AvifCapableRegionDecoder
@@ -107,6 +128,9 @@ import org.koitharu.kotatsu.core.prefs.ReaderMode
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.core.util.ext.isPdfUri
 import org.koitharu.kotatsu.parsers.model.Manga
+import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
+import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
+import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.koitharu.kotatsu.reader.ui.ReaderState
 import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
 import org.nemuri.app.browser.CloudFlareActivity
@@ -157,7 +181,7 @@ class ReaderActivity : ComponentActivity() {
 	}
 
 	override fun onPause() {
-		viewModel.flushProgress()
+		viewModel.onPauseReading()
 		super.onPause()
 	}
 
@@ -605,6 +629,7 @@ private fun MangaReaderViewport(
 					page = page,
 					bitmapConfig = bitmapConfig,
 					isWebtoon = true,
+					shaderConfig = uiState.shaderConfig,
 					loadPage = viewModel::loadPageImage,
 					onTap = onToggleHud,
 					modifier = Modifier.fillMaxWidth(),
@@ -660,6 +685,7 @@ private fun MangaReaderViewport(
 						page = page,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						shaderConfig = uiState.shaderConfig,
 						loadPage = viewModel::loadPageImage,
 						onTap = onToggleHud,
 						modifier = Modifier.fillMaxSize(),
@@ -678,6 +704,7 @@ private fun MangaReaderViewport(
 						page = page,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						shaderConfig = uiState.shaderConfig,
 						loadPage = viewModel::loadPageImage,
 						onTap = onToggleHud,
 						modifier = Modifier.fillMaxSize(),
@@ -695,6 +722,7 @@ private fun MangaReaderViewport(
 						page = page,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						shaderConfig = uiState.shaderConfig,
 						loadPage = viewModel::loadPageImage,
 						onTap = onToggleHud,
 						modifier = Modifier.fillMaxSize(),
@@ -710,11 +738,13 @@ private fun SsivPageView(
 	page: ReaderPage,
 	bitmapConfig: Bitmap.Config,
 	isWebtoon: Boolean,
+	shaderConfig: ReaderShaderConfig,
 	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
 	onTap: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
 	val context = LocalContext.current
+	val latestShaderConfig by rememberUpdatedState(shaderConfig)
 	var retryToken by remember(page.id) { mutableStateOf(0) }
 	var resolved by remember(page.id) { mutableStateOf<Pair<Uri, Rect?>?>(null) }
 	var errorText by remember(page.id) { mutableStateOf<String?>(null) }
@@ -770,6 +800,7 @@ private fun SsivPageView(
 							object : DefaultOnImageEventListener {
 								override fun onReady() {
 									imageReady = true
+									applyShaderToSsiv(this@apply, latestShaderConfig)
 								}
 
 								override fun onImageLoadError(e: Throwable) {
@@ -792,6 +823,7 @@ private fun SsivPageView(
 						}
 						ssiv.setImage(source)
 					}
+					applyShaderToSsiv(ssiv, shaderConfig)
 				},
 				onRelease = { it.recycle() },
 				modifier = Modifier.fillMaxSize(),
@@ -1058,12 +1090,16 @@ private fun ReaderSettingsModalSheet(
 	viewModel: ReaderViewModel,
 	onDismiss: () -> Unit,
 ) {
+	var showShaderPreview by remember { mutableStateOf(false) }
+
 	NemuriModalSheet(
-		title = if (uiState.isTextMode) "Typography & Theme" else "Reading Mode",
+		title = if (uiState.isTextMode) "Typography & Theme" else "Reading Mode & GPU Shaders",
 		onDismiss = onDismiss,
 	) {
 		Column(
-			modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+			modifier = Modifier
+				.verticalScroll(rememberScrollState())
+				.padding(horizontal = 20.dp, vertical = 8.dp),
 			verticalArrangement = Arrangement.spacedBy(12.dp),
 		) {
 			if (!uiState.isTextMode) {
@@ -1100,6 +1136,121 @@ private fun ReaderSettingsModalSheet(
 								Icon(Icons.Default.Check, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(18.dp))
 							}
 						}
+					}
+				}
+
+				HorizontalDivider(color = NemuriTheme.colors.border, modifier = Modifier.padding(vertical = 2.dp))
+
+				Text(
+					text = "Universal GPU Shaders" + if (!UpscaleEffect.isSupported) " (Requires Android 13+)" else "",
+					style = MaterialTheme.typography.labelLarge,
+					color = NemuriTheme.colors.cyan,
+				)
+				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					ReaderShaderPreset.entries.forEach { preset ->
+						val selected = uiState.shaderConfig.preset == preset
+						Surface(
+							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(10.dp),
+							modifier = Modifier
+								.weight(1f)
+								.border(
+									1.dp,
+									if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									RoundedCornerShape(10.dp),
+								)
+								.clip(RoundedCornerShape(10.dp))
+								.clickable(enabled = UpscaleEffect.isSupported) {
+									viewModel.setShaderPreset(preset)
+								},
+						) {
+							Text(
+								text = preset.label,
+								style = MaterialTheme.typography.labelSmall,
+								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								textAlign = TextAlign.Center,
+								maxLines = 1,
+								modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+							)
+						}
+					}
+				}
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Text("Screentone Descreen", style = MaterialTheme.typography.bodyMedium, color = NemuriTheme.colors.textPrimary)
+						Text("Smooths halftone dot noise while keeping ink sharp", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+					}
+					Switch(
+						checked = uiState.shaderConfig.descreen,
+						onCheckedChange = viewModel::setShaderDescreen,
+						enabled = UpscaleEffect.isSupported,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.cyan,
+						),
+					)
+				}
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Text("Crisp Ink & Paper Levels", style = MaterialTheme.typography.bodyMedium, color = NemuriTheme.colors.textPrimary)
+						Text("Deepens faded blacks & cleans muddy scan paper", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+					}
+					Switch(
+						checked = uiState.shaderConfig.inkLevels,
+						onCheckedChange = viewModel::setShaderInkLevels,
+						enabled = UpscaleEffect.isSupported,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.cyan,
+						),
+					)
+				}
+
+				Text(
+					text = "Shader Strength (${(uiState.shaderConfig.strength * 100f).roundToInt()}%)",
+					style = MaterialTheme.typography.labelLarge,
+					color = NemuriTheme.colors.textMuted,
+				)
+				Slider(
+					value = uiState.shaderConfig.strength,
+					onValueChange = viewModel::setShaderStrength,
+					valueRange = 0.3f..1.0f,
+					enabled = UpscaleEffect.isSupported && uiState.shaderConfig.isActive,
+					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+				)
+
+				val currentPage = uiState.pages.getOrNull(uiState.currentPageIndex)
+				if (UpscaleEffect.isSupported && currentPage != null) {
+					Button(
+						onClick = { showShaderPreview = true },
+						colors = ButtonDefaults.buttonColors(
+							containerColor = NemuriTheme.colors.surfaceElevated,
+							contentColor = NemuriTheme.colors.cyan,
+						),
+						shape = RoundedCornerShape(10.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+					) {
+						Text("Before / After Split Preview")
+					}
+					if (showShaderPreview) {
+						ShaderSplitPreviewDialog(
+							page = currentPage,
+							config = uiState.shaderConfig,
+							loadPage = viewModel::loadPageImage,
+							onDismiss = { showShaderPreview = false },
+						)
 					}
 				}
 			} else {
@@ -1224,8 +1375,229 @@ private fun ReaderChallengeScreen(
 			) {
 				Text(actionLabel)
 			}
-			TextButton(onClick = onRetry) { Text("Retry", color = NemuriTheme.colors.cyan) }
+					TextButton(onClick = onRetry) { Text("Retry", color = NemuriTheme.colors.cyan) }
 			TextButton(onClick = onBack) { Text("Close", color = NemuriTheme.colors.textSecondary) }
+		}
+	}
+}
+
+private data class AppliedShaderState(val key: Pair<ReaderShaderConfig, Float>?)
+
+private fun applyShaderToSsiv(
+	ssiv: SubsamplingScaleImageView,
+	config: ReaderShaderConfig,
+) {
+	if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+	val pm = ssiv.context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+	val isPowerSave = pm?.isPowerSaveMode == true
+	val fitScale = if (ssiv.sWidth > 0 && ssiv.width > 0) {
+		(ssiv.width.toFloat() / ssiv.sWidth.toFloat()).coerceAtLeast(UpscaleEffect.MIN_SCALE)
+	} else {
+		UpscaleEffect.MIN_SCALE
+	}
+	val desired = AppliedShaderState(
+		key = if (!config.isActive || isPowerSave) null else (config to fitScale),
+	)
+	if (ssiv.tag == desired) return
+	ssiv.tag = desired
+	if (desired.key == null) {
+		ssiv.setRenderEffect(null)
+	} else {
+		ssiv.setRenderEffect(UpscaleEffect.create(fitScale, config))
+	}
+}
+
+@Composable
+private fun ShaderSplitPreviewDialog(
+	page: ReaderPage,
+	config: ReaderShaderConfig,
+	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
+	onDismiss: () -> Unit,
+) {
+	val context = LocalContext.current
+	var bitmap by remember(page.id) { mutableStateOf<Bitmap?>(null) }
+	var loadFailed by remember(page.id) { mutableStateOf(false) }
+	var splitFraction by remember { mutableStateOf(0.5f) }
+
+	LaunchedEffect(page.id) {
+		loadFailed = false
+		val loaded = withContext(Dispatchers.IO) {
+			val pair = loadPage(page, false).getOrNull() ?: return@withContext null
+			val (uri, _) = pair
+			runCatching {
+				val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+				context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+				var sample = 1
+				while ((opts.outWidth / sample) > 1440 || (opts.outHeight / sample) > 2200) {
+					sample *= 2
+				}
+				val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+				context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+			}.getOrNull()
+		}
+		bitmap = loaded
+		loadFailed = loaded == null
+	}
+
+	Dialog(
+		onDismissRequest = onDismiss,
+		properties = DialogProperties(usePlatformDefaultWidth = false),
+	) {
+		Surface(
+			color = NemuriTheme.colors.sheet,
+			shape = RoundedCornerShape(18.dp),
+			modifier = Modifier
+				.fillMaxSize()
+				.padding(14.dp),
+		) {
+			Column(modifier = Modifier.fillMaxSize()) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(horizontal = 16.dp, vertical = 10.dp),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column {
+						Text("Shader Split Preview", style = MaterialTheme.typography.titleMedium, color = NemuriTheme.colors.textPrimary)
+						Text("Left: Original • Right: ${config.summaryLabel()}", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan)
+					}
+					TextButton(onClick = onDismiss) {
+						Text("Done", color = NemuriTheme.colors.cyan)
+					}
+				}
+
+				BoxWithConstraints(
+					modifier = Modifier
+						.weight(1f)
+						.fillMaxWidth()
+						.background(Color.Black)
+						.pointerInput(Unit) {
+							detectHorizontalDragGestures { change, _ ->
+								change.consume()
+								if (size.width > 0) {
+									splitFraction = (change.position.x / size.width.toFloat()).coerceIn(0.1f, 0.9f)
+								}
+							}
+						},
+					contentAlignment = Alignment.Center,
+				) {
+					val bmp = bitmap
+					when {
+						loadFailed -> {
+							Text(
+								text = "Unable to decode page preview",
+								style = MaterialTheme.typography.bodyMedium,
+								color = NemuriTheme.colors.textMuted,
+							)
+						}
+
+						bmp == null -> {
+							CircularProgressIndicator(color = NemuriTheme.colors.cyan)
+						}
+
+						else -> {
+							val leftShape = remember(splitFraction) {
+								GenericShape { size, _ ->
+									addRect(ComposeRect(0f, 0f, size.width * splitFraction, size.height))
+								}
+							}
+							val rightShape = remember(splitFraction) {
+								GenericShape { size, _ ->
+									addRect(ComposeRect(size.width * splitFraction, 0f, size.width, size.height))
+								}
+							}
+
+							AndroidView(
+								factory = { ctx ->
+									ImageView(ctx).apply {
+										scaleType = ImageView.ScaleType.FIT_CENTER
+									}
+								},
+								update = { iv -> iv.setImageBitmap(bmp) },
+								modifier = Modifier
+									.fillMaxSize()
+									.clip(leftShape),
+							)
+
+							AndroidView(
+								factory = { ctx ->
+									ImageView(ctx).apply {
+										scaleType = ImageView.ScaleType.FIT_CENTER
+									}
+								},
+								update = { iv ->
+									iv.setImageBitmap(bmp)
+									val desired = AppliedShaderState(if (config.isActive) (config to 2.0f) else null)
+									if (iv.tag != desired) {
+										iv.tag = desired
+										if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && config.isActive) {
+											iv.setRenderEffect(UpscaleEffect.create(2.0f, config))
+										} else {
+											iv.setRenderEffect(null)
+										}
+									}
+								},
+								modifier = Modifier
+									.fillMaxSize()
+									.clip(rightShape),
+							)
+
+							// Split divider line & Original / Enhanced corner labels
+							Box(
+								modifier = Modifier
+									.align(Alignment.TopStart)
+									.offset(x = maxWidth * splitFraction - 1.dp)
+									.width(2.dp)
+									.fillMaxHeight()
+									.background(NemuriTheme.colors.cyan),
+							)
+							Surface(
+								color = Color.Black.copy(alpha = 0.65f),
+								shape = RoundedCornerShape(6.dp),
+								modifier = Modifier
+									.align(Alignment.TopStart)
+									.padding(10.dp),
+							) {
+								Text(
+									text = "Original",
+									style = MaterialTheme.typography.labelSmall,
+									color = Color.White,
+									modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+								)
+							}
+							Surface(
+								color = NemuriTheme.colors.dock.copy(alpha = 0.85f),
+								shape = RoundedCornerShape(6.dp),
+								modifier = Modifier
+									.align(Alignment.TopEnd)
+									.padding(10.dp),
+							) {
+								Text(
+									text = "Enhanced",
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.cyan,
+									modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+								)
+							}
+						}
+					}
+				}
+
+				Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+					Text(
+						text = "Drag split line (${(splitFraction * 100f).roundToInt()}%)",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
+					)
+					Slider(
+						value = splitFraction,
+						onValueChange = { splitFraction = it },
+						valueRange = 0.1f..0.9f,
+						colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+					)
+				}
+			}
 		}
 	}
 }

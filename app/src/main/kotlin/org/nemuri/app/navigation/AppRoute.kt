@@ -35,6 +35,10 @@ sealed interface AppDestination {
 	data object LocalStorage : AppDestination
 	data object Bookmarks : AppDestination
 	data object Downloads : AppDestination
+	data object ReadingStats : AppDestination
+	data object DuplicateScanner : AppDestination
+	data object BrokenSourcesWizard : AppDestination
+	data class MigrateManga(val mangaId: Long) : AppDestination
 	data class MangaDetails(val mangaId: Long, val sourceName: String? = null) : AppDestination
 	data class Reader(val mangaId: Long, val chapterId: Long? = null) : AppDestination
 	data class Settings(val section: SettingsSection = SettingsSection.ROOT) : AppDestination

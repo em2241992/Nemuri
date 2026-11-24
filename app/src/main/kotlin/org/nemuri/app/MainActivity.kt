@@ -8,12 +8,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,16 +33,20 @@ import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.navigation.NemuriNavController
 import org.nemuri.app.navigation.NemuriShellUiState
 import org.nemuri.app.navigation.NemuriShellViewModel
+import org.nemuri.app.navigation.SettingsSection
 import org.nemuri.app.reader.ReaderActivity
 import org.nemuri.app.ui.bookmarks.BookmarksScreen
 import org.nemuri.app.ui.components.NemuriCapsuleToastHost
-import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriFloatingDockBar
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriNavigationRail
-import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.details.MangaDetailsScreen
 import org.nemuri.app.ui.downloads.DownloadsScreen
+import org.nemuri.app.ui.enhance.BrokenSourcesScreen
+import org.nemuri.app.ui.enhance.DuplicateScannerScreen
+import org.nemuri.app.ui.enhance.EnhanceHubScreen
+import org.nemuri.app.ui.enhance.MigrateMangaScreen
+import org.nemuri.app.ui.enhance.ReadingStatsScreen
 import org.nemuri.app.ui.explore.ExploreScreen
 import org.nemuri.app.ui.explore.GlobalSearchScreen
 import org.nemuri.app.ui.explore.SourceBrowseScreen
@@ -154,6 +155,18 @@ private fun NemuriAppRoot(
 									ReaderActivity.newIntent(context, manga = manga, chapterId = chapterId),
 								)
 							},
+							onResumeReading = { manga, history ->
+								MangaTransferCache.put(manga)
+								context.startActivity(
+									ReaderActivity.newIntent(
+										context = context,
+										manga = manga,
+										chapterId = history.chapterId,
+										page = history.page,
+										scroll = history.scroll,
+									),
+								)
+							},
 							onOpenSettings = { navController.navigate(AppDestination.Settings()) },
 						)
 
@@ -195,7 +208,13 @@ private fun NemuriAppRoot(
 							onOpenSettings = { navController.navigate(AppDestination.Settings()) },
 						)
 
-						AppTab.ENHANCE -> EnhancePlaceholderScreen(
+						AppTab.ENHANCE -> EnhanceHubScreen(
+							onOpenBrokenSources = { navController.navigate(AppDestination.BrokenSourcesWizard) },
+							onOpenDuplicates = { navController.navigate(AppDestination.DuplicateScanner) },
+							onOpenStats = { navController.navigate(AppDestination.ReadingStats) },
+							onOpenReadingSettings = {
+								navController.navigate(AppDestination.Settings(SettingsSection.READING))
+							},
 							onOpenSettings = { navController.navigate(AppDestination.Settings()) },
 						)
 					}
@@ -255,6 +274,42 @@ private fun NemuriAppRoot(
 						},
 					)
 
+					is AppDestination.ReadingStats -> ReadingStatsScreen(
+						onOpenDetails = { manga ->
+							MangaTransferCache.put(manga)
+							navController.navigate(AppDestination.MangaDetails(manga.id, manga.source.name))
+						},
+						onBack = { navController.popBackStack() },
+					)
+
+					is AppDestination.DuplicateScanner -> DuplicateScannerScreen(
+						onOpenDetails = { manga ->
+							MangaTransferCache.put(manga)
+							navController.navigate(AppDestination.MangaDetails(manga.id, manga.source.name))
+						},
+						onBack = { navController.popBackStack() },
+					)
+
+					is AppDestination.BrokenSourcesWizard -> BrokenSourcesScreen(
+						onOpenManualMigrate = { id ->
+							navController.navigate(AppDestination.MigrateManga(id))
+						},
+						onBack = { navController.popBackStack() },
+					)
+
+					is AppDestination.MigrateManga -> MigrateMangaScreen(
+						mangaId = destination.mangaId,
+						onMigrated = { migrated ->
+							MangaTransferCache.put(migrated)
+							navController.popBackStack()
+							if (navController.currentDestination is AppDestination.MangaDetails) {
+								navController.popBackStack()
+							}
+							navController.navigate(AppDestination.MangaDetails(migrated.id, migrated.source.name))
+						},
+						onBack = { navController.popBackStack() },
+					)
+
 					is AppDestination.MangaDetails -> MangaDetailsScreen(
 						mangaId = destination.mangaId,
 						sourceName = destination.sourceName,
@@ -276,6 +331,9 @@ private fun NemuriAppRoot(
 						},
 						onOpenSourceBrowse = { sourceName, query ->
 							navController.navigate(AppDestination.SourceBrowse(sourceName, query))
+						},
+						onOpenMigrate = { id ->
+							navController.navigate(AppDestination.MigrateManga(id))
 						},
 					)
 
@@ -336,25 +394,6 @@ private fun NemuriAppRoot(
 			toastManager = shellViewModel.toastManager,
 			bottomPadding = if (!isWideLayout && navController.showBottomDock) 92.dp else 20.dp,
 			modifier = Modifier.align(Alignment.BottomCenter),
-		)
-	}
-}
-
-@Composable
-private fun EnhancePlaceholderScreen(
-	onOpenSettings: () -> Unit,
-) {
-	Column(modifier = Modifier.fillMaxSize()) {
-		NemuriTopSearchHeader(
-			query = "",
-			onQueryChange = {},
-			placeholder = "Enhance Hub (Phase 5)",
-			onSettingsClick = onOpenSettings,
-		)
-		NemuriEmptyState(
-			icon = Icons.Default.AutoAwesome,
-			title = "Enhance Hub — Reserved for Phase 5",
-			subtitle = "Deduplication, Neko multi-source merge, Repair, Upscaler, and AI Recaps will be planned after Phases 1–4.",
 		)
 	}
 }

@@ -15,6 +15,7 @@ import org.koitharu.kotatsu.scrobbling.common.domain.Scrobbler
 import org.koitharu.kotatsu.scrobbling.common.domain.model.ScrobblingStatus
 import org.koitharu.kotatsu.tracker.data.TrackEntity
 import javax.inject.Inject
+import javax.inject.Provider
 
 class MigrateUseCase
 @Inject
@@ -23,7 +24,7 @@ constructor(
 	private val mangaDataRepository: MangaDataRepository,
 	private val database: MangaDatabase,
 	private val progressUpdateUseCase: ProgressUpdateUseCase,
-	private val scrobblers: Set<@JvmSuppressWildcards Scrobbler>,
+	private val scrobblersProvider: Provider<Set<@JvmSuppressWildcards Scrobbler>>,
 ) {
 	/**
 	 * @param migrateProgress when false the new manga simply takes the old one's place in the library:
@@ -74,7 +75,7 @@ constructor(
 				database.getBookmarksDao().deleteAll(oldDetails.id)
 				database.getHistoryDao().delete(oldDetails.id)
 				database.getTracksDao().delete(oldDetails.id)
-				for (scrobbler in scrobblers) {
+				for (scrobbler in scrobblersProvider.get()) {
 					if (scrobbler.isEnabled) {
 						scrobbler.unregisterScrobbling(oldDetails.id)
 					}
@@ -128,7 +129,7 @@ constructor(
 				tracksDao.upsert(newTrack)
 			}
 			// scrobbling
-			for (scrobbler in scrobblers) {
+			for (scrobbler in scrobblersProvider.get()) {
 				if (!scrobbler.isEnabled) {
 					continue
 				}

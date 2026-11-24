@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -27,15 +29,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -72,6 +77,7 @@ import org.koitharu.kotatsu.core.parser.favicon.faviconUri
 import org.koitharu.kotatsu.explore.data.SourcesSortOrder
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
@@ -94,6 +100,7 @@ fun ExploreScreen(
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
 	var showSortAndLanguageSheet by remember { mutableStateOf(false) }
+	var showHomeSourcePicker by remember { mutableStateOf(false) }
 	var actionTargetTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
 
 	Column(modifier = Modifier.fillMaxSize()) {
@@ -230,6 +237,129 @@ fun ExploreScreen(
 									maxLines = 1,
 									overflow = TextOverflow.Ellipsis,
 								)
+							}
+						}
+					}
+				}
+			}
+
+			if (uiState.homeSource != null) {
+				val home = uiState.homeSource!!
+				item(span = { GridItemSpan(maxLineSpan) }) {
+					HomeSourceHubHeader(
+						homeSourceTitle = home.title,
+						isLoading = uiState.isHomeHubLoading,
+						visibilityFilter = uiState.visibilityFilter,
+						onPickHomeSource = { showHomeSourcePicker = true },
+						onRefresh = viewModel::refreshHomeHub,
+						onSelectVisibility = viewModel::setVisibilityFilter,
+					)
+				}
+
+				if (uiState.isHomeHubLoading && uiState.homeCarousels.isEmpty()) {
+					item(span = { GridItemSpan(maxLineSpan) }) {
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(vertical = 18.dp),
+							horizontalArrangement = Arrangement.Center,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							CircularProgressIndicator(
+								color = NemuriTheme.colors.cyan,
+								strokeWidth = 2.dp,
+								modifier = Modifier.size(18.dp),
+							)
+							Spacer(modifier = Modifier.width(8.dp))
+							Text(
+								text = "Loading ${home.title} feeds…",
+								style = MaterialTheme.typography.bodySmall,
+								color = NemuriTheme.colors.textMuted,
+							)
+						}
+					}
+				} else if (!uiState.homeHubError.isNullOrBlank() && uiState.homeCarousels.isEmpty()) {
+					item(span = { GridItemSpan(maxLineSpan) }) {
+						Surface(
+							color = NemuriTheme.colors.card,
+							shape = RoundedCornerShape(12.dp),
+							modifier = Modifier
+								.fillMaxWidth()
+								.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween,
+							) {
+								Text(
+									text = uiState.homeHubError.orEmpty(),
+									style = MaterialTheme.typography.bodySmall,
+									color = NemuriTheme.colors.textMuted,
+									modifier = Modifier.weight(1f),
+								)
+								Text(
+									text = "Retry",
+									style = MaterialTheme.typography.labelMedium,
+									color = NemuriTheme.colors.cyan,
+									modifier = Modifier
+										.clip(RoundedCornerShape(8.dp))
+										.clickable { viewModel.refreshHomeHub() }
+										.padding(horizontal = 8.dp, vertical = 4.dp),
+								)
+							}
+						}
+					}
+				} else {
+					uiState.homeCarousels.forEach { carousel ->
+						item(key = "hub_sec_${carousel.id}", span = { GridItemSpan(maxLineSpan) }) {
+							Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.SpaceBetween,
+								) {
+									Text(
+										text = carousel.title,
+										style = MaterialTheme.typography.titleSmall,
+										color = NemuriTheme.colors.textPrimary,
+									)
+									Text(
+										text = "See All →",
+										style = MaterialTheme.typography.labelMedium,
+										color = NemuriTheme.colors.cyan,
+										modifier = Modifier
+											.clip(RoundedCornerShape(8.dp))
+											.clickable {
+												viewModel.trackSourceOpen(home.sourceInfo.mangaSource)
+												onOpenSourceBrowse(home.sourceName)
+											}
+											.padding(horizontal = 6.dp, vertical = 2.dp),
+									)
+								}
+								if (carousel.items.isEmpty()) {
+									Text(
+										text = "No titles match the ${uiState.visibilityFilter.label} filter in this section.",
+										style = MaterialTheme.typography.bodySmall,
+										color = NemuriTheme.colors.textDim,
+									)
+								} else {
+									LazyRow(
+										horizontalArrangement = Arrangement.spacedBy(10.dp),
+									) {
+										items(carousel.items, key = { "${carousel.id}:${it.id}" }) { manga ->
+											val inLib = manga.id in uiState.libraryMangaIds || manga.url in uiState.libraryMangaUrls
+											HomeCarouselCard(
+												manga = manga,
+												inLibrary = inLib,
+												onClick = {
+													MangaTransferCache.put(manga)
+													onOpenDetails(manga)
+												},
+											)
+										}
+									}
+								}
 							}
 						}
 					}
@@ -513,6 +643,250 @@ fun ExploreScreen(
 				)
 			}
 		}
+	}
+
+	if (showHomeSourcePicker) {
+		var pickerQuery by remember { mutableStateOf("") }
+		val filteredPicker = uiState.allEnabledSources.filter {
+			pickerQuery.isBlank() || it.title.contains(pickerQuery.trim(), ignoreCase = true)
+		}
+		NemuriModalSheet(
+			title = "Select Home Source",
+			subtitle = "Pick 1 source to power your Explore Hub carousels",
+			onDismiss = { showHomeSourcePicker = false },
+		) {
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				androidx.compose.material3.OutlinedTextField(
+					value = pickerQuery,
+					onValueChange = { pickerQuery = it },
+					placeholder = { Text("Search enabled sources…") },
+					singleLine = true,
+					modifier = Modifier.fillMaxWidth(),
+				)
+				LazyColumn(
+					modifier = Modifier
+						.fillMaxWidth()
+						.height(320.dp),
+					verticalArrangement = Arrangement.spacedBy(6.dp),
+				) {
+					items(filteredPicker, key = { "pick:${it.sourceName}" }) { tile ->
+						val isSelected = tile.sourceName == uiState.homeSource?.sourceName
+						Surface(
+							color = if (isSelected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(12.dp),
+							modifier = Modifier
+								.fillMaxWidth()
+								.border(
+									1.dp,
+									if (isSelected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									RoundedCornerShape(12.dp),
+								)
+								.clip(RoundedCornerShape(12.dp))
+								.clickable {
+									viewModel.setHomeSource(tile.sourceName)
+									showHomeSourcePicker = false
+								},
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween,
+							) {
+								Column(modifier = Modifier.weight(1f)) {
+									Text(
+										text = tile.title,
+										style = MaterialTheme.typography.titleSmall,
+										color = if (isSelected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+									if (!tile.summary.isNullOrBlank()) {
+										Text(
+											text = tile.summary,
+											style = MaterialTheme.typography.labelSmall,
+											color = NemuriTheme.colors.textMuted,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
+										)
+									}
+								}
+								if (isSelected) {
+									Icon(
+										imageVector = Icons.Default.Check,
+										contentDescription = null,
+										tint = NemuriTheme.colors.cyan,
+										modifier = Modifier.size(18.dp),
+									)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun HomeSourceHubHeader(
+	homeSourceTitle: String,
+	isLoading: Boolean,
+	visibilityFilter: LibraryVisibilityFilter,
+	onPickHomeSource: () -> Unit,
+	onRefresh: () -> Unit,
+	onSelectVisibility: (LibraryVisibilityFilter) -> Unit,
+) {
+	Column(
+		modifier = Modifier.fillMaxWidth(),
+		verticalArrangement = Arrangement.spacedBy(8.dp),
+	) {
+		Row(
+			modifier = Modifier.fillMaxWidth(),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			Surface(
+				color = NemuriTheme.colors.tealContainer,
+				shape = RoundedCornerShape(999.dp),
+				modifier = Modifier
+					.weight(1f, fill = false)
+					.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+					.clip(RoundedCornerShape(999.dp))
+					.clickable(onClick = onPickHomeSource),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
+				) {
+					Icon(
+						imageVector = Icons.Default.Home,
+						contentDescription = null,
+						tint = NemuriTheme.colors.cyan,
+						modifier = Modifier.size(15.dp),
+					)
+					Text(
+						text = "Home: $homeSourceTitle",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.cyan,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+					Icon(
+						imageVector = Icons.Default.ArrowDropDown,
+						contentDescription = "Change Home Source",
+						tint = NemuriTheme.colors.cyan,
+						modifier = Modifier.size(18.dp),
+					)
+				}
+			}
+			IconButton(
+				onClick = onRefresh,
+				enabled = !isLoading,
+				modifier = Modifier.size(32.dp),
+			) {
+				if (isLoading) {
+					CircularProgressIndicator(
+						color = NemuriTheme.colors.cyan,
+						strokeWidth = 2.dp,
+						modifier = Modifier.size(16.dp),
+					)
+				} else {
+					Icon(
+						imageVector = Icons.Default.Refresh,
+						contentDescription = "Refresh Home Source",
+						tint = NemuriTheme.colors.textSecondary,
+						modifier = Modifier.size(18.dp),
+					)
+				}
+			}
+		}
+
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.horizontalScroll(rememberScrollState()),
+			horizontalArrangement = Arrangement.spacedBy(6.dp),
+		) {
+			LibraryVisibilityFilter.entries.forEach { vis ->
+				val selected = visibilityFilter == vis
+				Surface(
+					color = if (selected) NemuriTheme.colors.surfaceElevated else NemuriTheme.colors.card,
+					shape = RoundedCornerShape(999.dp),
+					modifier = Modifier
+						.border(
+							1.dp,
+							if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+							RoundedCornerShape(999.dp),
+						)
+						.clip(RoundedCornerShape(999.dp))
+						.clickable { onSelectVisibility(vis) },
+				) {
+					Text(
+						text = vis.label,
+						style = MaterialTheme.typography.labelSmall,
+						color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
+						modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+					)
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun HomeCarouselCard(
+	manga: Manga,
+	inLibrary: Boolean,
+	onClick: () -> Unit,
+) {
+	Column(
+		modifier = Modifier
+			.width(108.dp)
+			.clip(RoundedCornerShape(12.dp))
+			.clickable(onClick = onClick),
+		verticalArrangement = Arrangement.spacedBy(5.dp),
+	) {
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.aspectRatio(0.7f)
+				.clip(RoundedCornerShape(12.dp))
+				.border(
+					1.dp,
+					if (inLibrary) NemuriTheme.colors.healthy.copy(alpha = 0.65f) else NemuriTheme.colors.border,
+					RoundedCornerShape(12.dp),
+				),
+		) {
+			MangaCoverImage(
+				manga = manga,
+				coverUrl = manga.coverUrl,
+				modifier = Modifier.fillMaxSize(),
+			)
+			if (inLibrary) {
+				Surface(
+					color = NemuriTheme.colors.healthy.copy(alpha = 0.92f),
+					shape = RoundedCornerShape(6.dp),
+					modifier = Modifier
+						.align(Alignment.TopEnd)
+						.padding(5.dp),
+				) {
+					NonWrappingBadgeText(
+						text = "SAVED",
+						color = NemuriTheme.colors.onCyan,
+						fontSizeSp = 8.5f,
+						modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+					)
+				}
+			}
+		}
+		Text(
+			text = manga.title,
+			style = MaterialTheme.typography.labelMedium,
+			color = NemuriTheme.colors.textPrimary,
+			maxLines = 2,
+			overflow = TextOverflow.Ellipsis,
+		)
 	}
 }
 

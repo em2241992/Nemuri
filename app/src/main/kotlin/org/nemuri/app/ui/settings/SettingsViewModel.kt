@@ -27,6 +27,7 @@ import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
 import org.koitharu.kotatsu.local.data.LocalStorageManager
+import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.suggestions.ui.SuggestionsWorker
 import org.koitharu.kotatsu.sync.SyncFeature
 import org.koitharu.kotatsu.sync.SyncStatusSnapshot
@@ -69,6 +70,10 @@ data class SettingsUiState(
 	val isReaderVolumeButtonsEnabled: Boolean = false,
 	val is32BitColorsEnabled: Boolean = false,
 	val isPagesNumbersEnabled: Boolean = false,
+	val readerShaderPreset: ReaderShaderPreset = ReaderShaderPreset.OFF,
+	val isReaderDescreenEnabled: Boolean = false,
+	val isReaderInkLevelsEnabled: Boolean = false,
+	val readerShaderStrength: Float = 0.75f,
 	val epubTheme: String = "system",
 	val epubFontFamily: String = "serif",
 	val epubFontSize: Int = 100,
@@ -161,6 +166,10 @@ class SettingsViewModel @Inject constructor(
 			isReaderVolumeButtonsEnabled = settings.isReaderVolumeButtonsEnabled,
 			is32BitColorsEnabled = settings.is32BitColorsEnabled,
 			isPagesNumbersEnabled = settings.isPagesNumbersEnabled,
+			readerShaderPreset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
+			isReaderDescreenEnabled = settings.isReaderDescreenEnabled,
+			isReaderInkLevelsEnabled = settings.isReaderInkLevelsEnabled,
+			readerShaderStrength = settings.readerShaderStrength,
 			epubTheme = settings.epubTheme,
 			epubFontFamily = settings.epubFontFamily,
 			epubFontSize = settings.epubFontSize,
@@ -242,6 +251,33 @@ class SettingsViewModel @Inject constructor(
 	fun setVolumeButtons(enabled: Boolean) = settings.setReaderVolumeButtonsEnabled(enabled)
 	fun set32BitColors(enabled: Boolean) = settings.set32BitColorsEnabled(enabled)
 	fun setPagesNumbers(enabled: Boolean) = settings.setPagesNumbersEnabled(enabled)
+	fun setReaderShaderPreset(preset: ReaderShaderPreset) {
+		settings.readerShaderMode = preset.key
+		settings.setReaderUpscaleEnabled(
+			preset != ReaderShaderPreset.OFF ||
+				settings.isReaderDescreenEnabled ||
+				settings.isReaderInkLevelsEnabled,
+		)
+	}
+	fun setReaderDescreen(enabled: Boolean) {
+		settings.isReaderDescreenEnabled = enabled
+		settings.setReaderUpscaleEnabled(
+			enabled ||
+				settings.readerShaderMode != ReaderShaderPreset.OFF.key ||
+				settings.isReaderInkLevelsEnabled,
+		)
+	}
+	fun setReaderInkLevels(enabled: Boolean) {
+		settings.isReaderInkLevelsEnabled = enabled
+		settings.setReaderUpscaleEnabled(
+			enabled ||
+				settings.readerShaderMode != ReaderShaderPreset.OFF.key ||
+				settings.isReaderDescreenEnabled,
+		)
+	}
+	fun setReaderShaderStrength(strength: Float) {
+		settings.readerShaderStrength = strength.coerceIn(0.3f, 1.0f)
+	}
 	fun setEpubTheme(theme: String) {
 		settings.epubTheme = theme
 	}

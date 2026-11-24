@@ -1420,6 +1420,51 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		prefs.edit { putString(KEY_PAGES_SAVE_DIR, uri?.toString()) }
 	}
 
+	fun setStatsEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_STATS_ENABLED, enabled) }
+	}
+
+	fun setReaderUpscaleEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_READER_UPSCALE, enabled) }
+	}
+
+	var isFeedHubMode: Boolean
+		get() = prefs.getBoolean(KEY_FEED_HUB_MODE, true)
+		set(value) = prefs.edit { putBoolean(KEY_FEED_HUB_MODE, value) }
+
+	var exploreHomeSource: String?
+		get() = prefs.getString(KEY_EXPLORE_HOME_SOURCE, null)?.takeIf { it.isNotBlank() }
+		set(value) = prefs.edit {
+			if (value.isNullOrBlank()) remove(KEY_EXPLORE_HOME_SOURCE)
+			else putString(KEY_EXPLORE_HOME_SOURCE, value)
+		}
+
+	var readerShaderMode: String
+		get() = prefs.getString(KEY_READER_SHADER_MODE, null)
+			?: if (isReaderUpscaleEnabled) "ANIME4K" else "OFF"
+		set(value) = prefs.edit {
+			putString(KEY_READER_SHADER_MODE, value)
+			putBoolean(KEY_READER_UPSCALE, value != "OFF" || isReaderDescreenEnabled || isReaderInkLevelsEnabled)
+		}
+
+	var isReaderDescreenEnabled: Boolean
+		get() = prefs.getBoolean(KEY_READER_SHADER_DESCREEN, false)
+		set(value) = prefs.edit {
+			putBoolean(KEY_READER_SHADER_DESCREEN, value)
+			putBoolean(KEY_READER_UPSCALE, value || readerShaderMode != "OFF" || isReaderInkLevelsEnabled)
+		}
+
+	var isReaderInkLevelsEnabled: Boolean
+		get() = prefs.getBoolean(KEY_READER_SHADER_INK_LEVELS, false)
+		set(value) = prefs.edit {
+			putBoolean(KEY_READER_SHADER_INK_LEVELS, value)
+			putBoolean(KEY_READER_UPSCALE, value || readerShaderMode != "OFF" || isReaderDescreenEnabled)
+		}
+
+	var readerShaderStrength: Float
+		get() = prefs.getFloat(KEY_READER_SHADER_STRENGTH, 0.75f).coerceIn(0.3f, 1.0f)
+		set(value) = prefs.edit { putFloat(KEY_READER_SHADER_STRENGTH, value.coerceIn(0.3f, 1.0f)) }
+
 	fun getMangaListBadges(): Int {
 		val raw = prefs.getStringSet(KEY_MANGA_LIST_BADGES, mangaListBadgesDefault).orEmpty()
 		var result = 0
@@ -1642,6 +1687,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_SHORTCUTS = "dynamic_shortcuts"
 		const val KEY_READER_OPTIMIZE = "reader_optimize"
 		const val KEY_READER_UPSCALE = "reader_upscale"
+		const val KEY_READER_SHADER_MODE = "reader_shader_mode"
+		const val KEY_READER_SHADER_DESCREEN = "reader_shader_descreen"
+		const val KEY_READER_SHADER_INK_LEVELS = "reader_shader_ink_levels"
+		const val KEY_READER_SHADER_STRENGTH = "reader_shader_strength"
+		const val KEY_FEED_HUB_MODE = "feed_hub_mode"
+		const val KEY_EXPLORE_HOME_SOURCE = "explore_home_source"
 		const val KEY_LOCAL_LIST_ORDER = "local_order"
 		const val KEY_HISTORY_ORDER = "history_order"
 		const val KEY_FAVORITES_ORDER = "fav_order"

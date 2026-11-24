@@ -55,8 +55,11 @@ import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
 import org.koitharu.kotatsu.reader.domain.ChaptersLoader
 import org.koitharu.kotatsu.reader.domain.DetectReaderModeUseCase
 import org.koitharu.kotatsu.reader.domain.PageLoader
+import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
+import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.ui.ReaderState
 import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
+import org.koitharu.kotatsu.stats.domain.StatsCollector
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
 import java.io.File
@@ -112,6 +115,7 @@ data class ReaderUiState(
 	val keepScreenOn: Boolean = true,
 	val volumeButtonsEnabled: Boolean = false,
 	val is32BitColors: Boolean = false,
+	val shaderConfig: ReaderShaderConfig = ReaderShaderConfig(),
 	val epubTheme: String = "system",
 	val epubFontSize: Int = 100,
 	val epubLineHeight: Int = 160,
@@ -136,6 +140,7 @@ class ReaderViewModel @Inject constructor(
 	private val pageLoader: PageLoader,
 	private val detectReaderModeUseCase: DetectReaderModeUseCase,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
+	private val statsCollector: StatsCollector,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
@@ -151,6 +156,12 @@ class ReaderViewModel @Inject constructor(
 			keepScreenOn = settings.isReaderKeepScreenOn,
 			volumeButtonsEnabled = settings.isReaderVolumeButtonsEnabled,
 			is32BitColors = settings.is32BitColorsEnabled,
+			shaderConfig = ReaderShaderConfig(
+				preset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
+				descreen = settings.isReaderDescreenEnabled,
+				inkLevels = settings.isReaderInkLevelsEnabled,
+				strength = settings.readerShaderStrength,
+			),
 			epubTheme = settings.epubTheme,
 			epubFontSize = settings.epubFontSize,
 			epubLineHeight = settings.epubLineHeight,
@@ -279,6 +290,13 @@ class ReaderViewModel @Inject constructor(
 			scroll = 0,
 			inChapterFraction = if (chapterPages.isNotEmpty()) (inChapterIdx + 1f) / chapterPages.size else 0f,
 		)
+		statsCollector.onMangaPageChanged(
+			mangaId = details.id,
+			chapterId = page.chapterId,
+			pageIndex = inChapterIdx,
+			totalPages = chapterPages.size,
+			isIncognito = effectiveIncognito || isPeek,
+		)
 	}
 
 	fun jumpToMangaPage(globalIndex: Int) {
@@ -301,6 +319,52 @@ class ReaderViewModel @Inject constructor(
 			scroll = latestScrollOffset,
 			inChapterFraction = fraction,
 		)
+		activeDetails?.let { details ->
+			statsCollector.onNovelProgressChanged(
+				mangaId = details.id,
+				chapterId = chapter.id,
+				blockIndex = firstBlockIndex,
+				totalBlocks = total,
+				isIncognito = effectiveIncognito || isPeek,
+			)
+		}
+	}
+
+	fun setShaderPreset(preset: ReaderShaderPreset) {
+		settings.readerShaderMode = preset.key
+		_uiState.update { it.copy(shaderConfig = it.shaderConfig.copy(preset = preset)) }
+	}
+
+	fun setShaderDescreen(enabled: Boolean) {
+		settings.isReaderDescreenEnabled = enabled
+		_uiState.update { it.copy(shaderConfig = it.shaderConfig.copy(descreen = enabled)) }
+	}
+
+	fun setShaderInkLevels(enabled: Boolean) {
+		settings.isReaderInkLevelsEnabled = enabled
+		_uiState.update { it.copy(shaderConfig = it.shaderConfig.copy(inkLevels = enabled)) }
+	}
+
+	fun setShaderStrength(strength: Float) {
+		val clamped = strength.coerceIn(0.3f, 1.0f)
+		settings.readerShaderStrength = clamped
+		_uiState.update { it.copy(shaderConfig = it.shaderConfig.copy(strength = clamped)) }
+	}
+
+	fun onPauseReading() {
+		autosaveJob?.cancel()
+		val mangaId = activeDetails?.id
+		viewModelScope.launch(Dispatchers.IO + NonCancellable) {
+			persistProgressNow()
+			if (mangaId != null) {
+				statsCollector.flushSessionNow(mangaId)
+			}
+		}
+	}
+
+	override fun onCleared() {
+		activeDetails?.id?.let { statsCollector.onPauseOrClose(it) }
+		super.onCleared()
 	}
 
 	fun jumpToNovelBlock(blockIndex: Int) {
@@ -394,6 +458,12 @@ class ReaderViewModel @Inject constructor(
 		}
 
 	fun flushProgress() {
+		viewModelScope.launch(Dispatchers.IO + NonCancellable) {
+			persistProgressNow()
+		}
+	}
+
+	private suspend fun persistProgressNow() {
 		val state = _uiState.value
 		val manga = activeDetails?.sourceManga ?: state.manga ?: return
 		val chapterId = state.currentChapterId
@@ -406,17 +476,15 @@ class ReaderViewModel @Inject constructor(
 			if (chPages.isNotEmpty()) (latestChapterPageIndex + 1f) / chPages.size else 0f
 		}
 		val percent = computeOverallPercent(chapterId, fraction)
-		viewModelScope.launch(Dispatchers.IO + NonCancellable) {
-			runCatching {
-				historyRepository.addOrUpdate(
-					manga = manga,
-					chapterId = chapterId,
-					page = latestChapterPageIndex,
-					scroll = latestScrollOffset,
-					percent = percent,
-					force = false,
-				)
-			}
+		runCatching {
+			historyRepository.addOrUpdate(
+				manga = manga,
+				chapterId = chapterId,
+				page = latestChapterPageIndex,
+				scroll = latestScrollOffset,
+				percent = percent,
+				force = false,
+			)
 		}
 	}
 

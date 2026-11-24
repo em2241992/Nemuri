@@ -1,33 +1,42 @@
 package org.nemuri.app.ui.feed
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.MarkEmailRead
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koitharu.kotatsu.core.model.MangaHistory
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.MangaCoverImage
@@ -59,6 +69,9 @@ fun FeedScreen(
 	onOpenDetails: (Manga) -> Unit,
 	onOpenChapter: (Manga, Long) -> Unit,
 	onOpenSettings: () -> Unit,
+	onResumeReading: (Manga, MangaHistory) -> Unit = { manga, history ->
+		onOpenChapter(manga, history.chapterId)
+	},
 	viewModel: FeedViewModel = viewModel(),
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -68,7 +81,7 @@ fun FeedScreen(
 		NemuriTopSearchHeader(
 			query = uiState.query,
 			onQueryChange = viewModel::setQuery,
-			placeholder = "Search updates feed…",
+			placeholder = if (uiState.isHubMode) "Search hub, library & updates…" else "Search updates feed…",
 			onSettingsClick = onOpenSettings,
 		)
 
@@ -76,19 +89,53 @@ fun FeedScreen(
 			modifier = Modifier
 				.fillMaxWidth()
 				.padding(horizontal = 14.dp, vertical = 4.dp),
-			horizontalArrangement = Arrangement.spacedBy(8.dp),
+			horizontalArrangement = Arrangement.spacedBy(6.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			FeedFilterPill(
-				label = "All",
-				selected = !uiState.unreadOnly,
-				onClick = { viewModel.setUnreadOnly(false) },
-			)
-			FeedFilterPill(
-				label = if (uiState.unreadCount > 0) "Unread (${uiState.unreadCount})" else "Unread",
-				selected = uiState.unreadOnly,
-				onClick = { viewModel.setUnreadOnly(true) },
-			)
+			// 1-tap Hub <-> Classic mode switch
+			Surface(
+				color = NemuriTheme.colors.surfaceElevated,
+				shape = RoundedCornerShape(999.dp),
+				modifier = Modifier
+					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(999.dp))
+					.clip(RoundedCornerShape(999.dp))
+					.clickable { viewModel.setHubMode(!uiState.isHubMode) },
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(5.dp),
+				) {
+					Icon(
+						imageVector = if (uiState.isHubMode) {
+							Icons.Default.ViewAgenda
+						} else {
+							Icons.AutoMirrored.Filled.FormatListBulleted
+						},
+						contentDescription = null,
+						tint = NemuriTheme.colors.cyan,
+						modifier = Modifier.size(14.dp),
+					)
+					Text(
+						text = if (uiState.isHubMode) "Hub" else "Classic",
+						style = MaterialTheme.typography.labelMedium,
+						color = NemuriTheme.colors.cyan,
+					)
+				}
+			}
+
+			if (!uiState.isHubMode) {
+				FeedFilterPill(
+					label = "All",
+					selected = !uiState.unreadOnly,
+					onClick = { viewModel.setUnreadOnly(false) },
+				)
+				FeedFilterPill(
+					label = if (uiState.unreadCount > 0) "Unread (${uiState.unreadCount})" else "Unread",
+					selected = uiState.unreadOnly,
+					onClick = { viewModel.setUnreadOnly(true) },
+				)
+			}
 
 			Spacer(modifier = Modifier.weight(1f))
 
@@ -106,7 +153,7 @@ fun FeedScreen(
 				}
 			}
 
-			if (uiState.totalCount > 0) {
+			if (!uiState.isHubMode && uiState.totalCount > 0) {
 				IconButton(
 					onClick = { showClearDialog = true },
 					modifier = Modifier.size(34.dp),
@@ -167,7 +214,125 @@ fun FeedScreen(
 
 		when {
 			!uiState.isLoaded -> {
-				NemuriLoadingState(message = "Loading updates feed…")
+				NemuriLoadingState(message = "Loading reading hub…")
+			}
+
+			uiState.isHubMode -> {
+				val hubEmpty = uiState.continueReading.isEmpty() &&
+					uiState.hubUpdates.isEmpty() &&
+					uiState.recentlyAdded.isEmpty()
+
+				if (hubEmpty) {
+					NemuriEmptyState(
+						icon = Icons.Default.DynamicFeed,
+						title = if (uiState.query.isNotBlank()) "No hub matches" else "Your Feed Hub is ready",
+						subtitle = if (uiState.query.isNotBlank()) {
+							"No history, updates, or library titles match \"${uiState.query}\"."
+						} else {
+							"Titles you read, add to your library, or update will appear here automatically."
+						},
+						actionLabel = if (!uiState.isTrackerRunning && uiState.query.isBlank()) "Check Updates Now" else null,
+						onAction = if (!uiState.isTrackerRunning && uiState.query.isBlank()) viewModel::checkForUpdatesNow else null,
+					)
+				} else {
+					LazyColumn(
+						modifier = Modifier.fillMaxSize(),
+						contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
+						verticalArrangement = Arrangement.spacedBy(18.dp),
+					) {
+						if (uiState.continueReading.isNotEmpty()) {
+							item(key = "hub_continue_header") {
+								HubSectionHeader(
+									title = "CONTINUE READING",
+									subtitle = "Tap cover to resume where you left off",
+								)
+							}
+							item(key = "hub_continue_row") {
+								LazyRow(
+									contentPadding = PaddingValues(horizontal = 14.dp),
+									horizontalArrangement = Arrangement.spacedBy(10.dp),
+								) {
+									items(uiState.continueReading, key = { "cont:${it.manga.id}" }) { item ->
+										ContinueReadingCard(
+											item = item,
+											onResume = {
+												MangaTransferCache.put(item.manga)
+												onResumeReading(item.manga, item.history)
+											},
+											onOpenDetails = {
+												MangaTransferCache.put(item.manga)
+												onOpenDetails(item.manga)
+											},
+										)
+									}
+								}
+							}
+						}
+
+						if (uiState.hubUpdates.isNotEmpty()) {
+							item(key = "hub_updates_header") {
+								HubSectionHeader(
+									title = if (uiState.unreadCount > 0) "UPDATES (${uiState.unreadCount} NEW)" else "RECENT UPDATES",
+									actionLabel = "Classic View →",
+									onAction = { viewModel.setHubMode(false) },
+								)
+							}
+							items(uiState.hubUpdates, key = { "hub_upd:${it.logId}" }) { entry ->
+								Box(modifier = Modifier.padding(horizontal = 14.dp)) {
+									FeedEntryCard(
+										entry = entry,
+										onOpenDetails = {
+											MangaTransferCache.put(entry.logItem.manga)
+											onOpenDetails(entry.logItem.manga)
+										},
+										onOpenLatestChapter = {
+											val chapterId = entry.firstChapterId
+											MangaTransferCache.put(entry.logItem.manga)
+											if (chapterId != null) {
+												onOpenChapter(entry.logItem.manga, chapterId)
+											} else {
+												onOpenDetails(entry.logItem.manga)
+											}
+										},
+										onDownload = { viewModel.downloadUpdates(entry) },
+										onMarkRead = {
+											if (entry.logItem.isNew) {
+												viewModel.markMangaRead(entry.logItem.manga.id)
+											} else {
+												viewModel.removeLogEntry(entry.logId)
+											}
+										},
+									)
+								}
+							}
+						}
+
+						if (uiState.recentlyAdded.isNotEmpty()) {
+							item(key = "hub_recent_header") {
+								HubSectionHeader(
+									title = "RECENTLY ADDED",
+									subtitle = "Latest titles saved to your library",
+								)
+							}
+							item(key = "hub_recent_row") {
+								LazyRow(
+									contentPadding = PaddingValues(horizontal = 14.dp),
+									horizontalArrangement = Arrangement.spacedBy(10.dp),
+								) {
+									items(uiState.recentlyAdded, key = { "rec:${it.id}" }) { manga ->
+										RecentLibraryCard(
+											manga = manga,
+											onClick = {
+												MangaTransferCache.put(manga)
+												onOpenDetails(manga)
+											},
+										)
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 
 			uiState.totalCount == 0 -> {
@@ -270,6 +435,165 @@ fun FeedScreen(
 					Text("Cancel", color = NemuriTheme.colors.textSecondary)
 				}
 			},
+		)
+	}
+}
+
+@Composable
+private fun HubSectionHeader(
+	title: String,
+	subtitle: String? = null,
+	actionLabel: String? = null,
+	onAction: (() -> Unit)? = null,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 14.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.SpaceBetween,
+	) {
+		Column(modifier = Modifier.weight(1f)) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.labelSmall,
+				fontWeight = FontWeight.Bold,
+				color = NemuriTheme.colors.cyan,
+			)
+			if (!subtitle.isNullOrBlank()) {
+				Text(
+					text = subtitle,
+					style = MaterialTheme.typography.bodySmall,
+					color = NemuriTheme.colors.textDim,
+				)
+			}
+		}
+		if (!actionLabel.isNullOrBlank() && onAction != null) {
+			Text(
+				text = actionLabel,
+				style = MaterialTheme.typography.labelMedium,
+				color = NemuriTheme.colors.cyan,
+				modifier = Modifier
+					.clip(RoundedCornerShape(8.dp))
+					.clickable(onClick = onAction)
+					.padding(horizontal = 6.dp, vertical = 4.dp),
+			)
+		}
+	}
+}
+
+@Composable
+private fun ContinueReadingCard(
+	item: ContinueReadingItem,
+	onResume: () -> Unit,
+	onOpenDetails: () -> Unit,
+) {
+	Surface(
+		color = NemuriTheme.colors.card,
+		shape = RoundedCornerShape(14.dp),
+		modifier = Modifier
+			.width(126.dp)
+			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
+			.clip(RoundedCornerShape(14.dp))
+			.clickable(onClick = onResume),
+	) {
+		Column {
+			Box(
+				modifier = Modifier
+					.fillMaxWidth()
+					.aspectRatio(0.72f),
+			) {
+				MangaCoverImage(
+					manga = item.manga,
+					coverUrl = item.manga.coverUrl,
+					modifier = Modifier.fillMaxSize(),
+				)
+				Surface(
+					color = NemuriTheme.colors.dock.copy(alpha = 0.88f),
+					shape = RoundedCornerShape(999.dp),
+					modifier = Modifier
+						.align(Alignment.BottomEnd)
+						.padding(6.dp),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(3.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.PlayArrow,
+							contentDescription = "Resume",
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(12.dp),
+						)
+						Text(
+							text = item.progressPercentLabel,
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textPrimary,
+						)
+					}
+				}
+			}
+			LinearProgressIndicator(
+				progress = { item.history.percent.coerceIn(0f, 1f) },
+				color = NemuriTheme.colors.cyan,
+				trackColor = NemuriTheme.colors.surfaceElevated,
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(3.dp),
+			)
+			Column(
+				modifier = Modifier
+					.clickable(onClick = onOpenDetails)
+					.padding(horizontal = 8.dp, vertical = 7.dp),
+				verticalArrangement = Arrangement.spacedBy(2.dp),
+			) {
+				Text(
+					text = item.manga.title,
+					style = MaterialTheme.typography.labelMedium,
+					color = NemuriTheme.colors.textPrimary,
+					maxLines = 2,
+					overflow = TextOverflow.Ellipsis,
+				)
+				Text(
+					text = item.sourceTitle,
+					style = MaterialTheme.typography.labelSmall,
+					color = NemuriTheme.colors.textDim,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun RecentLibraryCard(
+	manga: Manga,
+	onClick: () -> Unit,
+) {
+	Column(
+		modifier = Modifier
+			.width(108.dp)
+			.clip(RoundedCornerShape(12.dp))
+			.clickable(onClick = onClick),
+		verticalArrangement = Arrangement.spacedBy(5.dp),
+	) {
+		MangaCoverImage(
+			manga = manga,
+			coverUrl = manga.coverUrl,
+			modifier = Modifier
+				.fillMaxWidth()
+				.aspectRatio(0.7f)
+				.clip(RoundedCornerShape(12.dp))
+				.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
+		)
+		Text(
+			text = manga.title,
+			style = MaterialTheme.typography.labelMedium,
+			color = NemuriTheme.colors.textPrimary,
+			maxLines = 2,
+			overflow = TextOverflow.Ellipsis,
 		)
 	}
 }
