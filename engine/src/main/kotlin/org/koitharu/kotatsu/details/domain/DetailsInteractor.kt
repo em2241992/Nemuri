@@ -1,11 +1,15 @@
 package org.koitharu.kotatsu.details.domain
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import org.koitharu.kotatsu.core.model.FavouriteCategory
 import org.koitharu.kotatsu.core.model.isNsfw
 import org.koitharu.kotatsu.core.prefs.AppSettings
@@ -21,6 +25,7 @@ import org.koitharu.kotatsu.scrobbling.common.domain.Scrobbler
 import org.koitharu.kotatsu.scrobbling.common.domain.model.ScrobblingInfo
 import org.koitharu.kotatsu.tracker.domain.TrackingRepository
 import javax.inject.Inject
+import javax.inject.Provider
 
 /* TODO: remove */
 class DetailsInteractor @Inject constructor(
@@ -28,7 +33,7 @@ class DetailsInteractor @Inject constructor(
 	private val localMangaRepository: LocalMangaRepository,
 	private val trackingRepository: TrackingRepository,
 	private val settings: AppSettings,
-	private val scrobblers: Set<@JvmSuppressWildcards Scrobbler>,
+	private val scrobblersProvider: Provider<Set<@JvmSuppressWildcards Scrobbler>>,
 ) {
 
 	fun observeFavourite(mangaId: Long): Flow<Set<FavouriteCategory>> {
@@ -46,13 +51,15 @@ class DetailsInteractor @Inject constructor(
 			}
 	}
 
-	fun observeScrobblingInfo(mangaId: Long): Flow<List<ScrobblingInfo>> {
-		return combine(
-			scrobblers.map { it.observeScrobblingInfo(mangaId) },
-		) { scrobblingInfo ->
-			scrobblingInfo.filterNotNull()
-		}
-	}
+	fun observeScrobblingInfo(mangaId: Long): Flow<List<ScrobblingInfo>> = flow {
+		emitAll(
+			combine(
+				scrobblersProvider.get().map { it.observeScrobblingInfo(mangaId) },
+			) { scrobblingInfo ->
+				scrobblingInfo.filterNotNull()
+			},
+		)
+	}.flowOn(Dispatchers.IO)
 
 	fun observeIncognitoMode(mangaFlow: Flow<Manga?>): Flow<TriStateOption> {
 		return mangaFlow

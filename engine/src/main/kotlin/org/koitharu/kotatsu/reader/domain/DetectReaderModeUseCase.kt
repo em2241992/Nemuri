@@ -29,13 +29,14 @@ import org.koitharu.kotatsu.reader.ui.ReaderState
 import java.io.InputStream
 import java.util.zip.ZipFile
 import javax.inject.Inject
+import javax.inject.Provider
 import kotlin.math.roundToInt
 
 class DetectReaderModeUseCase @Inject constructor(
 	private val dataRepository: MangaDataRepository,
 	private val settings: AppSettings,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
-	@MangaHttpClient private val okHttpClient: OkHttpClient,
+	@MangaHttpClient private val okHttpClientProvider: Provider<OkHttpClient>,
 	private val imageProxyInterceptor: ImageProxyInterceptor,
 ) {
 
@@ -108,7 +109,7 @@ class DetectReaderModeUseCase @Inject constructor(
 				val response = repository.getImageStream(url, page)
 					?: imageProxyInterceptor.interceptPageRequest(
 						PageLoader.createPageRequest(url, page.source),
-						okHttpClient,
+						okHttpClientProvider.get(),
 					)
 				response.use {
 					runInterruptible(Dispatchers.IO) {

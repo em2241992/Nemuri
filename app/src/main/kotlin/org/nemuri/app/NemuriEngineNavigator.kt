@@ -15,6 +15,7 @@ import org.koitharu.kotatsu.parsers.model.SortOrder
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.reader.ReaderActivity
 
 class NemuriEngineNavigator : EngineNavigator {
 
@@ -43,7 +44,7 @@ class NemuriEngineNavigator : EngineNavigator {
 	): Intent = baseIntent(context, "list")
 		.putExtra(AppRouter.KEY_SOURCE, source.name)
 
-	override fun readerBaseIntent(context: Context): Intent = baseIntent(context, "reader")
+	override fun readerBaseIntent(context: Context): Intent = Intent(context, ReaderActivity::class.java)
 
 	override fun downloadsIntent(context: Context): Intent = baseIntent(context, "downloads")
 

@@ -73,6 +73,7 @@ import java.io.File
 import java.io.IOException
 import java.util.zip.ZipFile
 import javax.inject.Inject
+import javax.inject.Provider
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 
@@ -80,7 +81,7 @@ import kotlin.coroutines.CoroutineContext
 class PageLoader @Inject constructor(
 	@LocalizedAppContext private val context: Context,
 	lifecycle: ActivityRetainedLifecycle,
-	@MangaHttpClient private val okHttp: OkHttpClient,
+	@MangaHttpClient private val okHttpProvider: Provider<OkHttpClient>,
 	@PageCache private val cache: LocalStorageCache,
 	private val settings: AppSettings,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
@@ -400,7 +401,7 @@ class PageLoader @Inject constructor(
 						// discard its request can regenerate signatures or other stateful headers.
 						val imageHeaders = repo.getImageRequestHeaders(pageUrl, page)
 						val request = createPageRequest(pageUrl, page.source, imageHeaders)
-						imageProxyInterceptor.interceptPageRequest(request, okHttp)
+						imageProxyInterceptor.interceptPageRequest(request, okHttpProvider.get())
 					}
 				response.ensureSuccess().use { r ->
 					r.body.withProgress(progress).use {
