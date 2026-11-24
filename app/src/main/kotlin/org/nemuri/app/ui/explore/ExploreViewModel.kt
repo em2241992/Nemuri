@@ -129,9 +129,8 @@ class ExploreViewModel @Inject constructor(
 	private val visibilityFilterFlow = MutableStateFlow(LibraryVisibilityFilter.ALL)
 	private val homeHubRawFlow = MutableStateFlow(HomeHubRawState())
 
+	@Volatile
 	private var loadedHomeSourceName: String? = null
-		@Volatile get
-		@Volatile set
 	private var homeHubJob: Job? = null
 
 	private val sourcesMetadataFlow = combine(
