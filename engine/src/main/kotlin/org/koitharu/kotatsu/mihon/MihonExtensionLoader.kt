@@ -240,7 +240,7 @@ class MihonExtensionLoader @Inject constructor(
 			false
 		}
 
-		internal fun isPackageAnExtensionStatic(pkgInfo: PackageInfo): Boolean {
+		fun isPackageAnExtensionStatic(pkgInfo: PackageInfo): Boolean {
 			val appInfo = pkgInfo.applicationInfo ?: return false
 			val hasFeature = pkgInfo.reqFeatures?.any { it.name in EXTENSION_FEATURES } == true
 			return hasFeature || readSourceClassNames(appInfo.metaData) != null
