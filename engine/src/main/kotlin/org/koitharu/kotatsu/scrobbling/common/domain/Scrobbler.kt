@@ -57,6 +57,12 @@ abstract class Scrobbler(
 	val isEnabled: Boolean
 		get() = repository.isAuthorized
 
+	val oauthUrl: String
+		get() = repository.oauthUrl
+
+	val cachedUser: ScrobblerUser?
+		get() = repository.cachedUser
+
 	suspend fun authorize(authCode: String): ScrobblerUser {
 		repository.authorize(authCode)
 		return repository.loadUser()

@@ -7,27 +7,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -69,6 +54,7 @@ import org.nemuri.app.ui.feed.FeedScreen
 import org.nemuri.app.ui.history.HistoryScreen
 import org.nemuri.app.ui.library.LibraryScreen
 import org.nemuri.app.ui.local.LocalStorageScreen
+import org.nemuri.app.ui.settings.SettingsRouterScreen
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @AndroidEntryPoint
@@ -311,9 +297,14 @@ private fun NemuriAppRoot(
 						NemuriLoadingState(message = "Opening reader…")
 					}
 
-					is AppDestination.Settings -> SubRouteScaffold(
-						title = destination.section.title,
-						subtitle = "Phase 4 Settings & Backup/Sync hierarchy.",
+					is AppDestination.Settings -> SettingsRouterScreen(
+						section = destination.section,
+						onNavigateSection = { targetSection ->
+							navController.navigate(AppDestination.Settings(targetSection))
+						},
+						onOpenExtensionsCatalog = {
+							navController.navigate(AppDestination.ExtensionsCatalog())
+						},
 						onBack = { navController.popBackStack() },
 					)
 				}
@@ -365,70 +356,5 @@ private fun EnhancePlaceholderScreen(
 			title = "Enhance Hub — Reserved for Phase 5",
 			subtitle = "Deduplication, Neko multi-source merge, Repair, Upscaler, and AI Recaps will be planned after Phases 1–4.",
 		)
-	}
-}
-
-@Composable
-private fun SubRouteScaffold(
-	title: String,
-	subtitle: String,
-	onBack: () -> Unit,
-) {
-	Column(
-		modifier = Modifier
-			.fillMaxSize()
-			.background(NemuriTheme.colors.background)
-			.statusBarsPadding()
-			.navigationBarsPadding(),
-	) {
-		Row(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(horizontal = 8.dp, vertical = 8.dp),
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			IconButton(onClick = onBack) {
-				Icon(
-					imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-					contentDescription = "Back",
-					tint = NemuriTheme.colors.textPrimary,
-				)
-			}
-			Text(
-				text = title,
-				style = MaterialTheme.typography.titleLarge,
-				color = NemuriTheme.colors.textPrimary,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-		}
-		HorizontalDivider(color = NemuriTheme.colors.border)
-		Box(
-			modifier = Modifier
-				.fillMaxSize()
-				.padding(24.dp),
-			contentAlignment = Alignment.Center,
-		) {
-			Column(
-				horizontalAlignment = Alignment.CenterHorizontally,
-				verticalArrangement = Arrangement.spacedBy(12.dp),
-			) {
-				Text(
-					text = subtitle,
-					style = MaterialTheme.typography.bodyMedium,
-					color = NemuriTheme.colors.textMuted,
-				)
-				Button(
-					onClick = onBack,
-					colors = ButtonDefaults.buttonColors(
-						containerColor = NemuriTheme.colors.cyan,
-						contentColor = NemuriTheme.colors.onCyan,
-					),
-					shape = RoundedCornerShape(12.dp),
-				) {
-					Text("Go Back")
-				}
-			}
-		}
 	}
 }

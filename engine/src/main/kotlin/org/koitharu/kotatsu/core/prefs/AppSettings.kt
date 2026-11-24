@@ -1284,6 +1284,138 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			return prefs.getInt(KEY_BACKUP_PERIODICAL_COUNT, 10).coerceAtLeast(1)
 		}
 
+	val periodicalBackupFrequencyIndex: Int
+		get() = prefs.getString(KEY_BACKUP_PERIODICAL_FREQ, "3")?.toIntOrNull()?.coerceIn(0, 5) ?: 3
+
+	val isPeriodicalBackupTrimEnabled: Boolean
+		get() = prefs.getBoolean(KEY_BACKUP_PERIODICAL_TRIM, true)
+
+	val periodicalBackupKeepCount: Int
+		get() = prefs.getInt(KEY_BACKUP_PERIODICAL_COUNT, 10).coerceAtLeast(1)
+
+	fun setPeriodicalBackupEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_BACKUP_PERIODICAL_ENABLED, enabled) }
+	}
+
+	fun setPeriodicalBackupFrequencyIndex(index: Int) {
+		prefs.edit { putString(KEY_BACKUP_PERIODICAL_FREQ, index.coerceIn(0, 5).toString()) }
+	}
+
+	fun setPeriodicalBackupTrim(enabled: Boolean, maxCount: Int) {
+		prefs.edit {
+			putBoolean(KEY_BACKUP_PERIODICAL_TRIM, enabled)
+			putInt(KEY_BACKUP_PERIODICAL_COUNT, maxCount.coerceIn(1, 50))
+		}
+	}
+
+	fun setDefaultReaderMode(mode: ReaderMode) {
+		prefs.edit { putEnumValue(KEY_READER_MODE, mode) }
+	}
+
+	fun setReaderModeDetectionEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_READER_MODE_DETECT, enabled) }
+	}
+
+	fun setReaderKeepScreenOn(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_READER_SCREEN_ON, enabled) }
+	}
+
+	fun setReaderVolumeButtonsEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_READER_VOLUME_BUTTONS, enabled) }
+	}
+
+	fun set32BitColorsEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_32BIT_COLOR, enabled) }
+	}
+
+	fun setPagesNumbersEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_PAGES_NUMBERS, enabled) }
+	}
+
+	fun setPreferredDownloadFormat(format: DownloadFormat) {
+		prefs.edit { putEnumValue(KEY_DOWNLOADS_FORMAT, format) }
+	}
+
+	fun setAutoLocalChaptersCleanupEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_CHAPTERS_CLEAR_AUTO, enabled) }
+	}
+
+	fun setLocalChaptersCleanupKeep(count: Int) {
+		prefs.edit { putInt(KEY_CHAPTERS_CLEAR_KEEP, count.coerceIn(0, 3)) }
+	}
+
+	fun setMihonUserAgentOverride(value: String?) {
+		prefs.edit { putString(KEY_MIHON_USER_AGENT, value?.trim()?.takeIf { it.isNotEmpty() }) }
+	}
+
+	fun setTrackerEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_TRACKER_ENABLED, enabled) }
+	}
+
+	fun setTrackerWifiOnly(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_TRACKER_WIFI_ONLY, enabled) }
+	}
+
+	fun setTrackerFrequencyFactor(factor: Float) {
+		prefs.edit { putString(KEY_TRACKER_FREQUENCY, factor.toString()) }
+	}
+
+	fun setTrackerNsfwDisabled(disabled: Boolean) {
+		prefs.edit { putBoolean(KEY_TRACKER_NO_NSFW, disabled) }
+	}
+
+	fun setTrackerDownloadStrategy(strategy: TrackerDownloadStrategy) {
+		prefs.edit { putEnumValue(KEY_TRACKER_DOWNLOAD, strategy) }
+	}
+
+	fun setSuggestionsWiFiOnly(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_SUGGESTIONS_WIFI_ONLY, enabled) }
+	}
+
+	fun setSuggestionsExcludeNsfw(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_SUGGESTIONS_EXCLUDE_NSFW, enabled) }
+	}
+
+	fun setSuggestionsExcludeNovels(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_SUGGESTIONS_EXCLUDE_NOVELS, enabled) }
+	}
+
+	fun setScreenshotsPolicy(policy: ScreenshotsPolicy) {
+		prefs.edit { putEnumValue(KEY_SCREENSHOTS_POLICY, policy) }
+	}
+
+	fun setAdBlockEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_ADBLOCK, enabled) }
+	}
+
+	fun setDnsOverHttps(provider: DoHProvider) {
+		prefs.edit { putEnumValue(KEY_DOH, provider) }
+	}
+
+	fun setProxyConfig(
+		type: Proxy.Type,
+		address: String?,
+		port: Int,
+		login: String?,
+		password: String?,
+	) {
+		prefs.edit {
+			putString(KEY_PROXY_TYPE, type.name)
+			putString(KEY_PROXY_ADDRESS, address?.trim().orEmpty())
+			putString(KEY_PROXY_PORT, port.coerceIn(0, 65535).toString())
+			putString(KEY_PROXY_LOGIN, login?.trim().orEmpty())
+			putString(KEY_PROXY_PASSWORD, password.orEmpty())
+		}
+	}
+
+	fun setDiscordRpcEnabled(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_DISCORD_RPC, enabled) }
+	}
+
+	fun setDiscordRpcSkipNsfw(enabled: Boolean) {
+		prefs.edit { putBoolean(KEY_DISCORD_RPC_SKIP_NSFW, enabled) }
+	}
+
 	fun setPagesSaveDir(uri: Uri?) {
 		prefs.edit { putString(KEY_PAGES_SAVE_DIR, uri?.toString()) }
 	}

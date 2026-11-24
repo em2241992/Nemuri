@@ -3,6 +3,8 @@ package org.koitharu.kotatsu.sync
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.work.WorkManager
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import org.koitharu.kotatsu.settings.work.PeriodicWorkScheduler
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,6 +37,24 @@ class SyncFeature @Inject constructor(
 	suspend fun finishSignIn(data: Intent?): Unit = throw UnsupportedOperationException()
 
 	suspend fun onSignedIn() = Unit
+
+	fun statusSnapshot(): SyncStatusSnapshot = SyncStatusSnapshot(isAvailable = false)
+
+	fun observeIsSyncing(): Flow<Boolean> = flowOf(false)
+
+	suspend fun syncNow(): String? = "Unavailable in F-Droid build"
+
+	suspend fun signOut() = Unit
+
+	suspend fun deleteRemoteData(): String? = "Unavailable in F-Droid build"
+
+	suspend fun setIntervalMinutes(minutes: Int) = Unit
+
+	suspend fun setWifiOnly(wifiOnly: Boolean) = Unit
+
+	fun setEmailHidden(hidden: Boolean) = Unit
+
+	fun setEnabledContent(keys: Set<String>) = Unit
 
 	companion object {
 

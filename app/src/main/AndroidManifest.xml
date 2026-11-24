@@ -52,6 +52,22 @@
 				<category android:name="android.intent.category.BROWSABLE" />
 				<data android:scheme="lnreader" android:host="repo" android:path="/add" />
 			</intent-filter>
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="kotatsu" android:host="shikimori-auth" />
+				<data android:scheme="kotatsu" android:host="anilist-auth" />
+				<data android:scheme="kotatsu" android:host="mal-auth" />
+				<data android:scheme="kotatsu" android:host="kitsu-auth" />
+				<data android:scheme="kotatsu" android:host="mangabaka-auth" />
+			</intent-filter>
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="org.nemuri.app" />
+			</intent-filter>
 		</activity>
 
 		<activity

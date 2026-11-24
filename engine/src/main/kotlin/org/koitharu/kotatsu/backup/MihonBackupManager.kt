@@ -55,6 +55,7 @@ import org.koitharu.kotatsu.stats.data.StatsEntity
 import org.koitharu.kotatsu.tracker.data.TrackEntity
 import java.util.Locale
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import org.koitharu.kotatsu.R
 
@@ -66,7 +67,7 @@ class MihonBackupManager @Inject constructor(
     private val mihonExtensionManager: MihonExtensionManager,
     private val mihonExtensionLoader: MihonExtensionLoader,
     private val extensionStoreRegistry: ExtensionStoreRegistry,
-    private val scrobblers: Set<@JvmSuppressWildcards Scrobbler>,
+    private val scrobblersProvider: Provider<Set<@JvmSuppressWildcards Scrobbler>>,
 ) {
 
   data class Options(
@@ -440,7 +441,7 @@ class MihonBackupManager @Inject constructor(
                         mangaId = mangaId,
                         targetId = targetId,
                         status = decodeTrackingStatus(tracking.syncId, tracking.status)?.let { status ->
-                            scrobblers.find { it.scrobblerService.id == scrobblerId }?.remoteStatus(status)
+                            scrobblersProvider.get().find { it.scrobblerService.id == scrobblerId }?.remoteStatus(status)
                         },
                         chapter = tracking.lastChapterRead.toInt().coerceAtLeast(0),
                         comment = null,

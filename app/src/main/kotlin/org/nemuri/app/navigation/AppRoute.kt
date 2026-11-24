@@ -1,5 +1,7 @@
 package org.nemuri.app.navigation
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.koitharu.kotatsu.parsers.model.Manga
 import java.util.concurrent.ConcurrentHashMap
 
@@ -54,4 +56,18 @@ object MangaTransferCache {
 	}
 
 	fun get(mangaId: Long): Manga? = cache[mangaId]
+}
+
+object PendingScrobblerAuth {
+
+	private val _pending = MutableStateFlow<Pair<Int, String>?>(null)
+	val pending = _pending.asStateFlow()
+
+	fun post(serviceId: Int, authCode: String) {
+		_pending.value = serviceId to authCode
+	}
+
+	fun clear() {
+		_pending.value = null
+	}
 }

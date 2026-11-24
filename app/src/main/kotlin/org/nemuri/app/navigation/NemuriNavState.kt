@@ -69,6 +69,27 @@ class NemuriNavController(initialTab: AppTab = AppTab.LIBRARY) {
 					navigate(AppDestination.ExtensionsCatalog(initialRepoUrl = repoUrl.ifBlank { null }))
 					return
 				}
+
+				scheme == "kotatsu" || scheme == "org.nemuri.app" -> {
+					val targetHostOrPath = host ?: path?.removePrefix("/")
+					val serviceId = when (targetHostOrPath) {
+						"shikimori-auth" -> 1
+						"anilist-auth" -> 2
+						"mal-auth" -> 3
+						"kitsu-auth" -> 4
+						"mangabaka-auth" -> 5
+						"comick-auth" -> 6
+						else -> null
+					}
+					val code = data.getQueryParameter("code")
+					if (serviceId != null && !code.isNullOrBlank()) {
+						PendingScrobblerAuth.post(serviceId, code)
+						if (currentDestination != AppDestination.Settings(SettingsSection.TRACKERS)) {
+							navigate(AppDestination.Settings(SettingsSection.TRACKERS))
+						}
+						return
+					}
+				}
 			}
 		}
 
