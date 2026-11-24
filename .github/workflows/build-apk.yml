@@ -70,10 +70,14 @@ jobs:
             echo "::error::No APK found under app/build/outputs/apk/github/debug"
             exit 1
           fi
-          APK_NAME="Nemuri-v0.1.${{ github.run_number }}-arm64-debug.apk"
+          APK_NAME="Nemuri-v0.1.${{ github.run_number }}-debug.apk"
           cp "$APK_SRC" "$APK_NAME"
           echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
           ls -lh "$APK_NAME"
+          echo "=== Packaged native ABIs ==="
+          unzip -l "$APK_NAME" | awk '/lib\/[^\/]+\//{split($4,a,"/"); print a[2]}' | sort -u || true
+          echo "=== APK Signing Certificate ==="
+          keytool -printcert -jarfile "$APK_NAME" | grep -E 'Owner:|SHA256:' || true
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

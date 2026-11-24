@@ -25,9 +25,6 @@ android {
 		androidResources {
 			generateLocaleConfig = false
 		}
-		ndk {
-			abiFilters 'arm64-v8a'
-		}
 	}
 
 	def ksPath = System.getenv('NEMURI_KEYSTORE_PATH')
@@ -35,6 +32,9 @@ android {
 	def ksAlias = System.getenv('NEMURI_KEY_ALIAS')
 	def ksKeyPass = System.getenv('NEMURI_KEY_PASSWORD')
 	def hasPersistentSigning = ksPath && ksPass && ksAlias && ksKeyPass && file(ksPath).exists()
+	if (ksPath && !hasPersistentSigning) {
+		logger.warn('NEMURI_KEYSTORE_PATH is set, but persistent signing is incomplete; verify KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD secrets.')
+	}
 
 	signingConfigs {
 		if (hasPersistentSigning) {
