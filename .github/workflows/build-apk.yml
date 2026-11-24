@@ -37,7 +37,28 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Decode Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            KS_FILE="$RUNNER_TEMP/nemuri-signing.jks"
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$KS_FILE"
+            if [ ! -s "$KS_FILE" ]; then
+              echo "::error::Decoded keystore file is empty."
+              exit 1
+            fi
+            echo "NEMURI_KEYSTORE_PATH=$KS_FILE" >> "$GITHUB_ENV"
+            echo "Using persistent signing keystore from GitHub Secrets"
+          else
+            echo "::warning::KEYSTORE_BASE64 secret is not set; falling back to ephemeral debug keystore (in-place updates will not work until secrets are configured)."
+          fi
+
       - name: Build GitHub Debug APK
+        env:
+          NEMURI_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          NEMURI_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          NEMURI_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew :app:assembleGithubDebug --no-daemon --stacktrace
 
       - name: Package Ready APK

@@ -16,24 +16,54 @@ android {
 	namespace = 'org.nemuri.app'
 
 	defaultConfig {
+		def ciRunNumber = System.getenv('GITHUB_RUN_NUMBER')?.toInteger() ?: 1
 		applicationId = 'org.nemuri.app'
 		minSdk = 26
 		targetSdk = 37
-		versionCode = 1
-		versionName = '0.1.0-alpha1'
+		versionCode = ciRunNumber
+		versionName = "0.1.${ciRunNumber}-beta"
 		androidResources {
 			generateLocaleConfig = false
+		}
+	}
+
+	def ksPath = System.getenv('NEMURI_KEYSTORE_PATH')
+	def ksPass = System.getenv('NEMURI_KEYSTORE_PASSWORD')
+	def ksAlias = System.getenv('NEMURI_KEY_ALIAS')
+	def ksKeyPass = System.getenv('NEMURI_KEY_PASSWORD')
+	def hasPersistentSigning = ksPath && ksPass && ksAlias && ksKeyPass && file(ksPath).exists()
+
+	signingConfigs {
+		if (hasPersistentSigning) {
+			debug {
+				storeFile = file(ksPath)
+				storePassword = ksPass
+				keyAlias = ksAlias
+				keyPassword = ksKeyPass
+			}
+			release {
+				storeFile = file(ksPath)
+				storePassword = ksPass
+				keyAlias = ksAlias
+				keyPassword = ksKeyPass
+			}
 		}
 	}
 
 	buildTypes {
 		debug {
 			applicationIdSuffix = '.debug'
+			if (hasPersistentSigning) {
+				signingConfig = signingConfigs.debug
+			}
 		}
 		release {
 			minifyEnabled = true
 			shrinkResources = true
 			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+			if (hasPersistentSigning) {
+				signingConfig = signingConfigs.release
+			}
 		}
 		preview {
 			initWith release
