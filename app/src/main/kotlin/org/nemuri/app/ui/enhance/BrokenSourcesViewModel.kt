@@ -190,7 +190,7 @@ class BrokenSourcesViewModel @Inject constructor(
 		stepFlow.value = BrokenWizardStep.REVIEW
 		scanJob?.cancel()
 		scanJob = viewModelScope.launch(Dispatchers.IO) {
-			val entities = databaseProvider.get().getMangaDao().findLibraryMangaBySources(chosenSources).distinctBy { it.id }
+			val entities = databaseProvider.get().getMangaDao().findLibraryMangaBySources(chosenSources).distinctBy { it.manga.id }
 			val total = entities.size
 			proposalsStateFlow.value = ProposalsBundle(isScanning = true, scanDone = 0, scanTotal = total)
 			val autoFix = autoFixUseCaseProvider.get()
