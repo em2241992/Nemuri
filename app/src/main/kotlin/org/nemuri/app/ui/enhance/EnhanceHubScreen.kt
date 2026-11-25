@@ -196,15 +196,15 @@ fun EnhanceHubScreen(
 					EnhanceToolCard(
 						icon = Icons.Default.AutoAwesome,
 						title = "AI Engine & \"Where Was I?\" Recaps",
-						subtitle = "Gemini Nano, Ollama / OpenAI-compatible LAN, or Gemini REST API",
+						subtitle = "Gemini Nano, LiteRT-LM local CPU/GPU fallback, Ollama LAN & Gemini API",
 						badge = uiState.aiModeLabel,
 						badgeTint = NemuriTheme.colors.mergePurple,
 						onClick = onOpenAiSettings,
 					)
 					EnhanceToolCard(
 						icon = Icons.Default.GraphicEq,
-						title = "Universal GPU Reader Shaders",
-						subtitle = "Active preset: ${uiState.activeShaderLabel} (Anime4K, AMD FSR 1.0, Descreen, Ink+)",
+						title = "GPU Shaders & Neural 2x Upscaler",
+						subtitle = "Active: ${uiState.activeShaderLabel} (Anime4K, FSR 1.0, Waifu2x / Real-ESRGAN)",
 						onClick = onOpenReadingSettings,
 					)
 				}
@@ -248,12 +248,12 @@ fun EnhanceHubScreen(
 						)
 						Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 							Text(
-								text = "Upcoming in Phase 5B-2 / 5C",
+								text = "On-Device Safety & Battery Guard",
 								style = MaterialTheme.typography.titleSmall,
 								color = NemuriTheme.colors.textPrimary,
 							)
 							Text(
-								text = "Opt-in on-device CPU/GPU GGUF/LiteRT-LM fallback models and tiled LiteRT NPU/GPU neural page upscaler.",
+								text = "API keys stay Keystore-encrypted, local LLM weights auto-unload after 60s idle, and Neural/GPU upscalers pause under Battery Saver.",
 								style = MaterialTheme.typography.bodySmall,
 								color = NemuriTheme.colors.textMuted,
 							)

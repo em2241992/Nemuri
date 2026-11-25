@@ -183,7 +183,7 @@ fun MangaCompactGridCard(
 						),
 					),
 				)
-				.padding(start = 8.dp, end = 8.dp, top = 20.dp, bottom = if (progress > 0f) 10.dp else 8.dp),
+				.padding(start = 11.dp, end = 11.dp, top = 22.dp, bottom = if (progress > 0f) 12.dp else 10.dp),
 		) {
 			Text(
 				text = manga.title,

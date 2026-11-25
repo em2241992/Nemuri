@@ -52,6 +52,7 @@ import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriLoadingState
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.settings.SettingsGroupCard
 import org.nemuri.app.ui.settings.SettingsScaffold
 import org.nemuri.app.ui.settings.SettingsToggleRow
@@ -131,9 +132,10 @@ fun MigrateMangaScreen(
 								horizontalArrangement = Arrangement.SpaceBetween,
 								verticalAlignment = Alignment.CenterVertically,
 							) {
+								val sourceQueryField = rememberSyncedTextField(uiState.sourceQuery, viewModel::setSourceQuery)
 								OutlinedTextField(
-									value = uiState.sourceQuery,
-									onValueChange = viewModel::setSourceQuery,
+									value = sourceQueryField.fieldValue,
+									onValueChange = sourceQueryField::onValueChange,
 									placeholder = { Text("Filter target sources…") },
 									singleLine = true,
 									modifier = Modifier.weight(1f),

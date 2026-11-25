@@ -34,9 +34,9 @@ import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.extensions.install.ExtensionUpdateWorker
 import org.koitharu.kotatsu.extensions.install.ShizukuExtensionInstaller
 import org.koitharu.kotatsu.extensions.runtime.getExternalExtensionLanguageDisplayName
+import org.koitharu.kotatsu.extensions.runtime.normalizeExternalExtensionLangCode
 import org.koitharu.kotatsu.lnreader.LnPluginManager
 import org.koitharu.kotatsu.lnreader.model.LnMangaSource
-import org.koitharu.kotatsu.lnreader.model.langCode
 import org.koitharu.kotatsu.lnreader.model.languageLabel
 import org.koitharu.kotatsu.mihon.MihonExtensionLoader
 import org.koitharu.kotatsu.mihon.MihonExtensionManager
@@ -78,12 +78,13 @@ enum class ExtensionContentFilter(val label: String) {
 
 @Immutable
 data class CatalogExtensionItem(
+	val listKey: String,
 	val packageName: String,
 	val displayName: String,
 	val apkName: String,
 	val versionName: String,
 	val versionCode: Long,
-	val langCode: String?,
+	val langCode: String,
 	val langLabel: String,
 	val isNovel: Boolean,
 	val isLnPlugin: Boolean,
@@ -100,6 +101,7 @@ data class CatalogExtensionItem(
 
 @Immutable
 data class InstalledExtensionItem(
+	val listKey: String,
 	val id: String,
 	val displayName: String,
 	val versionName: String,
@@ -178,6 +180,14 @@ private data class ExtensionSourcesSnapshot(
 	val prefSnapshot: PrefSnapshot,
 )
 
+private data class BaseExtensionsSnapshot(
+	val installedCombined: List<InstalledExtensionItem>,
+	val allCatalogItems: List<CatalogExtensionItem>,
+	val storeSummaries: List<StoreSummaryItem>,
+	val failedExtensions: List<MihonLoadResult.Error>,
+	val isPrivateMode: Boolean,
+)
+
 private data class PrefSnapshot(
 	val privateMode: Boolean,
 	val shizukuEnabled: Boolean,
@@ -243,21 +253,23 @@ class ExtensionsCatalogViewModel @Inject constructor(
 		)
 	}
 
-	private val sourcesSnapshotFlow = combine(
+	private val baseSnapshotFlow = combine(
 		storeManager.states,
 		extensionManager.installedExtensions,
 		extensionManager.failedExtensions,
 		lnPluginManager.sources,
 		prefSnapshotFlow,
 	) { stores, installedMihon, failedMihon, lnSources, prefs ->
-		ExtensionSourcesSnapshot(
-			storeStates = stores,
-			mihonSuccess = installedMihon,
-			mihonFailed = failedMihon,
-			lnSources = lnSources,
-			prefSnapshot = prefs,
+		buildBaseSnapshot(
+			ExtensionSourcesSnapshot(
+				storeStates = stores,
+				mihonSuccess = installedMihon,
+				mihonFailed = failedMihon,
+				lnSources = lnSources,
+				prefSnapshot = prefs,
+			),
 		)
-	}
+	}.flowOn(Dispatchers.IO)
 
 	private val actionStateFlow = combine(
 		filterSelection,
@@ -276,13 +288,13 @@ class ExtensionsCatalogViewModel @Inject constructor(
 	}
 
 	val uiState: StateFlow<ExtensionsCatalogUiState> = combine(
-		sourcesSnapshotFlow,
+		baseSnapshotFlow,
 		actionStateFlow,
 		pendingSystemUninstall,
-	) { sources, actions, pendingUninstall ->
-		buildUiState(sources, actions, pendingUninstall)
+	) { base, actions, pendingUninstall ->
+		buildUiState(base, actions, pendingUninstall)
 	}
-		.flowOn(Dispatchers.IO)
+		.flowOn(Dispatchers.Default)
 		.stateIn(
 			scope = viewModelScope,
 			started = SharingStarted.WhileSubscribed(5_000L),
@@ -294,13 +306,10 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			),
 		)
 
-	private fun buildUiState(
+	private fun buildBaseSnapshot(
 		snapshot: ExtensionSourcesSnapshot,
-		actions: ActionStateSnapshot,
-		pendingUninstall: String?,
-	): ExtensionsCatalogUiState {
+	): BaseExtensionsSnapshot {
 		val prefs = snapshot.prefSnapshot
-		val filters = actions.filters
 		val mode = if (prefs.privateMode) ExtensionInstallMode.SANDBOX else ExtensionInstallMode.SYSTEM
 		val storeRecords = snapshot.storeStates.map { it.store }
 		val storeLabels = extensionStoreDisplayLabels(storeRecords)
@@ -319,13 +328,22 @@ class ExtensionsCatalogViewModel @Inject constructor(
 		}
 
 		// Collect every catalog entry across stores so Updates & Catalog share consistent metadata.
+		val seenStoreEntries = HashSet<String>()
+		val usedCatalogKeys = HashMap<String, Int>()
 		val allCatalogItems = buildList {
 			for (state in snapshot.storeStates) {
 				if (!state.store.enabled) continue
 				val storeLabel = storeLabels[state.store.id] ?: state.store.displayName
 				for (entry in state.catalog) {
 					if (entry.contentWarning > prefs.contentFilter) continue
-					val langCode = entry.lang?.takeIf { it.isNotBlank() }
+					val langCode = normalizeExternalExtensionLangCode(entry.lang)
+					val dedupeSig = "${state.store.id}:${entry.packageName}:${entry.apkName}:${entry.versionCode}:$langCode"
+					if (!seenStoreEntries.add(dedupeSig)) continue
+					val baseKey = "${state.store.id}:${entry.packageName}:${entry.apkName}"
+					val keyCount = usedCatalogKeys[baseKey] ?: 0
+					usedCatalogKeys[baseKey] = keyCount + 1
+					val listKey = if (keyCount == 0) baseKey else "$baseKey#$keyCount"
+
 					val localMihon = if (!entry.isLnPlugin) installedMihonByPkg[entry.packageName] else null
 					val localLn = if (entry.isLnPlugin) installedLnById[entry.packageName] else null
 					val isInstalled = localMihon != null || localLn != null
@@ -342,13 +360,14 @@ class ExtensionsCatalogViewModel @Inject constructor(
 						?: if (!entry.isLnPlugin) repoRepository.resolveIconUrl(state.store.indexUrl, entry.packageName) else null
 					add(
 						CatalogExtensionItem(
+							listKey = listKey,
 							packageName = entry.packageName,
 							displayName = extensionDisplayName(entry.name),
 							apkName = entry.apkName,
 							versionName = entry.versionName,
 							versionCode = entry.versionCode,
 							langCode = langCode,
-							langLabel = langCode?.let(::getExternalExtensionLanguageDisplayName) ?: "Multi",
+							langLabel = getExternalExtensionLanguageDisplayName(langCode),
 							isNovel = entry.isNovelExtension,
 							isLnPlugin = entry.isLnPlugin,
 							contentWarning = entry.contentWarning,
@@ -386,16 +405,22 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			}
 		}
 
+		val usedInstalledKeys = HashMap<String, Int>()
 		val installedCombined = buildList {
 			for (info in localInfos) {
 				val loaded = loadedByPkg[info.pkgName]
 				val catalogueSources = loaded?.catalogueSources.orEmpty()
 				val isNovel = info.pkgName.contains("novelextension.") ||
 					catalogueSources.any { it.isNovelSource }
-				val effectiveLang = loaded?.lang?.takeIf { it.isNotBlank() } ?: info.lang
+				val effectiveLang = normalizeExternalExtensionLangCode(loaded?.lang?.takeIf { it.isNotBlank() } ?: info.lang)
 				val ownerStore = storeManager.owner(mode, info)
+				val baseKey = "apk:${info.pkgName}"
+				val keyCount = usedInstalledKeys[baseKey] ?: 0
+				usedInstalledKeys[baseKey] = keyCount + 1
+				val listKey = if (keyCount == 0) baseKey else "$baseKey#$keyCount"
 				add(
 					InstalledExtensionItem(
+						listKey = listKey,
 						id = info.pkgName,
 						displayName = extensionDisplayName(info.appName),
 						versionName = info.versionName,
@@ -414,18 +439,23 @@ class ExtensionsCatalogViewModel @Inject constructor(
 				)
 			}
 			for (ln in snapshot.lnSources) {
-				val code = ln.plugin.langCode
+				val code = normalizeExternalExtensionLangCode(ln.plugin.lang)
 				val storeLabel = ln.plugin.storeId?.let { id ->
 					storeLabels[id] ?: storeRecords.firstOrNull { it.id == id }?.displayName
 				}
+				val baseKey = "ln:${ln.pluginId}"
+				val keyCount = usedInstalledKeys[baseKey] ?: 0
+				usedInstalledKeys[baseKey] = keyCount + 1
+				val listKey = if (keyCount == 0) baseKey else "$baseKey#$keyCount"
 				add(
 					InstalledExtensionItem(
+						listKey = listKey,
 						id = ln.pluginId,
 						displayName = ln.displayName,
 						versionName = ln.plugin.version,
 						versionCode = 0L,
 						langCode = code,
-						langLabel = ln.plugin.languageLabel,
+						langLabel = ln.plugin.languageLabel.ifBlank { getExternalExtensionLanguageDisplayName(code) },
 						isNovel = true,
 						isLnPlugin = true,
 						isShared = false,
@@ -439,14 +469,33 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			}
 		}.sortedBy { it.displayName.lowercase() }
 
+		return BaseExtensionsSnapshot(
+			installedCombined = installedCombined,
+			allCatalogItems = allCatalogItems,
+			storeSummaries = storeSummaries,
+			failedExtensions = snapshot.mihonFailed,
+			isPrivateMode = prefs.privateMode,
+		)
+	}
+
+	private fun buildUiState(
+		base: BaseExtensionsSnapshot,
+		actions: ActionStateSnapshot,
+		pendingUninstall: String?,
+	): ExtensionsCatalogUiState {
+		val filters = actions.filters
+		val installedCombined = base.installedCombined
+		val allCatalogItems = base.allCatalogItems
+
 		fun matchesContentFilter(isNovel: Boolean): Boolean = when (filters.contentFilter) {
 			ExtensionContentFilter.ALL -> true
 			ExtensionContentFilter.MANGA -> !isNovel
 			ExtensionContentFilter.NOVELS -> isNovel
 		}
 
-		fun matchesLang(lang: String?): Boolean =
-			filters.selectedLangCode == null || lang.equals(filters.selectedLangCode, ignoreCase = true)
+		val selectedNorm = filters.selectedLangCode?.let(::normalizeExternalExtensionLangCode)
+		fun matchesLang(lang: String): Boolean =
+			selectedNorm == null || lang.equals(selectedNorm, ignoreCase = true)
 
 		val langCounts = HashMap<String, Int>()
 		when (filters.activeTab) {
@@ -458,8 +507,7 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			}
 			ExtensionsTab.CATALOG -> allCatalogItems.forEach {
 				if ((filters.selectedStoreId == null || it.storeId == filters.selectedStoreId) &&
-					matchesContentFilter(it.isNovel) &&
-					!it.langCode.isNullOrBlank()
+					matchesContentFilter(it.isNovel)
 				) {
 					langCounts[it.langCode] = (langCounts[it.langCode] ?: 0) + 1
 				}
@@ -504,14 +552,14 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			installedItems = filteredInstalled,
 			updateItems = filteredUpdates,
 			catalogItems = filteredCatalog,
-			stores = storeSummaries,
-			failedExtensions = snapshot.mihonFailed,
+			stores = base.storeSummaries,
+			failedExtensions = base.failedExtensions,
 			availableLanguages = languageOptions,
 			inProgressIds = actions.inProgressIds,
 			isRefreshing = actions.isRefreshing,
 			isAddingStore = actions.isAddingStore,
-			isPrivateMode = prefs.privateMode,
-			isShizukuEnabled = prefs.shizukuEnabled,
+			isPrivateMode = base.isPrivateMode,
+			isShizukuEnabled = settings.isShizukuInstallerEnabled,
 			isShizukuInstalled = shizukuInstaller.isInstalled,
 			isShizukuReady = shizukuInstaller.isReady,
 			pendingSystemInstall = actions.pendingSystemInstall,
@@ -616,7 +664,7 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			pluginId = item.packageName,
 			rawCode = rawCode,
 			iconUrl = item.iconUrl.orEmpty(),
-			lang = item.langCode.orEmpty(),
+			lang = item.langCode,
 			storeId = item.storeId,
 		)
 		runCatching { updateScheduler.schedule() }

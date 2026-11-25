@@ -10,6 +10,7 @@ class NemuriAiRouter @Inject constructor(
 	private val settings: AppSettings,
 	private val secretStore: AiSecretStore,
 	private val geminiNanoClient: GeminiNanoClient,
+	private val localLlmClient: LocalLlmClient,
 	private val remoteAiClient: RemoteAiClient,
 ) {
 
@@ -18,6 +19,8 @@ class NemuriAiRouter @Inject constructor(
 	fun isAiEnabled(): Boolean = currentMode() != AiMode.OFF
 
 	suspend fun checkNanoAvailability(): NanoAvailability = geminiNanoClient.checkAvailability()
+
+	suspend fun checkNanoDiagnostics(): NanoDiagnostics = geminiNanoClient.checkDiagnostics()
 
 	suspend fun downloadNanoModel(onProgress: (Long) -> Unit = {}): Result<Unit> =
 		geminiNanoClient.triggerDownload(onProgress)
@@ -31,6 +34,10 @@ class NemuriAiRouter @Inject constructor(
 
 		AiMode.GEMINI_NANO -> geminiNanoClient.generate("$systemPrompt\n\n$userPrompt").map { text ->
 			AiGenerationResult(text = text, engineUsed = "Gemini Nano (On-Device)", isAiGenerated = true)
+		}
+
+		AiMode.LOCAL_MODEL -> localLlmClient.generate(systemPrompt, userPrompt, maxTokens).map { (text, label) ->
+			AiGenerationResult(text = text, engineUsed = label, isAiGenerated = true)
 		}
 
 		AiMode.REMOTE_OPENAI -> remoteAiClient.generateOpenAiCompatible(systemPrompt, userPrompt, maxTokens).map { text ->
@@ -96,6 +103,22 @@ class NemuriAiRouter @Inject constructor(
 			lastError = remoteRes.exceptionOrNull()
 		}
 
+		// 4. Downloaded On-Device Local LLM fallback (LiteRT-LM CPU/GPU)
+		if (localLlmClient.hasReadyModel()) {
+			val localRes = localLlmClient.generate(systemPrompt, userPrompt, maxTokens)
+			if (localRes.isSuccess) {
+				val (text, label) = localRes.getOrThrow()
+				return Result.success(
+					AiGenerationResult(
+						text = text,
+						engineUsed = label,
+						isAiGenerated = true,
+					),
+				)
+			}
+			lastError = localRes.exceptionOrNull()
+		}
+
 		return Result.failure(lastError ?: IllegalStateException("No AI backend available in Auto mode"))
 	}
 
@@ -127,8 +150,8 @@ class NemuriAiRouter @Inject constructor(
 			},
 			onFailure = { err ->
 				val nanoNote = if (mode == AiMode.AUTO || mode == AiMode.GEMINI_NANO) {
-					val st = checkNanoAvailability()
-					" (Gemini Nano: ${st.label})"
+					val diag = checkNanoDiagnostics()
+					" (Gemini Nano: ${diag.detailMessage})"
 				} else {
 					""
 				}

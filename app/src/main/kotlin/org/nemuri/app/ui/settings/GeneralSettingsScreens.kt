@@ -1,5 +1,7 @@
 package org.nemuri.app.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -20,10 +22,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cookie
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
@@ -35,6 +41,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -53,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -338,6 +347,14 @@ fun ReadingSettingsScreen(
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 	var showModeDialog by remember { mutableStateOf(false) }
 	var showShaderDialog by remember { mutableStateOf(false) }
+	var showAccelDialog by remember { mutableStateOf(false) }
+	val importOnnxLauncher = rememberLauncherForActivityResult(
+		contract = ActivityResultContracts.OpenDocument(),
+	) { uri ->
+		if (uri != null) {
+			viewModel.importNeuralModelUri(uri)
+		}
+	}
 
 	SettingsLazyPage(
 		title = SettingsSection.READING.title,
@@ -424,6 +441,137 @@ fun ReadingSettingsScreen(
 					steps = 6,
 					onValueChange = viewModel::setReaderShaderStrength,
 				)
+			}
+		}
+
+		item {
+			SettingsGroupCard("Neural 2x Page Upscaler (ONNX)") {
+				SettingsToggleRow(
+					title = "Enable Neural 2x Upscaling",
+					subtitle = if (state.isNeuralUpscaleSupported) {
+						"Tiled 256px super-resolution; skips ultra-tall webtoon strips & Battery Saver"
+					} else {
+						"Available in GitHub builds with ONNX Runtime"
+					},
+					checked = state.isNeuralUpscaleEnabled,
+					enabled = state.isNeuralUpscaleSupported,
+					onCheckedChange = viewModel::setNeuralUpscaleEnabled,
+				)
+				if (state.isNeuralUpscaleSupported) {
+					SettingsRowDivider()
+					SettingsChoiceRow(
+						title = "Hardware Accelerator",
+						subtitle = state.neuralAccelerator.subtitle,
+						currentLabel = state.neuralAccelerator.label,
+						onClick = { showAccelDialog = true },
+					)
+					SettingsRowDivider()
+					SettingsToggleRow(
+						title = "Pre-Upscale Ahead",
+						subtitle = "Background-upscale 1–2 upcoming paged pages into disk cache",
+						checked = state.isNeuralPreloadEnabled,
+						onCheckedChange = viewModel::setNeuralPreloadEnabled,
+					)
+					SettingsRowDivider()
+					Column(
+						modifier = Modifier.padding(14.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						val dl = state.neuralDownloadState
+						state.neuralCatalog.forEach { item ->
+							val isDownloadingThis = dl.activeModelId == item.id
+							Surface(
+								color = if (item.isSelected && item.isDownloaded) {
+									NemuriTheme.colors.tealContainer.copy(alpha = 0.55f)
+								} else {
+									NemuriTheme.colors.surfaceElevated
+								},
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(
+									1.dp,
+									if (item.isSelected && item.isDownloaded) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Column(
+									modifier = Modifier.padding(10.dp),
+									verticalArrangement = Arrangement.spacedBy(6.dp),
+								) {
+									Row(
+										modifier = Modifier.fillMaxWidth(),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.SpaceBetween,
+									) {
+										Column(modifier = Modifier.weight(1f)) {
+											Text(item.title, style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textPrimary)
+											Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textMuted)
+										}
+										if (item.isDownloaded) {
+											Row(verticalAlignment = Alignment.CenterVertically) {
+												TextButton(onClick = { viewModel.selectNeuralModel(item.id) }) {
+													Text(
+														text = if (item.isSelected) "Active" else "Use",
+														color = if (item.isSelected) NemuriTheme.colors.healthy else NemuriTheme.colors.cyan,
+													)
+												}
+												IconButton(onClick = { viewModel.deleteNeuralModel(item.id) }, modifier = Modifier.size(30.dp)) {
+													Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NemuriTheme.colors.danger, modifier = Modifier.size(17.dp))
+												}
+											}
+										} else if (isDownloadingThis) {
+											IconButton(onClick = viewModel::cancelNeuralDownload, modifier = Modifier.size(30.dp)) {
+												Icon(Icons.Default.Close, contentDescription = "Cancel", tint = NemuriTheme.colors.amber, modifier = Modifier.size(17.dp))
+											}
+										} else if (item.isDownloadable) {
+											OutlinedButton(
+												onClick = { viewModel.downloadNeuralModel(item.id) },
+												enabled = dl.activeModelId == null,
+												border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)),
+											) {
+												Icon(Icons.Default.Download, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(16.dp))
+												Spacer(Modifier.width(4.dp))
+												Text(item.sizeLabel, color = NemuriTheme.colors.cyan)
+											}
+										} else {
+											OutlinedButton(
+												onClick = { importOnnxLauncher.launch(arrayOf("*/*")) },
+												enabled = dl.activeModelId == null,
+												border = BorderStroke(1.dp, NemuriTheme.colors.border),
+											) {
+												Icon(Icons.Default.FolderOpen, contentDescription = null, tint = NemuriTheme.colors.textSecondary, modifier = Modifier.size(16.dp))
+												Spacer(Modifier.width(4.dp))
+												Text("Import", color = NemuriTheme.colors.textSecondary)
+											}
+										}
+									}
+									if (isDownloadingThis) {
+										val frac = if (dl.totalBytes > 0L) (dl.downloadedBytes.toFloat() / dl.totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+										LinearProgressIndicator(
+											progress = { frac },
+											color = NemuriTheme.colors.cyan,
+											trackColor = NemuriTheme.colors.border,
+											modifier = Modifier.fillMaxWidth(),
+										)
+									}
+								}
+							}
+						}
+						if (state.neuralCacheBytes > 0L) {
+							OutlinedButton(
+								onClick = viewModel::clearNeuralCache,
+								border = BorderStroke(1.dp, NemuriTheme.colors.border),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Icon(Icons.Default.CleaningServices, contentDescription = null, tint = NemuriTheme.colors.textSecondary, modifier = Modifier.size(17.dp))
+								Spacer(Modifier.width(8.dp))
+								Text(
+									text = "Clear Neural Cache (${String.format("%.1f MB", state.neuralCacheBytes / (1024f * 1024f))})",
+									color = NemuriTheme.colors.textSecondary,
+								)
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -548,6 +696,16 @@ fun ReadingSettingsScreen(
 			selected = state.readerShaderPreset,
 			onSelect = viewModel::setReaderShaderPreset,
 			onDismiss = { showShaderDialog = false },
+		)
+	}
+
+	if (showAccelDialog) {
+		SettingsOptionDialog(
+			title = "Neural Accelerator",
+			options = NeuralAccelerator.entries.map { it to it.label },
+			selected = state.neuralAccelerator,
+			onSelect = viewModel::setNeuralAccelerator,
+			onDismiss = { showAccelDialog = false },
 		)
 	}
 }

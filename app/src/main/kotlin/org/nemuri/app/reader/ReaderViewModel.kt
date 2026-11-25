@@ -11,14 +11,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -54,7 +57,11 @@ import org.koitharu.kotatsu.parsers.model.MangaChapter
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
 import org.koitharu.kotatsu.reader.domain.ChaptersLoader
 import org.koitharu.kotatsu.reader.domain.DetectReaderModeUseCase
+import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
+import org.koitharu.kotatsu.reader.domain.NeuralModelDownloadState
+import org.koitharu.kotatsu.reader.domain.NeuralUpscaleModelManager
 import org.koitharu.kotatsu.reader.domain.PageLoader
+import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.ui.ReaderState
@@ -62,6 +69,7 @@ import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
 import org.koitharu.kotatsu.stats.domain.StatsCollector
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
+import org.nemuri.app.ui.settings.NeuralModelUiItem
 import java.io.File
 import java.time.Instant
 import java.util.zip.ZipFile
@@ -116,6 +124,16 @@ data class ReaderUiState(
 	val volumeButtonsEnabled: Boolean = false,
 	val is32BitColors: Boolean = false,
 	val shaderConfig: ReaderShaderConfig = ReaderShaderConfig(),
+	val isNeuralUpscaleSupported: Boolean = false,
+	val isNeuralUpscaleEnabled: Boolean = false,
+	val neuralAccelerator: NeuralAccelerator = NeuralAccelerator.AUTO,
+	val selectedNeuralModelId: String = "",
+	val hasReadyNeuralModel: Boolean = false,
+	val activeNeuralModelLabel: String = "",
+	val neuralCatalog: List<NeuralModelUiItem> = emptyList(),
+	val neuralDownloadState: NeuralModelDownloadState = NeuralModelDownloadState(),
+	val neuralCacheBytes: Long = 0L,
+	val neuralRevision: Int = 0,
 	val epubTheme: String = "system",
 	val epubFontSize: Int = 100,
 	val epubLineHeight: Int = 160,
@@ -138,6 +156,8 @@ class ReaderViewModel @Inject constructor(
 	private val bookmarksRepository: BookmarksRepository,
 	private val chaptersLoader: ChaptersLoader,
 	private val pageLoader: PageLoader,
+	private val pageUpscaleEngine: PageUpscaleEngine,
+	private val upscaleModelManager: NeuralUpscaleModelManager,
 	private val detectReaderModeUseCase: DetectReaderModeUseCase,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
 	private val statsCollector: StatsCollector,
@@ -162,6 +182,10 @@ class ReaderViewModel @Inject constructor(
 				inkLevels = settings.isReaderInkLevelsEnabled,
 				strength = settings.readerShaderStrength,
 			),
+			isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
+			isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
+			neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
+			selectedNeuralModelId = settings.neuralUpscaleModelId,
 			epubTheme = settings.epubTheme,
 			epubFontSize = settings.epubFontSize,
 			epubLineHeight = settings.epubLineHeight,
@@ -177,12 +201,21 @@ class ReaderViewModel @Inject constructor(
 	private var loadJob: Job? = null
 	private var chapterLoadJob: Job? = null
 	private var autosaveJob: Job? = null
+	private var neuralPreloadJob: Job? = null
 	private val bookmarkTargetFlow = MutableStateFlow<Triple<Manga, Long, Int>?>(null)
 	private var effectiveIncognito: Boolean = extraIncognito || settings.isIncognitoModeEnabled
 	private var latestChapterPageIndex: Int = 0
 	private var latestScrollOffset: Int = 0
 
 	init {
+		viewModelScope.launch {
+			combine(
+				upscaleModelManager.downloadState,
+				upscaleModelManager.inventoryVersion,
+			) { dlState, _ -> dlState }.collect { dlState ->
+				refreshNeuralUiState(dlState)
+			}
+		}
 		viewModelScope.launch {
 			bookmarkTargetFlow
 				.flatMapLatest { target ->
@@ -274,6 +307,7 @@ class ReaderViewModel @Inject constructor(
 		pageLoader.preload(pages, page) {
 			chaptersLoader.loadNextChapterPages(details, page.chapterId)
 		}
+		scheduleNeuralPreloadAhead(pages, globalIndex)
 
 		if (!stateHasChapterAfter(pages, globalIndex) && chIdx in 0 until activeBranchChapters.lastIndex) {
 			viewModelScope.launch(Dispatchers.IO) {
@@ -351,6 +385,139 @@ class ReaderViewModel @Inject constructor(
 		_uiState.update { it.copy(shaderConfig = it.shaderConfig.copy(strength = clamped)) }
 	}
 
+	fun setNeuralUpscaleEnabled(enabled: Boolean) {
+		settings.isNeuralUpscaleEnabled = enabled
+		if (enabled && upscaleModelManager.resolveActiveReadyModel() == null) {
+			toastManager.show("Download a Neural 2x model below to activate super-resolution")
+		}
+		_uiState.update {
+			it.copy(
+				isNeuralUpscaleEnabled = enabled,
+				neuralRevision = it.neuralRevision + 1,
+			)
+		}
+	}
+
+	fun setNeuralAccelerator(accelerator: NeuralAccelerator) {
+		settings.neuralUpscaleAccelerator = accelerator.key
+		refreshNeuralUiState(bumpRevision = false)
+	}
+
+	fun selectNeuralModel(modelId: String) {
+		settings.neuralUpscaleModelId = modelId
+		refreshNeuralUiState(bumpRevision = settings.isNeuralUpscaleEnabled)
+	}
+
+	fun downloadNeuralModel(modelId: String) {
+		if (upscaleModelManager.downloadState.value.activeModelId != null) return
+		viewModelScope.launch(Dispatchers.IO) {
+			val res = upscaleModelManager.downloadModel(modelId)
+			res.onSuccess {
+				if (!settings.isNeuralUpscaleEnabled) {
+					settings.isNeuralUpscaleEnabled = true
+				}
+				refreshNeuralUiState(bumpRevision = true)
+				toastManager.show("Neural 2x model ready")
+			}.onFailure { err ->
+				val msg = err.localizedMessage
+				if (!msg.isNullOrBlank() && !msg.contains("cancel", ignoreCase = true)) {
+					toastManager.show(msg)
+				}
+			}
+		}
+	}
+
+	fun cancelNeuralDownload() {
+		upscaleModelManager.cancelDownload()
+		toastManager.show("Download cancelled")
+	}
+
+	fun deleteNeuralModel(modelId: String) {
+		viewModelScope.launch(Dispatchers.IO) {
+			if (upscaleModelManager.deleteModel(modelId)) {
+				pageUpscaleEngine.releaseSession()
+				refreshNeuralUiState(bumpRevision = true)
+				toastManager.show("Deleted neural model")
+			}
+		}
+	}
+
+	fun clearNeuralCache() {
+		viewModelScope.launch(Dispatchers.IO) {
+			pageUpscaleEngine.clearCache()
+			refreshNeuralUiState(bumpRevision = settings.isNeuralUpscaleEnabled)
+			toastManager.show("Cleared neural upscale cache")
+		}
+	}
+
+	private fun refreshNeuralUiState(
+		dlState: NeuralModelDownloadState = upscaleModelManager.downloadState.value,
+		bumpRevision: Boolean = false,
+	) {
+		val selectedId = settings.neuralUpscaleModelId
+		val items = upscaleModelManager.catalog.map { entry ->
+			val file = upscaleModelManager.getModelFile(entry.id)
+			val bytes = file?.length() ?: entry.approxSizeBytes
+			NeuralModelUiItem(
+				id = entry.id,
+				title = entry.title,
+				subtitle = entry.subtitle,
+				isDownloadable = entry.downloadUrl != null,
+				isDownloaded = file != null,
+				isSelected = selectedId == entry.id,
+				sizeLabel = formatCompactBytes(bytes),
+			)
+		}
+		val ready = upscaleModelManager.resolveActiveReadyModel()?.first
+		val cacheBytes = pageUpscaleEngine.computeCacheSizeBytes()
+		_uiState.update { state ->
+			state.copy(
+				isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
+				neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
+				selectedNeuralModelId = selectedId,
+				hasReadyNeuralModel = ready != null,
+				activeNeuralModelLabel = ready?.title ?: "None downloaded",
+				neuralCatalog = items,
+				neuralDownloadState = dlState,
+				neuralCacheBytes = cacheBytes,
+				neuralRevision = if (bumpRevision) state.neuralRevision + 1 else state.neuralRevision,
+			)
+		}
+	}
+
+	private fun scheduleNeuralPreloadAhead(pages: List<ReaderPage>, globalIndex: Int) {
+		neuralPreloadJob?.cancel()
+		val state = _uiState.value
+		if (!pageUpscaleEngine.isSupported ||
+			!state.isNeuralUpscaleEnabled ||
+			!settings.isNeuralPreloadEnabled ||
+			state.readerMode == ReaderMode.WEBTOON ||
+			upscaleModelManager.resolveActiveReadyModel() == null
+		) {
+			return
+		}
+		val currentChapterId = pages.getOrNull(globalIndex)?.chapterId ?: return
+		val nextPages = (1..2).mapNotNull { offset ->
+			pages.getOrNull(globalIndex + offset)?.takeIf { it.chapterId == currentChapterId }
+		}
+		if (nextPages.isEmpty()) return
+		neuralPreloadJob = viewModelScope.launch(Dispatchers.IO) {
+			for (nextPage in nextPages) {
+				runCatchingCancellable {
+					val uri = pageLoader.loadPage(nextPage.toMangaPage(), false)
+					val bounds = pageLoader.getImageBounds(uri)
+					pageUpscaleEngine.upscalePageIfEnabled(uri, bounds, isWebtoon = false)
+				}
+			}
+		}
+	}
+
+	private fun formatCompactBytes(bytes: Long): String {
+		if (bytes <= 0L) return "Custom"
+		val mb = bytes.toFloat() / (1024f * 1024f)
+		return if (mb >= 10f) "${mb.toInt()} MB" else String.format("%.1f MB", mb)
+	}
+
 	fun onPauseReading() {
 		autosaveJob?.cancel()
 		val mangaId = activeDetails?.id
@@ -363,7 +530,11 @@ class ReaderViewModel @Inject constructor(
 	}
 
 	override fun onCleared() {
+		neuralPreloadJob?.cancel()
 		activeDetails?.id?.let { statsCollector.onPauseOrClose(it) }
+		CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+			pageUpscaleEngine.releaseSession()
+		}
 		super.onCleared()
 	}
 
@@ -443,12 +614,24 @@ class ReaderViewModel @Inject constructor(
 		}
 	}
 
+	suspend fun loadRawPageImage(page: ReaderPage): Result<Pair<Uri, Rect?>> =
+		withContext(Dispatchers.IO) {
+			runCatchingCancellable {
+				val uri = pageLoader.loadPage(page.toMangaPage(), false)
+				val bounds = pageLoader.getImageBounds(uri)
+				uri to bounds
+			}
+		}
+
 	suspend fun loadPageImage(page: ReaderPage, force: Boolean = false): Result<Pair<Uri, Rect?>> =
 		withContext(Dispatchers.IO) {
 			runCatchingCancellable {
 				val uri = pageLoader.loadPage(page.toMangaPage(), force)
 				val bounds = pageLoader.getImageBounds(uri)
-				uri to bounds
+				val isWebtoon = _uiState.value.readerMode == ReaderMode.WEBTOON
+				val result = pageUpscaleEngine.upscalePageIfEnabled(uri, bounds, isWebtoon)
+				_uiState.update { it.copy(neuralCacheBytes = pageUpscaleEngine.computeCacheSizeBytes()) }
+				result
 			}.onFailure { err ->
 				when (err) {
 					is CloudFlareProtectedException -> _uiState.update { it.copy(pendingCloudFlare = err) }

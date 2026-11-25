@@ -16,6 +16,7 @@ import org.koitharu.kotatsu.core.prefs.SourceSettings
 import org.koitharu.kotatsu.core.prefs.observeAsFlow
 import org.koitharu.kotatsu.core.ui.util.ReversibleHandle
 import org.koitharu.kotatsu.extensions.runtime.getExternalExtensionLanguageAutonym
+import org.koitharu.kotatsu.extensions.runtime.normalizeExternalExtensionLangCode
 import org.koitharu.kotatsu.lnreader.LnPluginManager
 import org.koitharu.kotatsu.lnreader.model.LnMangaSource
 import org.koitharu.kotatsu.lnreader.model.langCode
@@ -230,7 +231,7 @@ class MangaSourcesRepository @Inject constructor(
 	 */
 	private fun getMihonSources(): List<MihonMangaSource> {
 		val hiddenLangs = settings.hiddenSourceLanguages
-		return getActiveMihonSources().filterNot { it.language in hiddenLangs }
+		return getActiveMihonSources().filterNot { hiddenLangs.containsNormalizedLang(it.language) }
 	}
 
 	/**
@@ -288,7 +289,7 @@ class MangaSourcesRepository @Inject constructor(
 		val hiddenLangs = settings.hiddenSourceLanguages
 		return manager.getAll()
 			.filterNot { it.pluginId in hidden }
-			.filterNot { it.plugin.langCode in hiddenLangs }
+			.filterNot { hiddenLangs.containsNormalizedLang(it.plugin.langCode) }
 	}
 
 	fun observeLnSources(): Flow<List<LnMangaSource>> {
@@ -332,13 +333,16 @@ class MangaSourcesRepository @Inject constructor(
 	fun getSourceLanguages(): List<SourceLanguage> {
 		val hiddenPlugins = settings.lnHiddenPlugins
 		val counts = HashMap<String, Int>()
-		getActiveMihonSources().forEach { counts[it.language] = (counts[it.language] ?: 0) + 1 }
+		getActiveMihonSources().forEach {
+			val code = normalizeExternalExtensionLangCode(it.language)
+			counts[code] = (counts[code] ?: 0) + 1
+		}
 		lnPluginManager?.let { manager ->
 			manager.initialize()
 			manager.getAll()
 				.filterNot { it.pluginId in hiddenPlugins }
 				.forEach {
-					val code = it.plugin.langCode
+					val code = normalizeExternalExtensionLangCode(it.plugin.langCode)
 					counts[code] = (counts[code] ?: 0) + 1
 				}
 		}
@@ -348,13 +352,19 @@ class MangaSourcesRepository @Inject constructor(
 				code = code,
 				displayName = getExternalExtensionLanguageAutonym(code),
 				sourceCount = count,
-				isEnabled = code !in hiddenLangs,
+				isEnabled = !hiddenLangs.containsNormalizedLang(code),
 			)
 		}.sortedBy { it.displayName.lowercase() }
 	}
 
 	fun setHiddenLanguages(codes: Set<String>) {
-		settings.hiddenSourceLanguages = codes
+		settings.hiddenSourceLanguages = codes.mapTo(LinkedHashSet()) { normalizeExternalExtensionLangCode(it) }
+	}
+
+	private fun Set<String>.containsNormalizedLang(rawLang: String?): Boolean {
+		if (isEmpty()) return false
+		val target = normalizeExternalExtensionLangCode(rawLang)
+		return any { normalizeExternalExtensionLangCode(it).equals(target, ignoreCase = true) }
 	}
 
 	/** True when at least one installed source offers more than one language. */

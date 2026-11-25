@@ -57,7 +57,9 @@ composeBom = "2026.09.00"
 # progress, FAB menu) only in the 1.5 line; in 1.4.0 stable they are still Kotlin-internal.
 material3 = "1.5.0-beta01"
 graphicsShapes = "1.1.0"
-mlkitGenAiPrompt = "1.0.0-beta4"
+mlkitGenAiPrompt = "1.0.0-beta5"
+litertlm = "0.20.0"
+onnxruntime = "1.32.0"
 
 [libraries]
 acra-dialog = { module = "ch.acra:acra-dialog", version.ref = "acra" }
@@ -144,6 +146,8 @@ androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-ru
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-graphics-shapes = { module = "androidx.graphics:graphics-shapes", version.ref = "graphicsShapes" }
 mlkit-genai-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkitGenAiPrompt" }
+litertlm-android = { module = "com.google.ai.edge.litertlm:litertlm-android", version.ref = "litertlm" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "gradle" }

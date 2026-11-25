@@ -1492,6 +1492,32 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getBoolean(KEY_AI_INCLUDE_NOVEL_EXCERPT, true)
 		set(value) = prefs.edit { putBoolean(KEY_AI_INCLUDE_NOVEL_EXCERPT, value) }
 
+	var aiLocalModelId: String
+		get() = prefs.getString(KEY_AI_LOCAL_MODEL_ID, "qwen2_5_coder_1_5b_int4")?.takeIf { it.isNotBlank() }
+			?: "qwen2_5_coder_1_5b_int4"
+		set(value) = prefs.edit { putString(KEY_AI_LOCAL_MODEL_ID, value) }
+
+	var aiLocalAccelerator: String
+		get() = prefs.getString(KEY_AI_LOCAL_ACCELERATOR, "GPU")?.takeIf { it.isNotBlank() } ?: "GPU"
+		set(value) = prefs.edit { putString(KEY_AI_LOCAL_ACCELERATOR, value) }
+
+	var isNeuralUpscaleEnabled: Boolean
+		get() = prefs.getBoolean(KEY_NEURAL_UPSCALE_ENABLED, false)
+		set(value) = prefs.edit { putBoolean(KEY_NEURAL_UPSCALE_ENABLED, value) }
+
+	var neuralUpscaleModelId: String
+		get() = prefs.getString(KEY_NEURAL_UPSCALE_MODEL_ID, "waifu2x_upconv7_2x")?.takeIf { it.isNotBlank() }
+			?: "waifu2x_upconv7_2x"
+		set(value) = prefs.edit { putString(KEY_NEURAL_UPSCALE_MODEL_ID, value) }
+
+	var neuralUpscaleAccelerator: String
+		get() = prefs.getString(KEY_NEURAL_UPSCALE_ACCELERATOR, "AUTO")?.takeIf { it.isNotBlank() } ?: "AUTO"
+		set(value) = prefs.edit { putString(KEY_NEURAL_UPSCALE_ACCELERATOR, value) }
+
+	var isNeuralPreloadEnabled: Boolean
+		get() = prefs.getBoolean(KEY_NEURAL_UPSCALE_PRELOAD, true)
+		set(value) = prefs.edit { putBoolean(KEY_NEURAL_UPSCALE_PRELOAD, value) }
+
 	fun getMangaListBadges(): Int {
 		val raw = prefs.getStringSet(KEY_MANGA_LIST_BADGES, mangaListBadgesDefault).orEmpty()
 		var result = 0
@@ -1726,6 +1752,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_AI_GEMINI_MODEL = "ai_gemini_model"
 		const val KEY_AI_SHOW_RECAP_CARD = "ai_show_recap_card"
 		const val KEY_AI_INCLUDE_NOVEL_EXCERPT = "ai_include_novel_excerpt"
+		const val KEY_AI_LOCAL_MODEL_ID = "ai_local_model_id"
+		const val KEY_AI_LOCAL_ACCELERATOR = "ai_local_accelerator"
+		const val KEY_NEURAL_UPSCALE_ENABLED = "neural_upscale_enabled"
+		const val KEY_NEURAL_UPSCALE_MODEL_ID = "neural_upscale_model_id"
+		const val KEY_NEURAL_UPSCALE_ACCELERATOR = "neural_upscale_accelerator"
+		const val KEY_NEURAL_UPSCALE_PRELOAD = "neural_upscale_preload"
 		const val KEY_LOCAL_LIST_ORDER = "local_order"
 		const val KEY_HISTORY_ORDER = "history_order"
 		const val KEY_FAVORITES_ORDER = "fav_order"
@@ -1864,6 +1896,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			KEY_EXTENSION_UPDATES_AVAILABLE,
 			KEY_LAST_EXTENSION_UPDATE_NOTIFICATION_TIME,
 			KEY_APP_VERSION,
+			KEY_AI_LOCAL_MODEL_ID,
+			KEY_AI_LOCAL_ACCELERATOR,
+			KEY_NEURAL_UPSCALE_ENABLED,
+			KEY_NEURAL_UPSCALE_MODEL_ID,
+			KEY_NEURAL_UPSCALE_ACCELERATOR,
+			KEY_NEURAL_UPSCALE_PRELOAD,
 		)
 
 		/**
@@ -1907,6 +1945,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			KEY_AI_REMOTE_URL,
 			KEY_AI_REMOTE_MODEL,
 			KEY_AI_GEMINI_MODEL,
+			KEY_AI_LOCAL_MODEL_ID,
+			KEY_AI_LOCAL_ACCELERATOR,
+			KEY_NEURAL_UPSCALE_ENABLED,
+			KEY_NEURAL_UPSCALE_MODEL_ID,
+			KEY_NEURAL_UPSCALE_ACCELERATOR,
+			KEY_NEURAL_UPSCALE_PRELOAD,
 		)
 
 		fun isSyncableKey(key: String): Boolean = key !in SENSITIVE_BACKUP_KEYS &&

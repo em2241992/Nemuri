@@ -38,6 +38,37 @@ private val LANG_CODE_REGEX = Regex("[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*")
 /** Same, falling back to the declared value so an unknown language still filters consistently. */
 fun getExternalExtensionLangCode(lang: String): String = getExternalExtensionLangCodeOrNull(lang) ?: lang
 
+/**
+ * Canonical language code for catalog and Explore language filters.
+ * Blank, null, "multi", and "all" collapse to `"all"` ("Multi"), and BCP-47 tags are normalized
+ * consistently (e.g. `"en"`, `"pt-BR"`, `"zh-Hans"`) so case variants never create duplicate keys
+ * or miss language filter comparisons.
+ */
+fun normalizeExternalExtensionLangCode(lang: String?): String {
+	val raw = lang?.trim()?.trim('\u200E', '\u200F').orEmpty()
+	if (raw.isEmpty()) return "all"
+	val resolved = getExternalExtensionLangCodeOrNull(raw) ?: raw
+	val lower = resolved.lowercase(Locale.ROOT)
+	if (lower == "all" || lower == "multi") return "all"
+	val parts = resolved.replace('_', '-').split('-').filter { it.isNotEmpty() }
+	if (parts.isEmpty()) return "all"
+	return buildString {
+		append(parts[0].lowercase(Locale.ROOT))
+		for (i in 1 until parts.size) {
+			val sub = parts[i]
+			append('-')
+			when {
+				sub.length == 2 && sub.all { it.isLetter() } -> append(sub.uppercase(Locale.ROOT))
+				sub.length == 4 && sub.all { it.isLetter() } -> {
+					append(sub[0].uppercaseChar())
+					append(sub.substring(1).lowercase(Locale.ROOT))
+				}
+				else -> append(sub.lowercase(Locale.ROOT))
+			}
+		}
+	}
+}
+
 /** Display label for a language declared as either a code or a name. */
 fun getExternalExtensionLanguageLabel(lang: String): String =
 	getExternalExtensionLangCodeOrNull(lang)?.let(::getExternalExtensionLanguageDisplayName) ?: lang
@@ -86,8 +117,9 @@ private val langCodesByName: Map<String, String> by lazy {
 }
 
 fun getExternalExtensionLanguageDisplayName(langCode: String): String {
-	return when (langCode.lowercase(Locale.ROOT)) {
-		"all" -> "Multi"
+	val normalized = langCode.trim().lowercase(Locale.ROOT)
+	return when {
+		normalized.isEmpty() || normalized == "all" || normalized == "multi" -> "Multi"
 		else -> runCatching { Locale.forLanguageTag(langCode).getDisplayLanguage(Locale.getDefault()) }
 			.getOrNull()
 			?.takeIf { it.isNotBlank() }
@@ -101,8 +133,9 @@ fun getExternalExtensionLanguageDisplayName(langCode: String): String {
  * natively (source settings language picker, browse top-bar subheading).
  */
 fun getExternalExtensionLanguageAutonym(langCode: String): String {
-	return when (langCode.lowercase(Locale.ROOT)) {
-		"all" -> "Multi"
+	val normalized = langCode.trim().lowercase(Locale.ROOT)
+	return when {
+		normalized.isEmpty() || normalized == "all" || normalized == "multi" -> "Multi"
 		else -> runCatching {
 			val locale = Locale.forLanguageTag(langCode)
 			locale.getDisplayLanguage(locale).replaceFirstChar { it.uppercase(locale) }

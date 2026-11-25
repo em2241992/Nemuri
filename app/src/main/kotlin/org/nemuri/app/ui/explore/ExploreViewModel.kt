@@ -14,8 +14,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -33,6 +35,7 @@ import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.explore.data.SourceLanguage
 import org.koitharu.kotatsu.explore.data.SourcesSortOrder
 import org.koitharu.kotatsu.explore.domain.ExploreRepository
+import org.koitharu.kotatsu.extensions.runtime.normalizeExternalExtensionLangCode
 import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
 import org.koitharu.kotatsu.list.domain.ListSortOrder
 import org.koitharu.kotatsu.parsers.model.Manga
@@ -163,6 +166,41 @@ class ExploreViewModel @Inject constructor(
 
 	private val libraryMembershipFlow = favouritesRepository.observeAll(ListSortOrder.NEWEST, emptySet(), 2000)
 
+	init {
+		viewModelScope.launch(Dispatchers.IO) {
+			sourcesMetadataFlow
+				.map { meta ->
+					val enabled = meta.enabledSources
+					val preferred = enabled.firstOrNull { it.name == meta.preferredHomeSourceName }
+						?: enabled.firstOrNull { it.isPinned && !it.isNovelSource }
+						?: enabled.firstOrNull { !it.isNovelSource }
+						?: enabled.firstOrNull()
+					preferred?.toExploreSourceTile()
+				}
+				.distinctUntilChanged { a, b -> a?.sourceName == b?.sourceName }
+				.collect { resolvedHome ->
+					if (resolvedHome == null) {
+						loadedHomeSourceName = null
+						homeHubJob?.cancel()
+						homeHubRawFlow.value = HomeHubRawState()
+					} else if (resolvedHome.sourceName != loadedHomeSourceName) {
+						triggerHomeHubLoad(resolvedHome)
+					}
+				}
+		}
+	}
+
+	private fun MangaSourceInfo.toExploreSourceTile() = ExploreSourceTile(
+		sourceInfo = this,
+		sourceName = name,
+		title = getTitle(context),
+		summary = getSummary(context),
+		homeUrl = homeUrl,
+		isNovel = isNovelSource,
+		isNsfw = isNsfw(),
+		isPinned = isPinned,
+	)
+
 	val uiState: StateFlow<ExploreUiState> = combine(
 		sourcesMetadataFlow,
 		combine(
@@ -176,18 +214,7 @@ class ExploreViewModel @Inject constructor(
 		suggestionRepository.observeRandomList(12),
 	) { meta, controls, hubRaw, favManga, storedSuggestions ->
 		val trimmed = controls.query.trim()
-		val allTiles = meta.enabledSources.map { info ->
-			ExploreSourceTile(
-				sourceInfo = info,
-				sourceName = info.name,
-				title = info.getTitle(context),
-				summary = info.getSummary(context),
-				homeUrl = info.homeUrl,
-				isNovel = info.isNovelSource,
-				isNsfw = info.isNsfw(),
-				isPinned = info.isPinned,
-			)
-		}
+		val allTiles = meta.enabledSources.map { it.toExploreSourceTile() }
 
 		val filteredTiles = allTiles
 			.filter { tile ->
@@ -209,9 +236,7 @@ class ExploreViewModel @Inject constructor(
 			?: allTiles.firstOrNull { !it.isNovel }
 			?: allTiles.firstOrNull()
 
-		if (resolvedHome != null && resolvedHome.sourceName != loadedHomeSourceName && !hubRaw.isLoading) {
-			triggerHomeHubLoad(resolvedHome)
-		}
+		val matchingHub = hubRaw.takeIf { resolvedHome != null && it.sourceName == resolvedHome.sourceName }
 
 		val libIds = favManga.mapTo(HashSet(favManga.size)) { it.id }
 		val libUrls = favManga.mapTo(HashSet(favManga.size)) { it.url }
@@ -219,9 +244,12 @@ class ExploreViewModel @Inject constructor(
 		fun Manga.inLibrary(): Boolean = id in libIds || url in libUrls
 
 		val rawCarousels = buildList {
-			addAll(hubRaw.carousels)
-			if (storedSuggestions.isNotEmpty() && none { it.id == "suggested" }) {
-				add(HomeHubCarousel(id = "suggested", title = "Suggested For You", items = storedSuggestions))
+			if (matchingHub != null) {
+				addAll(matchingHub.carousels)
+			}
+			val distinctSuggestions = storedSuggestions.distinctBy { it.id }
+			if (distinctSuggestions.isNotEmpty() && none { it.id == "suggested" }) {
+				add(HomeHubCarousel(id = "suggested", title = "Suggested For You", items = distinctSuggestions))
 			}
 		}.mapNotNull { carousel ->
 			val filteredItems = when (controls.visibility) {
@@ -250,8 +278,8 @@ class ExploreViewModel @Inject constructor(
 			hasExtensionUpdates = meta.hasUpdates,
 			isFindingRandom = controls.findingRandom,
 			homeSource = resolvedHome,
-			isHomeHubLoading = hubRaw.isLoading,
-			homeHubError = hubRaw.error,
+			isHomeHubLoading = matchingHub?.isLoading == true,
+			homeHubError = matchingHub?.error,
 			homeCarousels = rawCarousels,
 			visibilityFilter = controls.visibility,
 			libraryMangaIds = libIds,
@@ -296,7 +324,7 @@ class ExploreViewModel @Inject constructor(
 					val popularJob = if (SortOrder.POPULARITY in sortOrders) {
 						async {
 							runCatchingCancellable {
-								repo.getList(0, SortOrder.POPULARITY, MangaListFilter()).take(15)
+								repo.getList(0, SortOrder.POPULARITY, MangaListFilter()).distinctBy { it.id }.take(15)
 							}.getOrDefault(emptyList())
 						}
 					} else null
@@ -304,7 +332,7 @@ class ExploreViewModel @Inject constructor(
 					val updatedJob = if (SortOrder.UPDATED in sortOrders) {
 						async {
 							runCatchingCancellable {
-								repo.getList(0, SortOrder.UPDATED, MangaListFilter()).take(15)
+								repo.getList(0, SortOrder.UPDATED, MangaListFilter()).distinctBy { it.id }.take(15)
 							}.getOrDefault(emptyList())
 						}
 					} else null
@@ -317,7 +345,7 @@ class ExploreViewModel @Inject constructor(
 					val secondaryJob = secondaryOrder?.let { ord ->
 						async {
 							runCatchingCancellable {
-								repo.getList(0, ord, MangaListFilter()).take(15)
+								repo.getList(0, ord, MangaListFilter()).distinctBy { it.id }.take(15)
 							}.getOrDefault(emptyList())
 						}
 					}
@@ -389,7 +417,7 @@ class ExploreViewModel @Inject constructor(
 			else -> repo.defaultSortOrder
 		}
 		val items = runCatchingCancellable {
-			repo.getList(0, order, MangaListFilter(tags = setOf(matchingTag))).take(12)
+			repo.getList(0, order, MangaListFilter(tags = setOf(matchingTag))).distinctBy { it.id }.take(12)
 		}.getOrDefault(emptyList())
 		return if (items.isNotEmpty()) matchingTag.title to items else null
 	}
@@ -447,8 +475,13 @@ class ExploreViewModel @Inject constructor(
 	}
 
 	fun toggleLanguage(code: String) {
-		val current = settings.hiddenSourceLanguages
-		val updated = if (code in current) current - code else current + code
+		val normalized = normalizeExternalExtensionLangCode(code)
+		val current = settings.hiddenSourceLanguages.mapTo(LinkedHashSet()) { normalizeExternalExtensionLangCode(it) }
+		val updated = if (current.any { it.equals(normalized, ignoreCase = true) }) {
+			current.filterNotTo(LinkedHashSet()) { it.equals(normalized, ignoreCase = true) }
+		} else {
+			current + normalized
+		}
 		sourcesRepository.setHiddenLanguages(updated)
 		languageRefreshTrigger.value++
 	}

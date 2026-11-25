@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -116,7 +117,7 @@ fun ExploreScreen(
 		)
 
 		LazyVerticalGrid(
-			columns = GridCells.Adaptive(minSize = 160.dp),
+			columns = GridCells.Adaptive(minSize = 280.dp),
 			modifier = Modifier.fillMaxSize(),
 			contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 120.dp),
 			horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -392,7 +393,7 @@ fun ExploreScreen(
 								text = filter.label,
 								style = MaterialTheme.typography.labelMedium,
 								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-								modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+								modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
 							)
 						}
 					}
@@ -495,7 +496,9 @@ fun ExploreScreen(
 			onDismiss = { showSortAndLanguageSheet = false },
 		) {
 			LazyColumn(
-				modifier = Modifier.fillMaxWidth(),
+				modifier = Modifier
+					.fillMaxWidth()
+					.heightIn(max = 440.dp),
 				verticalArrangement = Arrangement.spacedBy(8.dp),
 				contentPadding = PaddingValues(bottom = 12.dp),
 			) {
@@ -755,7 +758,7 @@ private fun HomeSourceHubHeader(
 					.clickable(onClick = onPickHomeSource),
 			) {
 				Row(
-					modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+					modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
 					verticalAlignment = Alignment.CenterVertically,
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
 				) {
@@ -826,7 +829,7 @@ private fun HomeSourceHubHeader(
 						text = vis.label,
 						style = MaterialTheme.typography.labelSmall,
 						color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
-						modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+						modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
 					)
 				}
 			}
@@ -886,6 +889,7 @@ private fun HomeCarouselCard(
 			color = NemuriTheme.colors.textPrimary,
 			maxLines = 2,
 			overflow = TextOverflow.Ellipsis,
+			modifier = Modifier.padding(horizontal = 2.dp),
 		)
 	}
 }
@@ -965,9 +969,9 @@ private fun ExploreSourceCard(
 			),
 	) {
 		Row(
-			modifier = Modifier.padding(11.dp),
+			modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
 			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			horizontalArrangement = Arrangement.spacedBy(12.dp),
 		) {
 			Surface(
 				color = NemuriTheme.colors.surfaceElevated,
@@ -1000,7 +1004,7 @@ private fun ExploreSourceCard(
 					text = tile.title,
 					style = MaterialTheme.typography.titleSmall,
 					color = NemuriTheme.colors.textPrimary,
-					maxLines = 1,
+					maxLines = 2,
 					overflow = TextOverflow.Ellipsis,
 				)
 				val meta = tile.summary ?: if (tile.isNovel) "Novel" else "Manga"
@@ -1044,7 +1048,7 @@ private fun ExploreSourceCard(
 			}
 			IconButton(
 				onClick = onTogglePin,
-				modifier = Modifier.size(28.dp),
+				modifier = Modifier.size(34.dp),
 			) {
 				Icon(
 					imageVector = if (tile.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,

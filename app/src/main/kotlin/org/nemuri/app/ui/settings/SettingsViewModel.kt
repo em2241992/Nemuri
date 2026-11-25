@@ -1,7 +1,9 @@
 package org.nemuri.app.ui.settings
 
+import android.net.Uri
 import android.webkit.CookieManager
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +29,10 @@ import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
 import org.koitharu.kotatsu.local.data.LocalStorageManager
+import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
+import org.koitharu.kotatsu.reader.domain.NeuralModelDownloadState
+import org.koitharu.kotatsu.reader.domain.NeuralUpscaleModelManager
+import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.suggestions.ui.SuggestionsWorker
 import org.koitharu.kotatsu.sync.SyncFeature
@@ -36,6 +42,17 @@ import org.nemuri.app.ui.components.NemuriToastManager
 import java.net.Proxy
 import javax.inject.Inject
 import javax.inject.Provider
+
+@Immutable
+data class NeuralModelUiItem(
+	val id: String,
+	val title: String,
+	val subtitle: String,
+	val isDownloadable: Boolean,
+	val isDownloaded: Boolean,
+	val isSelected: Boolean,
+	val sizeLabel: String,
+)
 
 data class StorageStats(
 	val isLoading: Boolean = true,
@@ -74,6 +91,13 @@ data class SettingsUiState(
 	val isReaderDescreenEnabled: Boolean = false,
 	val isReaderInkLevelsEnabled: Boolean = false,
 	val readerShaderStrength: Float = 0.75f,
+	val isNeuralUpscaleSupported: Boolean = false,
+	val isNeuralUpscaleEnabled: Boolean = false,
+	val neuralAccelerator: NeuralAccelerator = NeuralAccelerator.AUTO,
+	val isNeuralPreloadEnabled: Boolean = true,
+	val neuralCatalog: List<NeuralModelUiItem> = emptyList(),
+	val neuralDownloadState: NeuralModelDownloadState = NeuralModelDownloadState(),
+	val neuralCacheBytes: Long = 0L,
 	val epubTheme: String = "system",
 	val epubFontFamily: String = "serif",
 	val epubFontSize: Int = 100,
@@ -125,11 +149,14 @@ class SettingsViewModel @Inject constructor(
 	private val cookieJarProvider: Provider<MutableCookieJar>,
 	private val databaseProvider: Provider<MangaDatabase>,
 	private val syncFeature: SyncFeature,
+	private val upscaleModelManager: NeuralUpscaleModelManager,
+	private val pageUpscaleEngine: PageUpscaleEngine,
 	val toastManager: NemuriToastManager,
 ) : ViewModel() {
 
 	private val storageStatsFlow = MutableStateFlow(StorageStats())
 	private val schemaVersionFlow = MutableStateFlow(0)
+	private val neuralCacheVersion = MutableStateFlow(0)
 
 	init {
 		refreshStorageStats()
@@ -147,7 +174,26 @@ class SettingsViewModel @Inject constructor(
 		trackScheduler.observeIsRunning(),
 		storageStatsFlow,
 		schemaVersionFlow,
-	) { _, isTrackerRunning, storageStats, schemaVersion ->
+		combine(
+			upscaleModelManager.downloadState,
+			upscaleModelManager.inventoryVersion,
+			neuralCacheVersion,
+		) { dl, _, _ -> dl },
+	) { _, isTrackerRunning, storageStats, schemaVersion, neuralDl ->
+		val selectedNeuralId = settings.neuralUpscaleModelId
+		val neuralItems = upscaleModelManager.catalog.map { entry ->
+			val file = upscaleModelManager.getModelFile(entry.id)
+			val bytes = file?.length() ?: entry.approxSizeBytes
+			NeuralModelUiItem(
+				id = entry.id,
+				title = entry.title,
+				subtitle = entry.subtitle,
+				isDownloadable = entry.downloadUrl != null,
+				isDownloaded = file != null,
+				isSelected = selectedNeuralId == entry.id,
+				sizeLabel = if (bytes <= 0L) "Custom" else String.format("%.1f MB", bytes / (1024f * 1024f)),
+			)
+		}
 		SettingsUiState(
 			themeMode = settings.theme,
 			isAmoled = settings.isAmoledTheme,
@@ -170,6 +216,13 @@ class SettingsViewModel @Inject constructor(
 			isReaderDescreenEnabled = settings.isReaderDescreenEnabled,
 			isReaderInkLevelsEnabled = settings.isReaderInkLevelsEnabled,
 			readerShaderStrength = settings.readerShaderStrength,
+			isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
+			isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
+			neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
+			isNeuralPreloadEnabled = settings.isNeuralPreloadEnabled,
+			neuralCatalog = neuralItems,
+			neuralDownloadState = neuralDl,
+			neuralCacheBytes = pageUpscaleEngine.computeCacheSizeBytes(),
 			epubTheme = settings.epubTheme,
 			epubFontFamily = settings.epubFontFamily,
 			epubFontSize = settings.epubFontSize,
@@ -277,6 +330,67 @@ class SettingsViewModel @Inject constructor(
 	}
 	fun setReaderShaderStrength(strength: Float) {
 		settings.readerShaderStrength = strength.coerceIn(0.3f, 1.0f)
+	}
+	fun setNeuralUpscaleEnabled(enabled: Boolean) {
+		settings.isNeuralUpscaleEnabled = enabled
+	}
+	fun setNeuralAccelerator(accelerator: NeuralAccelerator) {
+		settings.neuralUpscaleAccelerator = accelerator.key
+	}
+	fun setNeuralPreloadEnabled(enabled: Boolean) {
+		settings.isNeuralPreloadEnabled = enabled
+	}
+	fun selectNeuralModel(modelId: String) {
+		settings.neuralUpscaleModelId = modelId
+		neuralCacheVersion.value += 1
+	}
+	fun downloadNeuralModel(modelId: String) {
+		if (upscaleModelManager.downloadState.value.activeModelId != null) return
+		viewModelScope.launch(Dispatchers.IO) {
+			upscaleModelManager.downloadModel(modelId).onSuccess {
+				if (!settings.isNeuralUpscaleEnabled) {
+					settings.isNeuralUpscaleEnabled = true
+				}
+				neuralCacheVersion.value += 1
+				toastManager.show("Neural upscaler model downloaded")
+			}.onFailure { err ->
+				val msg = err.localizedMessage
+				if (!msg.isNullOrBlank() && !msg.contains("cancel", ignoreCase = true)) {
+					toastManager.show(msg)
+				}
+			}
+		}
+	}
+	fun cancelNeuralDownload() {
+		upscaleModelManager.cancelDownload()
+		toastManager.show("Download cancelled")
+	}
+	fun importNeuralModelUri(uri: Uri) {
+		viewModelScope.launch(Dispatchers.IO) {
+			upscaleModelManager.importModelFromUri(uri).onSuccess {
+				settings.isNeuralUpscaleEnabled = true
+				neuralCacheVersion.value += 1
+				toastManager.show("Custom ONNX upscaler imported")
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to import ONNX file")
+			}
+		}
+	}
+	fun deleteNeuralModel(modelId: String) {
+		viewModelScope.launch(Dispatchers.IO) {
+			if (upscaleModelManager.deleteModel(modelId)) {
+				pageUpscaleEngine.releaseSession()
+				neuralCacheVersion.value += 1
+				toastManager.show("Deleted neural model")
+			}
+		}
+	}
+	fun clearNeuralCache() {
+		viewModelScope.launch(Dispatchers.IO) {
+			pageUpscaleEngine.clearCache()
+			neuralCacheVersion.value += 1
+			toastManager.show("Cleared neural upscale cache")
+		}
 	}
 	fun setEpubTheme(theme: String) {
 		settings.epubTheme = theme

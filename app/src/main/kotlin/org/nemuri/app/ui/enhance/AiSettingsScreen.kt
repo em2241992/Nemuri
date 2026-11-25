@@ -1,5 +1,10 @@
 package org.nemuri.app.ui.enhance
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,8 +28,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
@@ -34,6 +43,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -49,12 +59,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.LocalLlmAccelerator
 import org.koitharu.kotatsu.ai.domain.NanoAvailability
 import org.nemuri.app.ui.settings.SettingsGroupCard
 import org.nemuri.app.ui.settings.SettingsRowDivider
@@ -69,6 +81,7 @@ fun AiSettingsScreen(
 	viewModel: AiSettingsViewModel = viewModel(),
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
+	val context = LocalContext.current
 
 	var remoteUrlDraft by remember { mutableStateOf(state.remoteUrl) }
 	var remoteModelDraft by remember { mutableStateOf(state.remoteModel) }
@@ -85,6 +98,14 @@ fun AiSettingsScreen(
 		remoteUrlDraft = state.remoteUrl
 		remoteModelDraft = state.remoteModel
 		geminiModelDraft = state.geminiModel
+	}
+
+	val importModelLauncher = rememberLauncherForActivityResult(
+		contract = ActivityResultContracts.OpenDocument(),
+	) { uri ->
+		if (uri != null) {
+			viewModel.importLocalModelUri(uri)
+		}
 	}
 
 	SettingsScaffold(
@@ -106,8 +127,9 @@ fun AiSettingsScreen(
 						Text(
 							text = when (state.aiMode) {
 								AiMode.OFF -> "AI calls and recap badges are disabled cleanly (Reading Trail remains local)."
-								AiMode.AUTO -> "Priority: Gemini Nano (AICore) → Gemini API Key → Ollama / OpenAI → Local Reading Trail."
+								AiMode.AUTO -> "Priority: Gemini Nano (AICore) → Gemini API Key → Ollama / OpenAI → Downloaded Local Model → Local Reading Trail."
 								AiMode.GEMINI_NANO -> "Pinned to on-device Gemini Nano via Android AICore."
+								AiMode.LOCAL_MODEL -> "Pinned to your downloaded or imported on-device LiteRT-LM model (auto-unloads from RAM after 60s idle)."
 								AiMode.REMOTE_OPENAI -> "Pinned to your configured Ollama, LM Studio, or OpenAI-compatible endpoint."
 								AiMode.GEMINI_API -> "Pinned to Google Gemini REST API using your encrypted key."
 							},
@@ -174,10 +196,10 @@ fun AiSettingsScreen(
 									},
 								)
 								Text(
-									text = if (state.isDownloadingNano) {
-										"Downloading weights (${state.nanoDownloadedMb} MB)…"
-									} else {
-										"Requires supported AICore device (Pixel 8+/9+/S24+ etc.)"
+									text = when {
+										state.isDownloadingNano -> "Downloading weights (${state.nanoDownloadedMb} MB)…"
+										state.nanoDiagnosticMessage.isNotBlank() -> state.nanoDiagnosticMessage
+										else -> "Requires supported AICore device (Pixel 8+/9+/S24+ etc.)"
 									},
 									style = MaterialTheme.typography.bodySmall,
 									color = NemuriTheme.colors.textMuted,
@@ -194,6 +216,36 @@ fun AiSettingsScreen(
 								}
 							}
 						}
+						if (state.nanoAvailability == NanoAvailability.UNAVAILABLE && state.isLocalRuntimeSupported && !state.isCheckingNano) {
+							Row(
+								modifier = Modifier.fillMaxWidth(),
+								horizontalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								OutlinedButton(
+									onClick = {
+										runCatching {
+											context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+										}
+									},
+									border = BorderStroke(1.dp, NemuriTheme.colors.border),
+									modifier = Modifier.weight(1f),
+								) {
+									Text("Developer Options", style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textSecondary)
+								}
+								OutlinedButton(
+									onClick = {
+										val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.aicore"))
+										val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.aicore"))
+										runCatching { context.startActivity(marketIntent) }
+											.onFailure { runCatching { context.startActivity(webIntent) } }
+									},
+									border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f)),
+									modifier = Modifier.weight(1f),
+								) {
+									Text("Update AICore", style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.cyan)
+								}
+							}
+						}
 						if (state.nanoAvailability == NanoAvailability.DOWNLOADABLE) {
 							Button(
 								onClick = viewModel::downloadNanoModel,
@@ -205,6 +257,170 @@ fun AiSettingsScreen(
 								Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
 								Spacer(Modifier.width(8.dp))
 								Text("Download Gemini Nano Model")
+							}
+						}
+					}
+				}
+			}
+
+			item {
+				SettingsGroupCard("On-Device Local LLM (LiteRT-LM CPU/GPU)") {
+					Column(
+						modifier = Modifier.padding(14.dp),
+						verticalArrangement = Arrangement.spacedBy(10.dp),
+					) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = if (state.isLocalRuntimeSupported) {
+										"Offline CPU/GPU Fallback Ready"
+									} else {
+										"Requires 64-bit GitHub build"
+									},
+									style = MaterialTheme.typography.titleSmall,
+									color = if (state.isLocalRuntimeSupported) NemuriTheme.colors.textPrimary else NemuriTheme.colors.textMuted,
+								)
+								Text(
+									text = "Weights stay out of the APK (${state.localTotalDiskMb} MB on disk) and auto-unload after 60s idle.",
+									style = MaterialTheme.typography.bodySmall,
+									color = NemuriTheme.colors.textMuted,
+								)
+							}
+							if (state.isLocalModelLoadedInRam) {
+								Surface(
+									color = NemuriTheme.colors.healthy.copy(alpha = 0.16f),
+									shape = RoundedCornerShape(999.dp),
+									modifier = Modifier
+										.clip(RoundedCornerShape(999.dp))
+										.clickable { viewModel.unloadLocalModelFromRam() },
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(4.dp),
+									) {
+										Icon(Icons.Default.Memory, contentDescription = null, tint = NemuriTheme.colors.healthy, modifier = Modifier.size(14.dp))
+										Text("In RAM • Unload", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.healthy)
+									}
+								}
+							}
+						}
+
+						if (state.isLocalRuntimeSupported) {
+							Text("Hardware Accelerator", style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textSecondary)
+							Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+								LocalLlmAccelerator.entries.forEach { accel ->
+									val selected = state.localAccelerator == accel
+									Surface(
+										color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+										shape = RoundedCornerShape(10.dp),
+										border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+										modifier = Modifier
+											.weight(1f)
+											.clip(RoundedCornerShape(10.dp))
+											.clickable { viewModel.setLocalAccelerator(accel) },
+									) {
+										Text(
+											text = accel.name,
+											style = MaterialTheme.typography.labelMedium,
+											color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+											modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
+										)
+									}
+								}
+							}
+
+							val dl = state.localDownloadState
+							state.localCatalog.forEach { item ->
+								val isDownloadingThis = dl.activeModelId == item.id
+								Surface(
+									color = if (item.isSelected && item.isDownloaded) {
+										NemuriTheme.colors.tealContainer.copy(alpha = 0.55f)
+									} else {
+										NemuriTheme.colors.surfaceElevated
+									},
+									shape = RoundedCornerShape(12.dp),
+									border = BorderStroke(
+										1.dp,
+										if (item.isSelected && item.isDownloaded) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier.fillMaxWidth(),
+								) {
+									Column(
+										modifier = Modifier.padding(11.dp),
+										verticalArrangement = Arrangement.spacedBy(6.dp),
+									) {
+										Row(
+											modifier = Modifier.fillMaxWidth(),
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.SpaceBetween,
+										) {
+											Column(modifier = Modifier.weight(1f)) {
+												Text(item.title, style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textPrimary)
+												Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textMuted)
+											}
+											if (item.isDownloaded) {
+												Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+													TextButton(onClick = { viewModel.selectLocalModel(item.id) }) {
+														Text(
+															text = if (item.isSelected) "Active" else "Use",
+															color = if (item.isSelected) NemuriTheme.colors.healthy else NemuriTheme.colors.cyan,
+														)
+													}
+													IconButton(onClick = { viewModel.deleteLocalModel(item.id) }, modifier = Modifier.size(32.dp)) {
+														Icon(Icons.Default.Delete, contentDescription = "Delete model", tint = NemuriTheme.colors.danger, modifier = Modifier.size(18.dp))
+													}
+												}
+											} else if (isDownloadingThis) {
+												IconButton(onClick = viewModel::cancelLocalDownload, modifier = Modifier.size(32.dp)) {
+													Icon(Icons.Default.Close, contentDescription = "Cancel download", tint = NemuriTheme.colors.amber, modifier = Modifier.size(18.dp))
+												}
+											} else if (item.isDownloadable) {
+												OutlinedButton(
+													onClick = { viewModel.downloadLocalModel(item.id) },
+													enabled = dl.activeModelId == null,
+													border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)),
+												) {
+													Icon(Icons.Default.Download, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(16.dp))
+													Spacer(Modifier.width(4.dp))
+													Text("${item.sizeMb} MB", color = NemuriTheme.colors.cyan)
+												}
+											} else {
+												OutlinedButton(
+													onClick = { importModelLauncher.launch(arrayOf("*/*")) },
+													enabled = dl.activeModelId == null,
+													border = BorderStroke(1.dp, NemuriTheme.colors.border),
+												) {
+													Icon(Icons.Default.FolderOpen, contentDescription = null, tint = NemuriTheme.colors.textSecondary, modifier = Modifier.size(16.dp))
+													Spacer(Modifier.width(4.dp))
+													Text("Import", color = NemuriTheme.colors.textSecondary)
+												}
+											}
+										}
+										if (isDownloadingThis) {
+											val fraction = if (dl.totalBytes > 0L) {
+												(dl.downloadedBytes.toFloat() / dl.totalBytes.toFloat()).coerceIn(0f, 1f)
+											} else {
+												0f
+											}
+											LinearProgressIndicator(
+												progress = { fraction },
+												color = NemuriTheme.colors.cyan,
+												trackColor = NemuriTheme.colors.border,
+												modifier = Modifier.fillMaxWidth(),
+											)
+											Text(
+												text = "Downloading ${dl.downloadedBytes / (1024L * 1024L)} / ${dl.totalBytes / (1024L * 1024L)} MB…",
+												style = MaterialTheme.typography.labelSmall,
+												color = NemuriTheme.colors.cyan,
+											)
+										}
+									}
+								}
 							}
 						}
 					}

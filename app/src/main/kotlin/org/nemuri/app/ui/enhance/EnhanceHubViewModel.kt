@@ -80,6 +80,13 @@ class EnhanceHubViewModel @Inject constructor(
 			inkLevels = settings.isReaderInkLevelsEnabled,
 			strength = settings.readerShaderStrength,
 		)
+		val shaderSummary = shaderCfg.summaryLabel()
+		val neuralActive = settings.isNeuralUpscaleEnabled
+		val activeUpscalerLabel = when {
+			neuralActive && shaderCfg.isActive -> "Neural 2x + $shaderSummary"
+			neuralActive -> "Neural 2x"
+			else -> shaderSummary
+		}
 		EnhanceHubUiState(
 			libraryCount = libraryCount,
 			brokenSourcesCount = broken.size,
@@ -87,7 +94,7 @@ class EnhanceHubViewModel @Inject constructor(
 			duplicatePairsCount = scan.duplicatePairs,
 			totalReadingTimeMs = scan.totalReadingTimeMs,
 			currentStreakDays = scan.currentStreakDays,
-			activeShaderLabel = shaderCfg.summaryLabel(),
+			activeShaderLabel = activeUpscalerLabel,
 			aiModeLabel = AiMode.fromKey(settings.aiMode).label,
 			isDuplicateCheckOnAdd = settings.isDuplicateCheckEnabled,
 			isDuplicateProgressMigrated = settings.isDuplicateProgressMigrated,

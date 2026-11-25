@@ -23,6 +23,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -59,11 +60,15 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.OpenInBrowser
@@ -74,6 +79,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -128,6 +134,7 @@ import org.koitharu.kotatsu.core.prefs.ReaderMode
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.core.util.ext.isPdfUri
 import org.koitharu.kotatsu.parsers.model.Manga
+import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
@@ -630,6 +637,7 @@ private fun MangaReaderViewport(
 					bitmapConfig = bitmapConfig,
 					isWebtoon = true,
 					shaderConfig = uiState.shaderConfig,
+					neuralRevision = uiState.neuralRevision,
 					loadPage = viewModel::loadPageImage,
 					onTap = onToggleHud,
 					modifier = Modifier.fillMaxWidth(),
@@ -686,6 +694,7 @@ private fun MangaReaderViewport(
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
 						shaderConfig = uiState.shaderConfig,
+						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTap = onToggleHud,
 						modifier = Modifier.fillMaxSize(),
@@ -705,6 +714,7 @@ private fun MangaReaderViewport(
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
 						shaderConfig = uiState.shaderConfig,
+						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTap = onToggleHud,
 						modifier = Modifier.fillMaxSize(),
@@ -723,6 +733,7 @@ private fun MangaReaderViewport(
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
 						shaderConfig = uiState.shaderConfig,
+						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTap = onToggleHud,
 						modifier = Modifier.fillMaxSize(),
@@ -739,6 +750,7 @@ private fun SsivPageView(
 	bitmapConfig: Bitmap.Config,
 	isWebtoon: Boolean,
 	shaderConfig: ReaderShaderConfig,
+	neuralRevision: Int,
 	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
 	onTap: () -> Unit,
 	modifier: Modifier = Modifier,
@@ -750,9 +762,11 @@ private fun SsivPageView(
 	var errorText by remember(page.id) { mutableStateOf<String?>(null) }
 	var imageReady by remember(page.id) { mutableStateOf(false) }
 
-	LaunchedEffect(page.id, retryToken) {
+	LaunchedEffect(page.id, retryToken, neuralRevision) {
 		errorText = null
-		imageReady = false
+		if (resolved == null) {
+			imageReady = false
+		}
 		loadPage(page, retryToken > 0)
 			.onSuccess { resolved = it }
 			.onFailure { err -> errorText = err.getDisplayMessage(context.resources) }
@@ -811,9 +825,10 @@ private fun SsivPageView(
 					}
 				},
 				update = { ssiv ->
+					val holder = ssivState(ssiv)
 					val tagKey = "${uri}_${bitmapConfig.name}"
-					if (ssiv.tag != tagKey) {
-						ssiv.tag = tagKey
+					if (holder.imageKey != tagKey) {
+						holder.imageKey = tagKey
 						val isLowRam = (ssiv.context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
 							?.isLowRamDevice == true
 						ssiv.bitmapDecoderFactory = AvifCapableImageDecoder.Factory(bitmapConfig)
@@ -1229,8 +1244,161 @@ private fun ReaderSettingsModalSheet(
 					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
 				)
 
+				HorizontalDivider(color = NemuriTheme.colors.border, modifier = Modifier.padding(vertical = 2.dp))
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Row(
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = NemuriTheme.colors.mergePurple, modifier = Modifier.size(16.dp))
+							Text("Neural 2x Super-Resolution", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.mergePurple)
+						}
+						Text(
+							text = if (!uiState.isNeuralUpscaleSupported) {
+								"Available in GitHub builds with ONNX Runtime"
+							} else {
+								"256px tiled ONNX • Skips tall webtoons & Battery Saver • Hybrid with GPU Shaders"
+							},
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+					}
+					Switch(
+						checked = uiState.isNeuralUpscaleEnabled,
+						onCheckedChange = viewModel::setNeuralUpscaleEnabled,
+						enabled = uiState.isNeuralUpscaleSupported,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.mergePurple,
+						),
+					)
+				}
+
+				if (uiState.isNeuralUpscaleSupported) {
+					Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+						NeuralAccelerator.entries.forEach { accel ->
+							val selected = uiState.neuralAccelerator == accel
+							Surface(
+								color = if (selected) NemuriTheme.colors.mergePurple.copy(alpha = 0.18f) else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								modifier = Modifier
+									.weight(1f)
+									.border(
+										1.dp,
+										if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
+										RoundedCornerShape(10.dp),
+									)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setNeuralAccelerator(accel) },
+							) {
+								Text(
+									text = when (accel) {
+										NeuralAccelerator.AUTO -> "Auto"
+										NeuralAccelerator.NNAPI -> "NPU / GPU"
+										NeuralAccelerator.XNNPACK -> "CPU"
+									},
+									style = MaterialTheme.typography.labelSmall,
+									color = if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textSecondary,
+									textAlign = TextAlign.Center,
+									maxLines = 1,
+									modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+								)
+							}
+						}
+					}
+
+					val dl = uiState.neuralDownloadState
+					uiState.neuralCatalog.filter { it.isDownloadable || it.isDownloaded }.forEach { model ->
+						val isDownloadingThis = dl.activeModelId == model.id
+						Surface(
+							color = if (model.isSelected && model.isDownloaded) {
+								NemuriTheme.colors.mergePurple.copy(alpha = 0.14f)
+							} else {
+								NemuriTheme.colors.surfaceElevated
+							},
+							shape = RoundedCornerShape(10.dp),
+							border = BorderStroke(
+								1.dp,
+								if (model.isSelected && model.isDownloaded) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
+							),
+							modifier = Modifier.fillMaxWidth(),
+						) {
+							Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.SpaceBetween,
+								) {
+									Column(modifier = Modifier.weight(1f)) {
+										Text(model.title, style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textPrimary)
+										Text(model.subtitle, style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+									}
+									if (model.isDownloaded) {
+										Row(verticalAlignment = Alignment.CenterVertically) {
+											TextButton(onClick = { viewModel.selectNeuralModel(model.id) }) {
+												Text(
+													text = if (model.isSelected) "Active" else "Use",
+													color = if (model.isSelected) NemuriTheme.colors.healthy else NemuriTheme.colors.cyan,
+												)
+											}
+											IconButton(onClick = { viewModel.deleteNeuralModel(model.id) }, modifier = Modifier.size(28.dp)) {
+												Icon(Icons.Default.Delete, contentDescription = "Delete model", tint = NemuriTheme.colors.danger, modifier = Modifier.size(16.dp))
+											}
+										}
+									} else if (isDownloadingThis) {
+										IconButton(onClick = viewModel::cancelNeuralDownload, modifier = Modifier.size(28.dp)) {
+											Icon(Icons.Default.Close, contentDescription = "Cancel", tint = NemuriTheme.colors.amber, modifier = Modifier.size(16.dp))
+										}
+									} else {
+										TextButton(
+											onClick = { viewModel.downloadNeuralModel(model.id) },
+											enabled = dl.activeModelId == null,
+										) {
+											Icon(Icons.Default.Download, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(15.dp))
+											Spacer(Modifier.width(4.dp))
+											Text(model.sizeLabel, color = NemuriTheme.colors.cyan)
+										}
+									}
+								}
+								if (isDownloadingThis) {
+									val frac = if (dl.totalBytes > 0L) (dl.downloadedBytes.toFloat() / dl.totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+									LinearProgressIndicator(
+										progress = { frac },
+										color = NemuriTheme.colors.mergePurple,
+										trackColor = NemuriTheme.colors.border,
+										modifier = Modifier.fillMaxWidth(),
+									)
+								}
+							}
+						}
+					}
+
+					if (uiState.neuralCacheBytes > 0L) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Text(
+								text = "Upscale cache: ${String.format("%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))}",
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.textMuted,
+							)
+							TextButton(onClick = viewModel::clearNeuralCache) {
+								Text("Clear Cache", color = NemuriTheme.colors.cyan)
+							}
+						}
+					}
+				}
+
 				val currentPage = uiState.pages.getOrNull(uiState.currentPageIndex)
-				if (UpscaleEffect.isSupported && currentPage != null) {
+				if ((UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) && currentPage != null) {
 					Button(
 						onClick = { showShaderPreview = true },
 						colors = ButtonDefaults.buttonColors(
@@ -1248,7 +1416,11 @@ private fun ReaderSettingsModalSheet(
 						ShaderSplitPreviewDialog(
 							page = currentPage,
 							config = uiState.shaderConfig,
-							loadPage = viewModel::loadPageImage,
+							isNeuralActive = uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel,
+							neuralModelLabel = uiState.activeNeuralModelLabel,
+							neuralRevision = uiState.neuralRevision,
+							loadOriginalPage = viewModel::loadRawPageImage,
+							loadEnhancedPage = viewModel::loadPageImage,
 							onDismiss = { showShaderPreview = false },
 						)
 					}
@@ -1383,6 +1555,14 @@ private fun ReaderChallengeScreen(
 
 private data class AppliedShaderState(val key: Pair<ReaderShaderConfig, Float>?)
 
+private class SsivHolderState(
+	var imageKey: String? = null,
+	var shaderState: AppliedShaderState? = null,
+)
+
+private fun ssivState(ssiv: SubsamplingScaleImageView): SsivHolderState =
+	(ssiv.tag as? SsivHolderState) ?: SsivHolderState().also { ssiv.tag = it }
+
 private fun applyShaderToSsiv(
 	ssiv: SubsamplingScaleImageView,
 	config: ReaderShaderConfig,
@@ -1398,8 +1578,9 @@ private fun applyShaderToSsiv(
 	val desired = AppliedShaderState(
 		key = if (!config.isActive || isPowerSave) null else (config to fitScale),
 	)
-	if (ssiv.tag == desired) return
-	ssiv.tag = desired
+	val holder = ssivState(ssiv)
+	if (holder.shaderState == desired) return
+	holder.shaderState = desired
 	if (desired.key == null) {
 		ssiv.setRenderEffect(null)
 	} else {
@@ -1411,32 +1592,59 @@ private fun applyShaderToSsiv(
 private fun ShaderSplitPreviewDialog(
 	page: ReaderPage,
 	config: ReaderShaderConfig,
-	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
+	isNeuralActive: Boolean,
+	neuralModelLabel: String,
+	neuralRevision: Int,
+	loadOriginalPage: suspend (ReaderPage) -> Result<Pair<Uri, Rect?>>,
+	loadEnhancedPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
 	onDismiss: () -> Unit,
 ) {
 	val context = LocalContext.current
-	var bitmap by remember(page.id) { mutableStateOf<Bitmap?>(null) }
+	var origBitmap by remember(page.id) { mutableStateOf<Bitmap?>(null) }
+	var enhBitmap by remember(page.id, neuralRevision) { mutableStateOf<Bitmap?>(null) }
 	var loadFailed by remember(page.id) { mutableStateOf(false) }
 	var splitFraction by remember { mutableStateOf(0.5f) }
 
-	LaunchedEffect(page.id) {
+	suspend fun decodeUriBitmap(uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+		runCatching {
+			val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+			context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+			var sample = 1
+			while ((opts.outWidth / sample) > 1440 || (opts.outHeight / sample) > 2200) {
+				sample *= 2
+			}
+			val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+			context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+		}.getOrNull()
+	}
+
+	LaunchedEffect(page.id, neuralRevision, isNeuralActive) {
 		loadFailed = false
-		val loaded = withContext(Dispatchers.IO) {
-			val pair = loadPage(page, false).getOrNull() ?: return@withContext null
-			val (uri, _) = pair
-			runCatching {
-				val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-				context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-				var sample = 1
-				while ((opts.outWidth / sample) > 1440 || (opts.outHeight / sample) > 2200) {
-					sample *= 2
-				}
-				val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-				context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
-			}.getOrNull()
+		val origUri = withContext(Dispatchers.IO) { loadOriginalPage(page).getOrNull()?.first }
+		val loadedOrig = origUri?.let { decodeUriBitmap(it) }
+		origBitmap = loadedOrig
+		if (loadedOrig == null) {
+			loadFailed = true
+			return@LaunchedEffect
 		}
-		bitmap = loaded
-		loadFailed = loaded == null
+		enhBitmap = if (isNeuralActive) {
+			val enhUri = withContext(Dispatchers.IO) { loadEnhancedPage(page, false).getOrNull()?.first }
+			if (enhUri != null && enhUri != origUri) {
+				decodeUriBitmap(enhUri) ?: loadedOrig
+			} else {
+				loadedOrig
+			}
+		} else {
+			loadedOrig
+		}
+	}
+
+	val enhancedSummary = remember(config, isNeuralActive, neuralModelLabel) {
+		when {
+			isNeuralActive && config.isActive -> "Neural 2x + ${config.summaryLabel()}"
+			isNeuralActive -> "Neural 2x ($neuralModelLabel)"
+			else -> config.summaryLabel()
+		}
 	}
 
 	Dialog(
@@ -1458,9 +1666,9 @@ private fun ShaderSplitPreviewDialog(
 					horizontalArrangement = Arrangement.SpaceBetween,
 					verticalAlignment = Alignment.CenterVertically,
 				) {
-					Column {
-						Text("Shader Split Preview", style = MaterialTheme.typography.titleMedium, color = NemuriTheme.colors.textPrimary)
-						Text("Left: Original • Right: ${config.summaryLabel()}", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan)
+					Column(modifier = Modifier.weight(1f)) {
+						Text("Upscaler Split Preview", style = MaterialTheme.typography.titleMedium, color = NemuriTheme.colors.textPrimary)
+						Text("Left: Original • Right: $enhancedSummary", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan, maxLines = 1, overflow = TextOverflow.Ellipsis)
 					}
 					TextButton(onClick = onDismiss) {
 						Text("Done", color = NemuriTheme.colors.cyan)
@@ -1482,7 +1690,8 @@ private fun ShaderSplitPreviewDialog(
 						},
 					contentAlignment = Alignment.Center,
 				) {
-					val bmp = bitmap
+					val leftBmp = origBitmap
+					val rightBmp = enhBitmap
 					when {
 						loadFailed -> {
 							Text(
@@ -1492,7 +1701,7 @@ private fun ShaderSplitPreviewDialog(
 							)
 						}
 
-						bmp == null -> {
+						leftBmp == null || rightBmp == null -> {
 							CircularProgressIndicator(color = NemuriTheme.colors.cyan)
 						}
 
@@ -1514,7 +1723,7 @@ private fun ShaderSplitPreviewDialog(
 										scaleType = ImageView.ScaleType.FIT_CENTER
 									}
 								},
-								update = { iv -> iv.setImageBitmap(bmp) },
+								update = { iv -> iv.setImageBitmap(leftBmp) },
 								modifier = Modifier
 									.fillMaxSize()
 									.clip(leftShape),
@@ -1527,7 +1736,7 @@ private fun ShaderSplitPreviewDialog(
 									}
 								},
 								update = { iv ->
-									iv.setImageBitmap(bmp)
+									iv.setImageBitmap(rightBmp)
 									val desired = AppliedShaderState(if (config.isActive) (config to 2.0f) else null)
 									if (iv.tag != desired) {
 										iv.tag = desired

@@ -8,6 +8,11 @@ class GeminiNanoClient @Inject constructor() {
 
 	suspend fun checkAvailability(): NanoAvailability = NanoAvailability.UNAVAILABLE
 
+	suspend fun checkDiagnostics(): NanoDiagnostics = NanoDiagnostics(
+		availability = NanoAvailability.UNAVAILABLE,
+		detailMessage = "Gemini Nano requires Google AICore (included in the GitHub build).",
+	)
+
 	suspend fun triggerDownload(onProgress: (Long) -> Unit = {}): Result<Unit> =
 		Result.failure(UnsupportedOperationException("Gemini Nano requires AICore (GitHub build)"))
 

@@ -26,14 +26,97 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import org.nemuri.app.ui.theme.NemuriTheme
+
+/**
+ * Keeps [TextFieldValue] (cursor selection & IME composing region) synchronized immediately on the
+ * UI thread while ignoring delayed echoes from async `StateFlow` ViewModels so rapid typing on
+ * the first character never jumps the cursor backwards.
+ */
+@Stable
+class SyncedTextFieldController internal constructor(
+	initialText: String,
+	private val onTextChange: (String) -> Unit,
+) {
+	var fieldValue by mutableStateOf(
+		TextFieldValue(text = initialText, selection = TextRange(initialText.length)),
+	)
+		private set
+
+	private val pendingDispatched = ArrayDeque<String>(8)
+
+	fun onValueChange(next: TextFieldValue) {
+		val textChanged = next.text != fieldValue.text
+		fieldValue = next
+		if (textChanged) {
+			if (pendingDispatched.size >= 32) {
+				pendingDispatched.removeFirst()
+			}
+			pendingDispatched.addLast(next.text)
+			onTextChange(next.text)
+		}
+	}
+
+	fun clear() {
+		if (fieldValue.text.isNotEmpty() || pendingDispatched.isNotEmpty()) {
+			fieldValue = TextFieldValue("")
+			if (pendingDispatched.size >= 32) {
+				pendingDispatched.removeFirst()
+			}
+			pendingDispatched.addLast("")
+			onTextChange("")
+		}
+	}
+
+	internal fun syncFromExternal(externalText: String) {
+		val idx = pendingDispatched.indexOf(externalText)
+		if (idx >= 0) {
+			repeat(idx + 1) { pendingDispatched.removeFirst() }
+			return
+		}
+		if (externalText != fieldValue.text) {
+			pendingDispatched.clear()
+			fieldValue = TextFieldValue(
+				text = externalText,
+				selection = TextRange(externalText.length),
+			)
+		}
+	}
+}
+
+@Composable
+fun rememberSyncedTextField(
+	externalText: String,
+	onTextChange: (String) -> Unit,
+): SyncedTextFieldController {
+	val latestOnTextChange by rememberUpdatedState(onTextChange)
+	val controller = remember {
+		SyncedTextFieldController(
+			initialText = externalText,
+			onTextChange = { latestOnTextChange(it) },
+		)
+	}
+	LaunchedEffect(externalText) {
+		controller.syncFromExternal(externalText)
+	}
+	return controller
+}
 
 @Composable
 fun NemuriTopSearchHeader(
@@ -54,6 +137,7 @@ fun NemuriTopSearchHeader(
 		color = NemuriTheme.colors.background,
 		modifier = modifier.fillMaxWidth(),
 	) {
+		val searchField = rememberSyncedTextField(query, onQueryChange)
 		Row(
 			modifier = Modifier
 				.fillMaxWidth()
@@ -113,7 +197,7 @@ fun NemuriTopSearchHeader(
 							.padding(horizontal = 6.dp),
 						contentAlignment = Alignment.CenterStart,
 					) {
-						if (query.isEmpty()) {
+						if (searchField.fieldValue.text.isEmpty()) {
 							Text(
 								text = placeholder,
 								style = MaterialTheme.typography.bodyMedium,
@@ -122,8 +206,8 @@ fun NemuriTopSearchHeader(
 							)
 						}
 						BasicTextField(
-							value = query,
-							onValueChange = onQueryChange,
+							value = searchField.fieldValue,
+							onValueChange = searchField::onValueChange,
 							singleLine = true,
 							textStyle = MaterialTheme.typography.bodyMedium.copy(
 								color = NemuriTheme.colors.textPrimary,
@@ -135,12 +219,12 @@ fun NemuriTopSearchHeader(
 						)
 					}
 
-					if (query.isNotEmpty()) {
+					if (searchField.fieldValue.text.isNotEmpty()) {
 						Box(
 							modifier = Modifier
 								.size(32.dp)
 								.clip(RoundedCornerShape(16.dp))
-								.clickable { onQueryChange("") },
+								.clickable { searchField.clear() },
 							contentAlignment = Alignment.Center,
 						) {
 							Icon(

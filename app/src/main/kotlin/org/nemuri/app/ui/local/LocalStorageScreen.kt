@@ -55,6 +55,7 @@ import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @Composable
@@ -150,14 +151,15 @@ fun LocalStorageScreen(
 			}
 		}
 
+		val queryField = rememberSyncedTextField(uiState.query, viewModel::setQuery)
 		OutlinedTextField(
-			value = uiState.query,
-			onValueChange = viewModel::setQuery,
+			value = queryField.fieldValue,
+			onValueChange = queryField::onValueChange,
 			placeholder = { Text("Filter CBZ, EPUB & PDF files…") },
 			leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
 			trailingIcon = {
-				if (uiState.query.isNotEmpty()) {
-					IconButton(onClick = { viewModel.setQuery("") }) {
+				if (queryField.fieldValue.text.isNotEmpty()) {
+					IconButton(onClick = queryField::clear) {
 						Icon(Icons.Default.Close, contentDescription = "Clear")
 					}
 				}

@@ -249,7 +249,7 @@ class GlobalSearchViewModel @Inject constructor(
 							sourceName = source.name,
 							sourceTitle = source.getTitle(context),
 							isNovel = source.isNovelSource,
-							items = results.manga,
+							items = results.manga.distinctBy { it.id },
 						)
 						stateMutex.withLock {
 							_uiState.update { state ->
@@ -298,7 +298,7 @@ class GlobalSearchViewModel @Inject constructor(
 							sourceName = source.name,
 							sourceTitle = source.getTitle(context),
 							isNovel = source.isNovelSource,
-							items = searchResults.manga,
+							items = searchResults.manga.distinctBy { it.id },
 						)
 						_uiState.update { state ->
 							state.copy(

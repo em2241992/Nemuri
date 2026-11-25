@@ -96,6 +96,7 @@ import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @Composable
@@ -186,12 +187,13 @@ fun SourceBrowseScreen(
 						.height(40.dp)
 						.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp)),
 				) {
+					val queryField = rememberSyncedTextField(uiState.query, viewModel::setQuery)
 					Row(
 						modifier = Modifier.padding(horizontal = 10.dp),
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						Box(modifier = Modifier.weight(1f)) {
-							if (uiState.query.isEmpty()) {
+							if (queryField.fieldValue.text.isEmpty()) {
 								Text(
 									text = "Search ${uiState.sourceTitle}…",
 									style = MaterialTheme.typography.bodySmall,
@@ -200,8 +202,8 @@ fun SourceBrowseScreen(
 								)
 							}
 							BasicTextField(
-								value = uiState.query,
-								onValueChange = viewModel::setQuery,
+								value = queryField.fieldValue,
+								onValueChange = queryField::onValueChange,
 								singleLine = true,
 								textStyle = MaterialTheme.typography.bodySmall.copy(color = NemuriTheme.colors.textPrimary),
 								cursorBrush = SolidColor(NemuriTheme.colors.cyan),
@@ -212,7 +214,8 @@ fun SourceBrowseScreen(
 						}
 						IconButton(
 							onClick = {
-								if (uiState.query.isNotEmpty()) {
+								if (queryField.fieldValue.text.isNotEmpty() || uiState.query.isNotEmpty()) {
+									queryField.clear()
 									viewModel.clearSearch()
 								} else {
 									isSearchExpanded = false

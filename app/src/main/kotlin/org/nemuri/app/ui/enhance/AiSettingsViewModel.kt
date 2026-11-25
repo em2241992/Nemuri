@@ -1,5 +1,6 @@
 package org.nemuri.app.ui.enhance
 
+import android.net.Uri
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,8 +15,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.ai.data.AiSecretStore
+import org.koitharu.kotatsu.ai.data.LocalModelManager
 import org.koitharu.kotatsu.ai.domain.AiConnectionTestResult
 import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.LocalLlmAccelerator
+import org.koitharu.kotatsu.ai.domain.LocalLlmClient
+import org.koitharu.kotatsu.ai.domain.LocalModelDownloadState
 import org.koitharu.kotatsu.ai.domain.NanoAvailability
 import org.koitharu.kotatsu.ai.domain.NemuriAiRouter
 import org.koitharu.kotatsu.ai.domain.WhereWasIRecapUseCase
@@ -25,12 +30,31 @@ import javax.inject.Inject
 import javax.inject.Provider
 
 @Immutable
+data class LocalModelUiItem(
+	val id: String,
+	val title: String,
+	val subtitle: String,
+	val isDownloadable: Boolean,
+	val isDownloaded: Boolean,
+	val isSelected: Boolean,
+	val sizeMb: Long,
+)
+
+@Immutable
 data class AiSettingsUiState(
 	val aiMode: AiMode = AiMode.AUTO,
 	val nanoAvailability: NanoAvailability = NanoAvailability.UNAVAILABLE,
+	val nanoDiagnosticMessage: String = "",
 	val isCheckingNano: Boolean = true,
 	val isDownloadingNano: Boolean = false,
 	val nanoDownloadedMb: Long = 0L,
+	val isLocalRuntimeSupported: Boolean = false,
+	val localAccelerator: LocalLlmAccelerator = LocalLlmAccelerator.GPU,
+	val selectedLocalModelId: String = "",
+	val localCatalog: List<LocalModelUiItem> = emptyList(),
+	val localDownloadState: LocalModelDownloadState = LocalModelDownloadState(),
+	val isLocalModelLoadedInRam: Boolean = false,
+	val localTotalDiskMb: Long = 0L,
 	val remoteUrl: String = "http://127.0.0.1:11434/v1",
 	val remoteModel: String = "llama3.2",
 	val hasOpenAiKey: Boolean = false,
@@ -44,6 +68,7 @@ data class AiSettingsUiState(
 
 private data class AiDynamicState(
 	val nanoAvailability: NanoAvailability = NanoAvailability.UNAVAILABLE,
+	val nanoDiagnosticMessage: String = "",
 	val isCheckingNano: Boolean = true,
 	val isDownloadingNano: Boolean = false,
 	val nanoDownloadedMb: Long = 0L,
@@ -58,6 +83,8 @@ class AiSettingsViewModel @Inject constructor(
 	private val settings: AppSettings,
 	private val secretStore: AiSecretStore,
 	private val aiRouterProvider: Provider<NemuriAiRouter>,
+	private val localModelManager: LocalModelManager,
+	private val localLlmClientProvider: Provider<LocalLlmClient>,
 	private val recapUseCaseProvider: Provider<WhereWasIRecapUseCase>,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
@@ -76,13 +103,39 @@ class AiSettingsViewModel @Inject constructor(
 	val uiState: StateFlow<AiSettingsUiState> = combine(
 		settings.observeChanges().onStart { emit(null) },
 		dynamicState,
-	) { _, dyn ->
+		localModelManager.downloadState,
+		localModelManager.inventoryVersion,
+		localLlmClientProvider.get().isModelLoadedInRam,
+	) { _, dyn, localDl, _, loadedInRam ->
+		val selectedLocalId = settings.aiLocalModelId
+		val catalogItems = localModelManager.catalog.map { entry ->
+			val downloadedBytes = localModelManager.getDownloadedSizeBytes(entry.id)
+			val downloaded = downloadedBytes > 0L
+			val mb = (if (downloaded) downloadedBytes else entry.approxSizeBytes) / (1024L * 1024L)
+			LocalModelUiItem(
+				id = entry.id,
+				title = entry.title,
+				subtitle = entry.subtitle,
+				isDownloadable = entry.downloadUrl != null,
+				isDownloaded = downloaded,
+				isSelected = selectedLocalId == entry.id,
+				sizeMb = mb,
+			)
+		}
 		AiSettingsUiState(
 			aiMode = AiMode.fromKey(settings.aiMode),
 			nanoAvailability = dyn.nanoAvailability,
+			nanoDiagnosticMessage = dyn.nanoDiagnosticMessage,
 			isCheckingNano = dyn.isCheckingNano,
 			isDownloadingNano = dyn.isDownloadingNano,
 			nanoDownloadedMb = dyn.nanoDownloadedMb,
+			isLocalRuntimeSupported = localLlmClientProvider.get().isRuntimeSupported,
+			localAccelerator = LocalLlmAccelerator.fromKey(settings.aiLocalAccelerator),
+			selectedLocalModelId = selectedLocalId,
+			localCatalog = catalogItems,
+			localDownloadState = localDl,
+			isLocalModelLoadedInRam = loadedInRam,
+			localTotalDiskMb = localModelManager.totalDiskUsageBytes() / (1024L * 1024L),
 			remoteUrl = settings.aiRemoteUrl,
 			remoteModel = settings.aiRemoteModel,
 			hasOpenAiKey = dyn.hasOpenAiKey,
@@ -99,6 +152,63 @@ class AiSettingsViewModel @Inject constructor(
 		initialValue = AiSettingsUiState(),
 	)
 
+	fun setLocalAccelerator(accel: LocalLlmAccelerator) {
+		settings.aiLocalAccelerator = accel.key
+		dynamicState.update { it.copy(testResult = null) }
+	}
+
+	fun selectLocalModel(modelId: String) {
+		settings.aiLocalModelId = modelId
+		dynamicState.update { it.copy(testResult = null) }
+	}
+
+	fun downloadLocalModel(modelId: String) {
+		if (localModelManager.downloadState.value.activeModelId != null) return
+		viewModelScope.launch(Dispatchers.IO) {
+			val result = localModelManager.downloadModel(modelId)
+			result.onSuccess {
+				toastManager.show("Local model ready for offline recaps")
+			}.onFailure { err ->
+				val msg = err.localizedMessage
+				if (!msg.isNullOrBlank() && !msg.contains("cancel", ignoreCase = true)) {
+					toastManager.show(msg)
+				}
+			}
+		}
+	}
+
+	fun cancelLocalDownload() {
+		localModelManager.cancelDownload()
+		toastManager.show("Model download cancelled")
+	}
+
+	fun importLocalModelUri(uri: Uri) {
+		viewModelScope.launch(Dispatchers.IO) {
+			toastManager.show("Importing local .litertlm model…")
+			localModelManager.importModelFromUri(uri).onSuccess {
+				toastManager.show("Custom model imported and selected")
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to import model file")
+			}
+		}
+	}
+
+	fun deleteLocalModel(modelId: String) {
+		viewModelScope.launch(Dispatchers.IO) {
+			localLlmClientProvider.get().unloadNow()
+			if (localModelManager.deleteModel(modelId)) {
+				toastManager.show("Deleted local model weights")
+			}
+		}
+	}
+
+	fun unloadLocalModelFromRam() {
+		viewModelScope.launch(Dispatchers.IO) {
+			localLlmClientProvider.get().unloadNow()
+			toastManager.show("Unloaded local LLM from RAM")
+		}
+	}
+
 	fun setAiMode(mode: AiMode) {
 		settings.aiMode = mode.key
 		dynamicState.update { it.copy(testResult = null) }
@@ -107,8 +217,14 @@ class AiSettingsViewModel @Inject constructor(
 	fun refreshNanoStatus() {
 		viewModelScope.launch(Dispatchers.IO) {
 			dynamicState.update { it.copy(isCheckingNano = true) }
-			val availability = aiRouterProvider.get().checkNanoAvailability()
-			dynamicState.update { it.copy(nanoAvailability = availability, isCheckingNano = false) }
+			val diag = aiRouterProvider.get().checkNanoDiagnostics()
+			dynamicState.update {
+				it.copy(
+					nanoAvailability = diag.availability,
+					nanoDiagnosticMessage = diag.detailMessage,
+					isCheckingNano = false,
+				)
+			}
 		}
 	}
 
@@ -126,9 +242,13 @@ class AiSettingsViewModel @Inject constructor(
 				val mb = bytes / (1024L * 1024L)
 				dynamicState.update { it.copy(nanoDownloadedMb = mb) }
 			}
-			val availability = aiRouterProvider.get().checkNanoAvailability()
+			val diag = aiRouterProvider.get().checkNanoDiagnostics()
 			dynamicState.update {
-				it.copy(isDownloadingNano = false, nanoAvailability = availability)
+				it.copy(
+					isDownloadingNano = false,
+					nanoAvailability = diag.availability,
+					nanoDiagnosticMessage = diag.detailMessage,
+				)
 			}
 			result.onSuccess {
 				toastManager.show("Gemini Nano model downloaded")

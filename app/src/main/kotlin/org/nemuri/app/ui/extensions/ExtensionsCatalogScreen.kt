@@ -13,12 +13,15 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,7 +50,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -89,6 +91,7 @@ import org.koitharu.kotatsu.settings.sources.catalog.StoreHealth
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @Composable
@@ -302,19 +305,19 @@ fun ExtensionsCatalogScreen(
 				}
 				Surface(
 					color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(14.dp),
+					shape = RoundedCornerShape(12.dp),
 					modifier = Modifier
 						.weight(1f)
 						.border(
 							1.dp,
 							if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-							RoundedCornerShape(14.dp),
+							RoundedCornerShape(12.dp),
 						)
-						.clip(RoundedCornerShape(14.dp))
+						.clip(RoundedCornerShape(12.dp))
 						.clickable { viewModel.selectTab(tab) },
 				) {
 					Row(
-						modifier = Modifier.padding(horizontal = 6.dp, vertical = 9.dp),
+						modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
 						horizontalArrangement = Arrangement.Center,
 						verticalAlignment = Alignment.CenterVertically,
 					) {
@@ -323,15 +326,21 @@ fun ExtensionsCatalogScreen(
 							style = MaterialTheme.typography.labelMedium,
 							color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 							maxLines = 1,
+							softWrap = false,
 							overflow = TextOverflow.Ellipsis,
 						)
 						if (countBadge > 0) {
 							Spacer(modifier = Modifier.width(4.dp))
-							Badge(
-								containerColor = if (tab == ExtensionsTab.UPDATES) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-								contentColor = if (tab == ExtensionsTab.UPDATES) NemuriTheme.colors.onCyan else NemuriTheme.colors.textPrimary,
+							Surface(
+								color = if (tab == ExtensionsTab.UPDATES) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								shape = RoundedCornerShape(999.dp),
 							) {
-								Text(countBadge.toString())
+								NonWrappingBadgeText(
+									text = countBadge.toString(),
+									color = if (tab == ExtensionsTab.UPDATES) NemuriTheme.colors.onCyan else NemuriTheme.colors.textPrimary,
+									fontSizeSp = 9.5f,
+									modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+								)
 							}
 						}
 					}
@@ -367,8 +376,9 @@ fun ExtensionsCatalogScreen(
 							tint = NemuriTheme.colors.textMuted,
 							modifier = Modifier.size(18.dp),
 						)
+						val queryField = rememberSyncedTextField(uiState.query, viewModel::setQuery)
 						Box(modifier = Modifier.weight(1f)) {
-							if (uiState.query.isEmpty()) {
+							if (queryField.fieldValue.text.isEmpty()) {
 								Text(
 									text = "Filter extensions or sources…",
 									style = MaterialTheme.typography.bodySmall,
@@ -376,56 +386,61 @@ fun ExtensionsCatalogScreen(
 								)
 							}
 							BasicTextField(
-								value = uiState.query,
-								onValueChange = viewModel::setQuery,
+								value = queryField.fieldValue,
+								onValueChange = queryField::onValueChange,
 								singleLine = true,
 								textStyle = MaterialTheme.typography.bodySmall.copy(color = NemuriTheme.colors.textPrimary),
 								cursorBrush = SolidColor(NemuriTheme.colors.cyan),
 								modifier = Modifier.fillMaxWidth(),
 							)
 						}
-						if (uiState.query.isNotEmpty()) {
+						if (queryField.fieldValue.text.isNotEmpty()) {
 							Icon(
 								imageVector = Icons.Default.Close,
 								contentDescription = "Clear",
 								tint = NemuriTheme.colors.textMuted,
 								modifier = Modifier
 									.size(18.dp)
-									.clickable { viewModel.setQuery("") },
+									.clickable { queryField.clear() },
 							)
 						}
 					}
 				}
 
 				if (uiState.availableLanguages.isNotEmpty()) {
+					val selectedLang = uiState.selectedLangCode
 					Surface(
-						color = if (uiState.selectedLangCode != null) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						color = if (selectedLang != null) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
 						shape = RoundedCornerShape(12.dp),
 						modifier = Modifier
 							.height(42.dp)
 							.border(
 								1.dp,
-								if (uiState.selectedLangCode != null) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								if (selectedLang != null) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 								RoundedCornerShape(12.dp),
 							)
 							.clip(RoundedCornerShape(12.dp))
 							.clickable { showLanguageSheet = true },
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 12.dp),
+							modifier = Modifier.padding(horizontal = 14.dp),
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(6.dp),
 						) {
 							Icon(
 								imageVector = Icons.Default.Language,
 								contentDescription = "Language filter",
-								tint = if (uiState.selectedLangCode != null) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								tint = if (selectedLang != null) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 								modifier = Modifier.size(16.dp),
 							)
 							Text(
-								text = uiState.selectedLangCode?.uppercase() ?: "Lang",
+								text = when {
+									selectedLang == null -> "Lang"
+									selectedLang.equals("all", ignoreCase = true) -> "Multi"
+									else -> selectedLang.uppercase()
+								},
 								style = MaterialTheme.typography.labelMedium,
-								color = if (uiState.selectedLangCode != null) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								color = if (selectedLang != null) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 							)
 						}
 					}
@@ -585,7 +600,9 @@ fun ExtensionsCatalogScreen(
 			onDismiss = { showLanguageSheet = false },
 		) {
 			LazyColumn(
-				modifier = Modifier.fillMaxWidth(),
+				modifier = Modifier
+					.fillMaxWidth()
+					.heightIn(max = 420.dp),
 				verticalArrangement = Arrangement.spacedBy(6.dp),
 				contentPadding = PaddingValues(bottom = 12.dp),
 			) {
@@ -616,6 +633,7 @@ fun ExtensionsCatalogScreen(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun InstalledExtensionsList(
 	items: List<InstalledExtensionItem>,
@@ -683,7 +701,7 @@ private fun InstalledExtensionsList(
 			}
 		}
 
-		items(items, key = { "${if (it.isLnPlugin) "ln" else "apk"}:${it.id}" }) { item ->
+		items(items, key = { it.listKey }) { item ->
 			val busy = item.id in inProgressIds
 			Surface(
 				color = NemuriTheme.colors.card,
@@ -693,85 +711,100 @@ private fun InstalledExtensionsList(
 					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp)),
 			) {
 				Row(
-					modifier = Modifier.padding(12.dp),
+					modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
 					verticalAlignment = Alignment.CenterVertically,
 					horizontalArrangement = Arrangement.spacedBy(12.dp),
 				) {
 					ExtensionIconBox(iconModel = item.iconModel, fallbackName = item.displayName, isNovel = item.isNovel)
-					Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-						Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+					Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+						Text(
+							text = item.displayName,
+							style = MaterialTheme.typography.titleSmall,
+							color = NemuriTheme.colors.textPrimary,
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+						)
+						FlowRow(
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+							verticalArrangement = Arrangement.spacedBy(4.dp),
+							itemVerticalAlignment = Alignment.CenterVertically,
+						) {
 							Text(
-								text = item.displayName,
-								style = MaterialTheme.typography.titleSmall,
-								color = NemuriTheme.colors.textPrimary,
+								text = buildString {
+									append(item.langLabel)
+									append(" • v")
+									append(item.versionName)
+									if (!item.storeLabel.isNullOrBlank()) {
+										append(" • ")
+										append(item.storeLabel)
+									}
+									if (!item.isShared && !item.isLnPlugin) {
+										append(" • Sandbox")
+									}
+								},
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.textMuted,
 								maxLines = 1,
 								overflow = TextOverflow.Ellipsis,
-								modifier = Modifier.weight(1f, fill = false),
 							)
 							if (item.isNovel) {
 								PillBadge(text = if (item.isLnPlugin) "JS NOVEL" else "NOVEL", color = NemuriTheme.colors.cyan)
 							}
 						}
-						Text(
-							text = buildString {
-								append(item.langLabel)
-								append(" • v")
-								append(item.versionName)
-								if (!item.storeLabel.isNullOrBlank()) {
-									append(" • ")
-									append(item.storeLabel)
-								}
-								if (!item.isShared && !item.isLnPlugin) {
-									append(" • Sandbox")
-								}
-							},
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.textMuted,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
 					}
-					if (item.updateCandidate != null) {
-						Surface(
-							color = NemuriTheme.colors.cyan,
-							shape = RoundedCornerShape(10.dp),
-							modifier = Modifier
-								.clip(RoundedCornerShape(10.dp))
-								.clickable(enabled = !busy) { onUpdate(item.updateCandidate) },
-						) {
-							Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-								if (busy) {
-									CircularProgressIndicator(
-										color = NemuriTheme.colors.onCyan,
-										strokeWidth = 2.dp,
-										modifier = Modifier.size(16.dp),
-									)
-								} else {
-									Icon(
-										imageVector = Icons.Default.SystemUpdateAlt,
-										contentDescription = "Update",
-										tint = NemuriTheme.colors.onCyan,
-										modifier = Modifier.size(16.dp),
-									)
+					Row(
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(2.dp),
+					) {
+						if (item.updateCandidate != null) {
+							Surface(
+								color = NemuriTheme.colors.cyan,
+								shape = RoundedCornerShape(10.dp),
+								modifier = Modifier
+									.clip(RoundedCornerShape(10.dp))
+									.clickable(enabled = !busy) { onUpdate(item.updateCandidate) },
+							) {
+								Box(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+									if (busy) {
+										CircularProgressIndicator(
+											color = NemuriTheme.colors.onCyan,
+											strokeWidth = 2.dp,
+											modifier = Modifier.size(16.dp),
+										)
+									} else {
+										Icon(
+											imageVector = Icons.Default.SystemUpdateAlt,
+											contentDescription = "Update",
+											tint = NemuriTheme.colors.onCyan,
+											modifier = Modifier.size(16.dp),
+										)
+									}
 								}
 							}
 						}
-					}
-					IconButton(onClick = { onToggleHidden(item) }) {
-						Icon(
-							imageVector = if (item.isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-							contentDescription = if (item.isHidden) "Show in Explore" else "Hide from Explore",
-							tint = if (item.isHidden) NemuriTheme.colors.amber else NemuriTheme.colors.textSecondary,
-							modifier = Modifier.size(20.dp),
-						)
-					}
-					IconButton(onClick = { onUninstall(item) }, enabled = !busy) {
-						Icon(
-							imageVector = Icons.Default.DeleteOutline,
-							contentDescription = "Uninstall",
-							tint = NemuriTheme.colors.danger,
-							modifier = Modifier.size(20.dp),
-						)
+						IconButton(
+							onClick = { onToggleHidden(item) },
+							modifier = Modifier.size(36.dp),
+						) {
+							Icon(
+								imageVector = if (item.isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+								contentDescription = if (item.isHidden) "Show in Explore" else "Hide from Explore",
+								tint = if (item.isHidden) NemuriTheme.colors.amber else NemuriTheme.colors.textSecondary,
+								modifier = Modifier.size(20.dp),
+							)
+						}
+						IconButton(
+							onClick = { onUninstall(item) },
+							enabled = !busy,
+							modifier = Modifier.size(36.dp),
+						) {
+							Icon(
+								imageVector = Icons.Default.DeleteOutline,
+								contentDescription = "Uninstall",
+								tint = NemuriTheme.colors.danger,
+								modifier = Modifier.size(20.dp),
+							)
+						}
 					}
 				}
 			}
@@ -839,7 +872,7 @@ private fun UpdatesExtensionsList(
 			}
 		}
 
-		items(items, key = { "${if (it.isLnPlugin) "ln" else "apk"}:${it.id}" }) { item ->
+		items(items, key = { it.listKey }) { item ->
 			val candidate = item.updateCandidate ?: return@items
 			val busy = item.id in inProgressIds
 			CatalogExtensionRow(
@@ -883,7 +916,7 @@ private fun CatalogExtensionsList(
 		contentPadding = PaddingValues(14.dp),
 		verticalArrangement = Arrangement.spacedBy(10.dp),
 	) {
-		items(items, key = { "${it.storeId}:${it.packageName}:${it.apkName}" }) { item ->
+		items(items, key = { it.listKey }) { item ->
 			CatalogExtensionRow(
 				item = item,
 				busy = item.packageName in inProgressIds,
@@ -893,6 +926,7 @@ private fun CatalogExtensionsList(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CatalogExtensionRow(
 	item: CatalogExtensionItem,
@@ -907,20 +941,41 @@ private fun CatalogExtensionRow(
 			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp)),
 	) {
 		Row(
-			modifier = Modifier.padding(12.dp),
+			modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(12.dp),
 		) {
 			ExtensionIconBox(iconModel = item.iconUrl, fallbackName = item.displayName, isNovel = item.isNovel)
-			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-				Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+				Text(
+					text = item.displayName,
+					style = MaterialTheme.typography.titleSmall,
+					color = NemuriTheme.colors.textPrimary,
+					maxLines = 2,
+					overflow = TextOverflow.Ellipsis,
+				)
+				FlowRow(
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
+					verticalArrangement = Arrangement.spacedBy(4.dp),
+					itemVerticalAlignment = Alignment.CenterVertically,
+				) {
 					Text(
-						text = item.displayName,
-						style = MaterialTheme.typography.titleSmall,
-						color = NemuriTheme.colors.textPrimary,
+						text = buildString {
+							append(item.langLabel)
+							append(" • v")
+							append(item.versionName)
+							if (item.hasUpdate && !item.installedVersionName.isNullOrBlank()) {
+								append(" (from ")
+								append(item.installedVersionName)
+								append(")")
+							}
+							append(" • ")
+							append(item.storeLabel)
+						},
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
 						maxLines = 1,
 						overflow = TextOverflow.Ellipsis,
-						modifier = Modifier.weight(1f, fill = false),
 					)
 					if (item.isNovel) {
 						PillBadge(text = if (item.isLnPlugin) "JS" else "NOVEL", color = NemuriTheme.colors.cyan)
@@ -932,24 +987,6 @@ private fun CatalogExtensionRow(
 						)
 					}
 				}
-				Text(
-					text = buildString {
-						append(item.langLabel)
-						append(" • v")
-						append(item.versionName)
-						if (item.hasUpdate && !item.installedVersionName.isNullOrBlank()) {
-							append(" (from ")
-							append(item.installedVersionName)
-							append(")")
-						}
-						append(" • ")
-						append(item.storeLabel)
-					},
-					style = MaterialTheme.typography.labelSmall,
-					color = NemuriTheme.colors.textMuted,
-					maxLines = 1,
-					overflow = TextOverflow.Ellipsis,
-				)
 			}
 
 			val actionColor = when {
@@ -960,8 +997,8 @@ private fun CatalogExtensionRow(
 			OutlinedButton(
 				onClick = onClick,
 				enabled = !busy && (!item.isInstalled || item.hasUpdate),
-				shape = RoundedCornerShape(10.dp),
-				contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+				shape = RoundedCornerShape(12.dp),
+				contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp),
 			) {
 				if (busy) {
 					CircularProgressIndicator(
@@ -1001,6 +1038,7 @@ private fun CatalogExtensionRow(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StoresTabList(
 	stores: List<StoreSummaryItem>,
@@ -1149,22 +1187,23 @@ private fun StoresTabList(
 						.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp)),
 				) {
 					Row(
-						modifier = Modifier.padding(14.dp),
+						modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
 						verticalAlignment = Alignment.CenterVertically,
 						horizontalArrangement = Arrangement.spacedBy(12.dp),
 					) {
 						Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-							Row(
-								verticalAlignment = Alignment.CenterVertically,
+							Text(
+								text = summary.label,
+								style = MaterialTheme.typography.titleSmall,
+								color = NemuriTheme.colors.textPrimary,
+								maxLines = 2,
+								overflow = TextOverflow.Ellipsis,
+							)
+							FlowRow(
 								horizontalArrangement = Arrangement.spacedBy(6.dp),
+								verticalArrangement = Arrangement.spacedBy(4.dp),
+								itemVerticalAlignment = Alignment.CenterVertically,
 							) {
-								Text(
-									text = summary.label,
-									style = MaterialTheme.typography.titleSmall,
-									color = NemuriTheme.colors.textPrimary,
-									maxLines = 1,
-									overflow = TextOverflow.Ellipsis,
-								)
 								val (healthLabel, healthColor) = when (st.health) {
 									StoreHealth.AVAILABLE -> "OK" to NemuriTheme.colors.healthy
 									StoreHealth.CHECKING -> "SYNCING" to NemuriTheme.colors.amber
@@ -1181,9 +1220,14 @@ private fun StoresTabList(
 										color = NemuriTheme.colors.cyan,
 									)
 								}
+								Text(
+									text = "${st.catalog.size} extensions",
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.textMuted,
+								)
 							}
 							Text(
-								text = "${st.catalog.size} extensions • ${st.store.indexUrl}",
+								text = st.store.indexUrl,
 								style = MaterialTheme.typography.labelSmall,
 								color = NemuriTheme.colors.textMuted,
 								maxLines = 1,
@@ -1280,7 +1324,10 @@ private fun FilterPillChip(
 			text = label,
 			style = MaterialTheme.typography.labelMedium,
 			color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-			modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+			maxLines = 1,
+			softWrap = false,
+			overflow = TextOverflow.Ellipsis,
+			modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
 		)
 	}
 }

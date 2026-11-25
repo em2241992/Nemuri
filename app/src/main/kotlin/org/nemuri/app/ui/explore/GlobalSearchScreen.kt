@@ -78,6 +78,7 @@ import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.MangaCompactGridCard
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -143,6 +144,7 @@ fun GlobalSearchScreen(
 					.height(44.dp)
 					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp)),
 			) {
+				val queryField = rememberSyncedTextField(uiState.query, viewModel::setQuery)
 				Row(
 					modifier = Modifier.padding(horizontal = 12.dp),
 					verticalAlignment = Alignment.CenterVertically,
@@ -155,7 +157,7 @@ fun GlobalSearchScreen(
 						modifier = Modifier.size(18.dp),
 					)
 					Box(modifier = Modifier.weight(1f)) {
-						if (uiState.query.isEmpty()) {
+						if (queryField.fieldValue.text.isEmpty()) {
 							Text(
 								text = "Search across enabled sources…",
 								style = MaterialTheme.typography.bodyMedium,
@@ -164,8 +166,8 @@ fun GlobalSearchScreen(
 							)
 						}
 						BasicTextField(
-							value = uiState.query,
-							onValueChange = viewModel::setQuery,
+							value = queryField.fieldValue,
+							onValueChange = queryField::onValueChange,
 							singleLine = true,
 							textStyle = MaterialTheme.typography.bodyMedium.copy(color = NemuriTheme.colors.textPrimary),
 							cursorBrush = SolidColor(NemuriTheme.colors.cyan),
@@ -174,14 +176,17 @@ fun GlobalSearchScreen(
 							modifier = Modifier.fillMaxWidth(),
 						)
 					}
-					if (uiState.query.isNotEmpty()) {
+					if (queryField.fieldValue.text.isNotEmpty()) {
 						Icon(
 							imageVector = Icons.Default.Close,
 							contentDescription = "Clear",
 							tint = NemuriTheme.colors.textMuted,
 							modifier = Modifier
 								.size(18.dp)
-								.clickable { viewModel.submitSearch("") },
+								.clickable {
+									queryField.clear()
+									viewModel.submitSearch("")
+								},
 						)
 					}
 				}
