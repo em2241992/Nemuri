@@ -36,11 +36,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -149,6 +152,7 @@ fun SourceBrowseScreen(
 
 	var isSearchExpanded by rememberSaveable(sourceName) { mutableStateOf(!initialQuery.isNullOrBlank()) }
 	var showFilterSheet by remember { mutableStateOf(false) }
+	var showLanguageVariantSheet by remember { mutableStateOf(false) }
 
 	val hasFilterControls = uiState.supportsDynamicFilters && uiState.dynamicFilters.isNotEmpty() ||
 		uiState.staticFilters.availableTags.isNotEmpty() ||
@@ -239,6 +243,15 @@ fun SourceBrowseScreen(
 						tint = NemuriTheme.colors.cyan,
 					)
 				}
+				if (uiState.languageVariants.size > 1) {
+					IconButton(onClick = { showLanguageVariantSheet = true }) {
+						Icon(
+							imageVector = Icons.Default.Language,
+							contentDescription = "Switch source language",
+							tint = NemuriTheme.colors.cyan,
+						)
+					}
+				}
 			} else {
 				Column(
 					modifier = Modifier
@@ -254,13 +267,51 @@ fun SourceBrowseScreen(
 					)
 					val subtitle = uiState.languageSubtitle
 					if (!subtitle.isNullOrBlank()) {
-						Text(
-							text = subtitle,
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.cyan,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
+						if (uiState.languageVariants.size > 1) {
+							Surface(
+								color = NemuriTheme.colors.tealContainer,
+								shape = RoundedCornerShape(999.dp),
+								modifier = Modifier
+									.padding(top = 2.dp)
+									.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+									.clip(RoundedCornerShape(999.dp))
+									.clickable { showLanguageVariantSheet = true },
+							) {
+								Row(
+									modifier = Modifier.padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.spacedBy(4.dp),
+								) {
+									Icon(
+										imageVector = Icons.Default.Language,
+										contentDescription = null,
+										tint = NemuriTheme.colors.cyan,
+										modifier = Modifier.size(12.dp),
+									)
+									Text(
+										text = subtitle,
+										style = MaterialTheme.typography.labelSmall,
+										color = NemuriTheme.colors.cyan,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+									Icon(
+										imageVector = Icons.Default.ArrowDropDown,
+										contentDescription = "Switch source language",
+										tint = NemuriTheme.colors.cyan,
+										modifier = Modifier.size(15.dp),
+									)
+								}
+							}
+						} else {
+							Text(
+								text = subtitle,
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.cyan,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis,
+							)
+						}
 					}
 				}
 				if (uiState.isSearchSupported) {
@@ -491,6 +542,68 @@ fun SourceBrowseScreen(
 					showFilterSheet = false
 				},
 			)
+		}
+	}
+
+	if (showLanguageVariantSheet && uiState.languageVariants.size > 1) {
+		NemuriModalSheet(
+			title = "Source Language",
+			subtitle = "${uiState.sourceTitle} • ${uiState.languageVariants.size} languages available",
+			onDismiss = { showLanguageVariantSheet = false },
+		) {
+			LazyColumn(
+				modifier = Modifier
+					.fillMaxWidth()
+					.heightIn(max = 420.dp),
+				verticalArrangement = Arrangement.spacedBy(8.dp),
+				contentPadding = PaddingValues(bottom = 12.dp),
+			) {
+				items(uiState.languageVariants, key = { it.languageCode }) { variant ->
+					Surface(
+						color = if (variant.isActive) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(12.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.border(
+								1.dp,
+								if (variant.isActive) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								RoundedCornerShape(12.dp),
+							)
+							.clip(RoundedCornerShape(12.dp))
+							.clickable {
+								viewModel.selectSourceLanguage(variant.languageCode)
+								showLanguageVariantSheet = false
+							},
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = variant.displayName,
+									style = MaterialTheme.typography.titleSmall,
+									color = if (variant.isActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = variant.languageCode.uppercase(),
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.textMuted,
+								)
+							}
+							if (variant.isActive) {
+								Icon(
+									imageVector = Icons.Default.Check,
+									contentDescription = null,
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(18.dp),
+								)
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -798,9 +911,10 @@ private fun DynamicFilterItem(
 		}
 
 		is DynamicFilterNode.Text -> {
+			val filterTextField = rememberSyncedTextField(node.value) { viewModel.updateDynamicText(node.path, it) }
 			OutlinedTextField(
-				value = node.value,
-				onValueChange = { viewModel.updateDynamicText(node.path, it) },
+				value = filterTextField.fieldValue,
+				onValueChange = filterTextField::onValueChange,
 				label = { Text(node.name) },
 				singleLine = true,
 				modifier = Modifier.fillMaxWidth(),

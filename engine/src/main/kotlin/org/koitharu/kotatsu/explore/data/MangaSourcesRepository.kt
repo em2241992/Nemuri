@@ -42,6 +42,14 @@ data class ResolvedSource(
 	val languageSubtitle: String?,
 )
 
+/** One selectable language variant of a multi-language Mihon extension source. */
+data class SourceLanguageVariant(
+	val languageCode: String,
+	val displayName: String,
+	val source: MihonMangaSource,
+	val isActive: Boolean,
+)
+
 @Singleton
 class MangaSourcesRepository @Inject constructor(
 	@LocalizedAppContext private val context: Context,
@@ -279,6 +287,52 @@ class MangaSourcesRepository @Inject constructor(
 		val activeLang = resolveActiveMihonLanguage(siblings.map { it.language }, stored, appLanguage)
 		val active = siblings.firstOrNull { it.language == activeLang } ?: mihon
 		return ResolvedSource(active, active.languageDisplayName)
+	}
+
+	/**
+	 * Returns all distinct language variants offered by [source]'s logical Mihon source
+	 * (same package + source name), or an empty list when [source] is single-language or non-Mihon.
+	 */
+	fun getSourceLanguageVariants(source: MangaSource): List<SourceLanguageVariant> {
+		val mihon = source.unwrapMihon() ?: return emptyList()
+		val manager = mihonExtensionManager ?: return emptyList()
+		manager.initialize()
+		val siblings = manager.getMihonMangaSources()
+			.filter { it.pkgName == mihon.pkgName && it.catalogueSource.name == mihon.catalogueSource.name }
+			.distinctBy { normalizeExternalExtensionLangCode(it.language) }
+		if (siblings.size <= 1) return emptyList()
+		val stored = settings.getMihonActiveLang(mihon.pkgName, mihon.catalogueSource.name)
+		val activeLang = resolveActiveMihonLanguage(siblings.map { it.language }, stored, appLanguage)
+		return siblings.map { sibling ->
+			SourceLanguageVariant(
+				languageCode = sibling.language,
+				displayName = sibling.languageDisplayName,
+				source = sibling,
+				isActive = sibling.language.equals(activeLang, ignoreCase = true),
+			)
+		}.sortedWith(
+			compareByDescending<SourceLanguageVariant> { it.languageCode.equals("all", ignoreCase = true) }
+				.thenBy { it.displayName.lowercase() },
+		)
+	}
+
+	/**
+	 * Persists [languageCode] as the active language for [source]'s logical Mihon source and returns
+	 * the newly resolved [ResolvedSource].
+	 */
+	fun setActiveSourceLanguage(source: MangaSource, languageCode: String): ResolvedSource {
+		val mihon = source.unwrapMihon() ?: return ResolvedSource(source, null)
+		settings.setMihonActiveLang(mihon.pkgName, mihon.catalogueSource.name, languageCode)
+		val resolved = resolveActiveSource(mihon)
+		val currentHome = settings.exploreHomeSource
+		if (currentHome != null) {
+			val siblings = mihonExtensionManager?.getMihonMangaSources().orEmpty()
+				.filter { it.pkgName == mihon.pkgName && it.catalogueSource.name == mihon.catalogueSource.name }
+			if (currentHome == mihon.name || siblings.any { it.name == currentHome }) {
+				settings.exploreHomeSource = resolved.source.name
+			}
+		}
+		return resolved
 	}
 
 	/** Novel plugins mixed straight into Explore alongside manga sources. */

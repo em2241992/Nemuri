@@ -169,6 +169,7 @@ class FeedViewModel @Inject constructor(
 				)
 			}
 			.toList()
+			.distinctBy { it.logId }
 
 		val filtered = if (prefs.unreadOnly) {
 			allEntries.filter { it.logItem.isNew }
@@ -189,10 +190,11 @@ class FeedViewModel @Inject constructor(
 					sourceTitle = item.manga.source.getTitle(context),
 				)
 			}
+			.distinctBy { it.manga.id }
 
 		val recentAddedItems = recentFavs.filter { manga ->
 			trimmed.isEmpty() || manga.title.contains(trimmed, ignoreCase = true)
-		}
+		}.distinctBy { it.id }
 
 		val hubUpdates = (allEntries.filter { it.logItem.isNew }.ifEmpty { allEntries }).take(8)
 

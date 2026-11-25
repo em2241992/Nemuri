@@ -312,7 +312,7 @@ class ReaderViewModel @Inject constructor(
 		if (!stateHasChapterAfter(pages, globalIndex) && chIdx in 0 until activeBranchChapters.lastIndex) {
 			viewModelScope.launch(Dispatchers.IO) {
 				if (chaptersLoader.loadPrevNextChapter(details, page.chapterId, isNext = true)) {
-					val updated = chaptersLoader.snapshot()
+					val updated = chaptersLoader.snapshot().distinctBy { it.id }
 					_uiState.update { it.copy(pages = updated) }
 				}
 			}
@@ -708,7 +708,7 @@ class ReaderViewModel @Inject constructor(
 					val branch = requestedBranch?.takeIf { loaded.chapters.containsKey(it) }
 						?: manga.getPreferredBranch(history).takeIf { loaded.chapters.containsKey(it) }
 						?: loaded.chapters.keys.firstOrNull()
-					val branchChapters = loaded.chapters[branch] ?: loaded.allChapters
+					val branchChapters = (loaded.chapters[branch] ?: loaded.allChapters).distinctBy { it.id }
 					activeBranchChapters = branchChapters
 
 					if (!initializedChapter && branchChapters.isNotEmpty()) {
@@ -833,7 +833,7 @@ class ReaderViewModel @Inject constructor(
 						?: detectReaderModeUseCase(manga, initialState)
 					chaptersLoader.init(details)
 					val loadedOk = chaptersLoader.loadSingleChapter(chapter.id)
-					val snapshot = chaptersLoader.snapshot()
+					val snapshot = chaptersLoader.snapshot().distinctBy { it.id }
 					if (!loadedOk || snapshot.isEmpty()) {
 						error("This chapter has no readable pages.")
 					}

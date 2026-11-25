@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PushPin
@@ -103,6 +104,7 @@ fun ExploreScreen(
 	var showSortAndLanguageSheet by remember { mutableStateOf(false) }
 	var showHomeSourcePicker by remember { mutableStateOf(false) }
 	var actionTargetTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
+	var languagePickerTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
 
 	Column(modifier = Modifier.fillMaxSize()) {
 		NemuriTopSearchHeader(
@@ -601,6 +603,7 @@ fun ExploreScreen(
 
 	val sheetTile = actionTargetTile
 	if (sheetTile != null) {
+		val languageVariants = remember(sheetTile.sourceName) { viewModel.getLanguageVariants(sheetTile) }
 		NemuriModalSheet(
 			title = sheetTile.title,
 			subtitle = sheetTile.summary,
@@ -615,6 +618,18 @@ fun ExploreScreen(
 						actionTargetTile = null
 					},
 				)
+				if (languageVariants.size > 1) {
+					val activeLabel = languageVariants.firstOrNull { it.isActive }?.displayName
+						?: "${languageVariants.size} available"
+					SheetActionRow(
+						icon = Icons.Default.Language,
+						label = "Switch Source Language ($activeLabel)",
+						onClick = {
+							languagePickerTile = sheetTile
+							actionTargetTile = null
+						},
+					)
+				}
 				val url = sheetTile.homeUrl
 				if (!url.isNullOrBlank()) {
 					SheetActionRow(
@@ -644,6 +659,70 @@ fun ExploreScreen(
 						actionTargetTile = null
 					},
 				)
+			}
+		}
+	}
+
+	val pickerTile = languagePickerTile
+	if (pickerTile != null) {
+		val variants = remember(pickerTile.sourceName) { viewModel.getLanguageVariants(pickerTile) }
+		NemuriModalSheet(
+			title = "Source Language",
+			subtitle = "${pickerTile.title} • ${variants.size} languages available",
+			onDismiss = { languagePickerTile = null },
+		) {
+			LazyColumn(
+				modifier = Modifier
+					.fillMaxWidth()
+					.heightIn(max = 420.dp),
+				verticalArrangement = Arrangement.spacedBy(8.dp),
+				contentPadding = PaddingValues(bottom = 12.dp),
+			) {
+				items(variants, key = { it.languageCode }) { variant ->
+					Surface(
+						color = if (variant.isActive) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(12.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.border(
+								1.dp,
+								if (variant.isActive) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								RoundedCornerShape(12.dp),
+							)
+							.clip(RoundedCornerShape(12.dp))
+							.clickable {
+								viewModel.selectTileLanguage(pickerTile, variant.languageCode)
+								languagePickerTile = null
+							},
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = variant.displayName,
+									style = MaterialTheme.typography.titleSmall,
+									color = if (variant.isActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = variant.languageCode.uppercase(),
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.textMuted,
+								)
+							}
+							if (variant.isActive) {
+								Icon(
+									imageVector = Icons.Default.Check,
+									contentDescription = null,
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(18.dp),
+								)
+							}
+						}
+					}
+				}
 			}
 		}
 	}

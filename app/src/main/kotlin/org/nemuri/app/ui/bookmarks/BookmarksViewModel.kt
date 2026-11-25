@@ -73,6 +73,7 @@ class BookmarksViewModel @Inject constructor(
 							bookmark.highlightText?.contains(trimmed, ignoreCase = true) == true
 					}
 					.sortedByDescending { it.createdAt }
+					.distinctBy { it.pageId }
 				if (filteredBookmarks.isEmpty()) {
 					null
 				} else {

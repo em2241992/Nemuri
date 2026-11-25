@@ -166,6 +166,7 @@ class MigrateMangaViewModel @Inject constructor(
 					aiEngineUsed = null,
 				)
 			}
+			val seenKeys = HashSet<String>()
 			val found = ArrayList<MigrationCandidateItem>()
 			alternativesUseCaseProvider.get()
 				.invoke(seed, targets = targets, loose = state.looseMatch)
@@ -173,6 +174,8 @@ class MigrateMangaViewModel @Inject constructor(
 					toastManager.show(err.localizedMessage ?: "Source search interrupted")
 				}
 				.collect { match ->
+					val dedupeKey = "${match.source.name}:${match.id}"
+					if (!seenKeys.add(dedupeKey)) return@collect
 					val item = MigrationCandidateItem(
 						manga = match,
 						sourceTitle = match.source.getTitle(context),

@@ -33,6 +33,7 @@ import org.koitharu.kotatsu.core.prefs.observeAsFlow
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.explore.data.SourceLanguage
+import org.koitharu.kotatsu.explore.data.SourceLanguageVariant
 import org.koitharu.kotatsu.explore.data.SourcesSortOrder
 import org.koitharu.kotatsu.explore.domain.ExploreRepository
 import org.koitharu.kotatsu.extensions.runtime.normalizeExternalExtensionLangCode
@@ -484,6 +485,17 @@ class ExploreViewModel @Inject constructor(
 		}
 		sourcesRepository.setHiddenLanguages(updated)
 		languageRefreshTrigger.value++
+	}
+
+	fun getLanguageVariants(tile: ExploreSourceTile): List<SourceLanguageVariant> =
+		sourcesRepository.getSourceLanguageVariants(tile.sourceInfo.mangaSource)
+
+	fun selectTileLanguage(tile: ExploreSourceTile, languageCode: String) {
+		viewModelScope.launch(Dispatchers.IO) {
+			val resolved = sourcesRepository.setActiveSourceLanguage(tile.sourceInfo.mangaSource, languageCode)
+			languageRefreshTrigger.value++
+			toastManager.show("Switched ${tile.title} to ${resolved.languageSubtitle ?: languageCode.uppercase()}")
+		}
 	}
 
 	fun reloadSources() {

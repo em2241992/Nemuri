@@ -100,7 +100,7 @@ class BrokenSourcesViewModel @Inject constructor(
 		proposalsStateFlow,
 	) { usages, enabledSources, step, (selSources, orderedTargets, selTargets), propBundle ->
 		val enabledNames = enabledSources.mapTo(HashSet(enabledSources.size)) { it.name }
-		val items = usages.map { usage ->
+		val items = usages.distinctBy { it.source }.map { usage ->
 			val matchingInfo = enabledSources.firstOrNull { it.name == usage.source }
 			LibrarySourceItem(
 				sourceName = usage.source,
@@ -190,7 +190,7 @@ class BrokenSourcesViewModel @Inject constructor(
 		stepFlow.value = BrokenWizardStep.REVIEW
 		scanJob?.cancel()
 		scanJob = viewModelScope.launch(Dispatchers.IO) {
-			val entities = databaseProvider.get().getMangaDao().findLibraryMangaBySources(chosenSources)
+			val entities = databaseProvider.get().getMangaDao().findLibraryMangaBySources(chosenSources).distinctBy { it.id }
 			val total = entities.size
 			proposalsStateFlow.value = ProposalsBundle(isScanning = true, scanDone = 0, scanTotal = total)
 			val autoFix = autoFixUseCaseProvider.get()

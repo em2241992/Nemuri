@@ -280,7 +280,7 @@ class MangaDetailsViewModel @Inject constructor(
 					if (!settings.isRelatedMangaEnabled) {
 						emptyList()
 					} else {
-						relatedMangaUseCase(manga).orEmpty()
+						relatedMangaUseCase(manga).orEmpty().distinctBy { it.id }
 					}
 				}
 				.flowOn(Dispatchers.IO)
@@ -800,7 +800,7 @@ class MangaDetailsViewModel @Inject constructor(
 						?: chaptersMap.keys.firstOrNull()
 					else -> chaptersMap.keys.firstOrNull()
 				}
-				val branchChapters = chaptersMap[resolvedBranch] ?: details?.allChapters.orEmpty()
+				val branchChapters = (chaptersMap[resolvedBranch] ?: details?.allChapters.orEmpty()).distinctBy { it.id }
 				val currentChapterId = user.history?.chapterId
 				val currentIndex = branchChapters.indexOfFirst { it.id == currentChapterId }
 				val newStartIndex = if (user.newCount > 0 && branchChapters.size >= user.newCount) {

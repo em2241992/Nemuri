@@ -28,6 +28,8 @@ import org.koitharu.kotatsu.core.model.homeUrl
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
+import org.koitharu.kotatsu.explore.data.ResolvedSource
+import org.koitharu.kotatsu.explore.data.SourceLanguageVariant
 import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
 import org.koitharu.kotatsu.list.domain.ListSortOrder
 import org.koitharu.kotatsu.mihon.MihonFilterHost
@@ -120,6 +122,7 @@ data class StaticFilterSnapshot(
 data class SourceBrowseUiState(
 	val sourceTitle: String = "",
 	val languageSubtitle: String? = null,
+	val languageVariants: List<SourceLanguageVariant> = emptyList(),
 	val homeUrl: String? = null,
 	val resolvedSource: MangaSource = UnknownMangaSource,
 	val query: String = "",
@@ -199,69 +202,95 @@ class SourceBrowseViewModel @Inject constructor(
 				sourcesRepository.ensureMihonSourcesLoaded()
 			}
 			val resolved = sourcesRepository.resolveActiveSource(ResolveMangaSource(sourceName))
-			activeSource = resolved.source
-			sourcesRepository.trackUsage(activeSource)
+			applyResolvedSource(resolved, startQuery = initialQuery?.trim().orEmpty())
+			loadPage(reset = true)
+		}
+	}
 
-			val repo = mangaRepositoryFactory.create(activeSource)
-			repository = repo
+	fun selectSourceLanguage(languageCode: String) {
+		val currentVariants = _uiState.value.languageVariants
+		if (currentVariants.any { it.isActive && it.languageCode.equals(languageCode, ignoreCase = true) }) {
+			return
+		}
+		loadJob?.cancel()
+		seenIds.clear()
+		viewModelScope.launch(Dispatchers.IO) {
+			val resolved = sourcesRepository.setActiveSourceLanguage(activeSource, languageCode)
+			applyResolvedSource(resolved, startQuery = _uiState.value.query)
+			val langLabel = resolved.languageSubtitle ?: languageCode.uppercase()
+			toastManager.show("Switched ${activeSource.getTitle(context)} to $langLabel")
+			loadPage(reset = true)
+		}
+	}
 
-			val sortOrders = repo.sortOrders.toList().ifEmpty { listOf(SortOrder.POPULARITY) }
-			val startQuery = initialQuery?.trim().orEmpty()
-			val initialSort = if (startQuery.isNotEmpty() && SortOrder.RELEVANCE in sortOrders) {
-				SortOrder.RELEVANCE
-			} else if (repo.defaultSortOrder in sortOrders) {
-				repo.defaultSortOrder
-			} else {
-				sortOrders.first()
-			}
+	private suspend fun applyResolvedSource(
+		resolved: ResolvedSource,
+		startQuery: String,
+	) {
+		activeSource = resolved.source
+		sourcesRepository.trackUsage(activeSource)
 
-			val filterHost = repo as? MihonFilterHost
-			val isDynamic = filterHost?.supportsDynamicFilters == true
-			inAppListingsExclusive = filterHost?.inAppListingsExclusive == true
+		val repo = mangaRepositoryFactory.create(activeSource)
+		repository = repo
 
-			val caps = repo.filterCapabilities
-			var staticSnapshot = StaticFilterSnapshot(
-				isMultipleTagsSupported = caps.isMultipleTagsSupported,
-				isTagsExclusionSupported = caps.isTagsExclusionSupported,
-			)
+		val sortOrders = repo.sortOrders.toList().ifEmpty { listOf(SortOrder.POPULARITY) }
+		val initialSort = if (startQuery.isNotEmpty() && SortOrder.RELEVANCE in sortOrders) {
+			SortOrder.RELEVANCE
+		} else if (repo.defaultSortOrder in sortOrders) {
+			repo.defaultSortOrder
+		} else {
+			sortOrders.first()
+		}
 
-			if (isDynamic && filterHost != null) {
-				defaultDynamicFilters = runCatchingCancellable { filterHost.loadDefaultFilterList() }
-					.getOrDefault(FilterList(emptyList()))
-				workingDynamicFilters = runCatchingCancellable { filterHost.loadDefaultFilterList() }
-					.getOrDefault(FilterList(emptyList()))
-				appliedTags = emptySet()
-			} else {
-				val opts = runCatchingCancellable { repo.getFilterOptions() }.getOrNull()
-				if (opts != null) {
-					staticSnapshot = staticSnapshot.copy(
-						availableTags = opts.availableTags.sortedBy { it.title.lowercase() },
-						availableStates = opts.availableStates.toList(),
-						availableContentRatings = opts.availableContentRating.toList(),
-						availableContentTypes = opts.availableContentTypes.toList(),
-					)
-				}
-			}
+		val filterHost = repo as? MihonFilterHost
+		val isDynamic = filterHost?.supportsDynamicFilters == true
+		inAppListingsExclusive = filterHost?.inAppListingsExclusive == true
 
-			_uiState.update {
-				it.copy(
-					sourceTitle = activeSource.getTitle(context),
-					languageSubtitle = resolved.languageSubtitle,
-					homeUrl = activeSource.homeUrl,
-					resolvedSource = activeSource,
-					query = startQuery,
-					availableSortOrders = sortOrders,
-					selectedSortOrder = initialSort,
-					isSearchSupported = caps.isSearchSupported,
-					isSearchWithFiltersSupported = caps.isSearchWithFiltersSupported,
-					supportsDynamicFilters = isDynamic,
-					dynamicFilters = if (isDynamic) snapshotDynamicFilters(workingDynamicFilters) else emptyList(),
-					staticFilters = staticSnapshot,
-					activeFilterCount = 0,
+		val caps = repo.filterCapabilities
+		var staticSnapshot = StaticFilterSnapshot(
+			isMultipleTagsSupported = caps.isMultipleTagsSupported,
+			isTagsExclusionSupported = caps.isTagsExclusionSupported,
+		)
+
+		if (isDynamic && filterHost != null) {
+			defaultDynamicFilters = runCatchingCancellable { filterHost.loadDefaultFilterList() }
+				.getOrDefault(FilterList(emptyList()))
+			workingDynamicFilters = runCatchingCancellable { filterHost.loadDefaultFilterList() }
+				.getOrDefault(FilterList(emptyList()))
+			appliedTags = emptySet()
+		} else {
+			defaultDynamicFilters = FilterList(emptyList())
+			workingDynamicFilters = FilterList(emptyList())
+			appliedTags = emptySet()
+			val opts = runCatchingCancellable { repo.getFilterOptions() }.getOrNull()
+			if (opts != null) {
+				staticSnapshot = staticSnapshot.copy(
+					availableTags = opts.availableTags.sortedBy { it.title.lowercase() },
+					availableStates = opts.availableStates.toList(),
+					availableContentRatings = opts.availableContentRating.toList(),
+					availableContentTypes = opts.availableContentTypes.toList(),
 				)
 			}
+		}
 
-			loadPage(reset = true)
+		val variants = sourcesRepository.getSourceLanguageVariants(activeSource)
+		_uiState.update {
+			it.copy(
+				sourceTitle = activeSource.getTitle(context),
+				languageSubtitle = resolved.languageSubtitle,
+				languageVariants = variants,
+				homeUrl = activeSource.homeUrl,
+				resolvedSource = activeSource,
+				query = startQuery,
+				availableSortOrders = sortOrders,
+				selectedSortOrder = initialSort,
+				isSearchSupported = caps.isSearchSupported,
+				isSearchWithFiltersSupported = caps.isSearchWithFiltersSupported,
+				supportsDynamicFilters = isDynamic,
+				dynamicFilters = if (isDynamic) snapshotDynamicFilters(workingDynamicFilters) else emptyList(),
+				staticFilters = staticSnapshot,
+				activeFilterCount = 0,
+			)
 		}
 	}
 

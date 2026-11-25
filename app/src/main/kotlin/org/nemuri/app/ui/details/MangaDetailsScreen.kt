@@ -115,6 +115,7 @@ import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
@@ -766,14 +767,15 @@ fun MangaDetailsScreen(
 							}
 
 							if (uiState.totalBranchChapters > 12 || uiState.chapterQuery.isNotEmpty()) {
+								val chapterQueryField = rememberSyncedTextField(uiState.chapterQuery, viewModel::setChapterQuery)
 								OutlinedTextField(
-									value = uiState.chapterQuery,
-									onValueChange = viewModel::setChapterQuery,
+									value = chapterQueryField.fieldValue,
+									onValueChange = chapterQueryField::onValueChange,
 									placeholder = { Text("Filter chapters…") },
 									leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
 									trailingIcon = {
-										if (uiState.chapterQuery.isNotEmpty()) {
-											IconButton(onClick = { viewModel.setChapterQuery("") }) {
+										if (chapterQueryField.fieldValue.text.isNotEmpty()) {
+											IconButton(onClick = { chapterQueryField.clear() }) {
 												Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
 											}
 										}
