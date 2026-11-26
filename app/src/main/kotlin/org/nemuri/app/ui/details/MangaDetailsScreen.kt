@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -129,14 +130,17 @@ import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.browser.isLikelyChallengeErrorMessage
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.reader.ReaderActivity
+import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.MangaCompactGridCard
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriErrorState
+import org.nemuri.app.ui.components.NemuriListNavigationOverlay
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NonWrappingBadgeText
 import org.nemuri.app.ui.components.SnappingSwipeRow
 import org.nemuri.app.ui.components.listDragRangeSelect
+import org.nemuri.app.ui.components.rememberNemuriScrollAdapter
 import org.nemuri.app.ui.components.rememberPushScreenBottomPadding
 import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
@@ -299,7 +303,9 @@ fun MangaDetailsScreen(
 
 			else -> {
 				val manga = uiState.manga!!
+				val layoutPrefs = LocalLayoutStudioPrefs.current
 				val chapterListState = rememberLazyListState()
+				val chapterScrollAdapter = rememberNemuriScrollAdapter(chapterListState)
 				val chapterIds = remember(uiState.chapters) { uiState.chapters.map { it.chapter.id } }
 				val detailsBottomPadding = rememberPushScreenBottomPadding(if (isSelectionMode) 98.dp else 28.dp)
 
@@ -1159,6 +1165,41 @@ fun MangaDetailsScreen(
 							)
 						}
 					}
+
+					val quickButtonsAvoidJumpPill by animateDpAsState(
+						targetValue = if (showChaptersQuickJump && !layoutPrefs.isFastScrollLeftHanded) 48.dp else 0.dp,
+						animationSpec = nemuriSpatialSpring(),
+						label = "detailsQuickButtonsOffset",
+					)
+					val chapterCalloutForIndex: (Int) -> String? = remember(uiState.chapters, chaptersHeaderIndex) {
+						{ idx ->
+							val firstChapterIdx = chaptersHeaderIndex + 1
+							when {
+								uiState.chapters.isEmpty() -> null
+								idx < chaptersHeaderIndex -> "Top"
+								idx == chaptersHeaderIndex -> "Chapters"
+								idx in firstChapterIdx until (firstChapterIdx + uiState.chapters.size) -> {
+									val row = uiState.chapters[idx - firstChapterIdx]
+									val num = row.chapter.number
+									when {
+										num > 0f && num % 1f == 0f -> "Ch. ${num.toInt()}"
+										num > 0f -> "Ch. ${num.toBigDecimal().stripTrailingZeros().toPlainString()}"
+										else -> row.title.take(14)
+									}
+								}
+								else -> "Related"
+							}
+						}
+					}
+
+					NemuriListNavigationOverlay(
+						adapter = chapterScrollAdapter,
+						hasBottomDock = false,
+						visibleOverride = !isSelectionMode,
+						extraQuickButtonsBottomOffset = quickButtonsAvoidJumpPill,
+						topTrackPadding = 64.dp,
+						labelForIndex = chapterCalloutForIndex,
+					)
 				}
 			}
 		}

@@ -7,6 +7,8 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RenderEffect
@@ -43,7 +45,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -86,8 +87,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.Compare
@@ -505,13 +504,15 @@ private fun ReaderRootScreen(
 					Box(
 						modifier = Modifier
 							.fillMaxSize()
-							.statusBarsPadding()
 							.pointerInput(Unit) {
 								detectTapGestures(onTap = { showHud = !showHud })
-							},
+							}
+							.statusBarsPadding(),
 					) {
-						IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
-							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = NemuriTheme.colors.textPrimary)
+						if (!showHud) {
+							IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
+								Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = NemuriTheme.colors.textPrimary)
+							}
 						}
 						NemuriErrorState(
 							message = uiState.errorMessage,
@@ -766,83 +767,122 @@ private fun ReaderRootScreen(
 				),
 		) {
 			val isContinuousScroll = uiState.isTextMode || uiState.readerMode == ReaderMode.WEBTOON
+			val canSlowDown = if (isContinuousScroll) {
+				uiState.autoScrollSpeed > 0.055f
+			} else {
+				uiState.autoScrollPageDelaySec < 10
+			}
+			val canSpeedUp = if (isContinuousScroll) {
+				uiState.autoScrollSpeed < 0.995f
+			} else {
+				uiState.autoScrollPageDelaySec > 1
+			}
 			Surface(
-				color = NemuriTheme.colors.dock.copy(alpha = 0.94f),
+				color = NemuriTheme.colors.dock.copy(alpha = 0.95f),
 				shape = RoundedCornerShape(999.dp),
-				border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f)),
+				border = BorderStroke(
+					1.dp,
+					if (uiState.isAutoScrollPaused) NemuriTheme.colors.amber.copy(alpha = 0.6f) else NemuriTheme.colors.cyan.copy(alpha = 0.6f),
+				),
 				shadowElevation = 12.dp,
 			) {
 				Row(
-					modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+					modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
 					verticalAlignment = Alignment.CenterVertically,
-					horizontalArrangement = Arrangement.spacedBy(4.dp),
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
 				) {
-					IconButton(
-						onClick = { viewModel.setAutoScrollPaused(!uiState.isAutoScrollPaused) },
-						modifier = Modifier.size(34.dp),
-					) {
-						Icon(
-							imageVector = if (uiState.isAutoScrollPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-							contentDescription = if (uiState.isAutoScrollPaused) "Resume auto-scroll" else "Pause auto-scroll",
-							tint = NemuriTheme.colors.cyan,
-							modifier = Modifier.size(18.dp),
-						)
-					}
-					IconButton(
-						onClick = {
-							if (isContinuousScroll) {
-								viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed - 0.1f)
-							} else {
-								viewModel.setAutoScrollPageDelaySec(uiState.autoScrollPageDelaySec + 1)
-							}
+					Surface(
+						color = if (uiState.isAutoScrollPaused) {
+							NemuriTheme.colors.amber.copy(alpha = 0.18f)
+						} else {
+							NemuriTheme.colors.tealContainer
 						},
-						modifier = Modifier.size(30.dp),
+						shape = CircleShape,
+						modifier = Modifier
+							.size(32.dp)
+							.clip(CircleShape)
+							.clickable { viewModel.setAutoScrollPaused(!uiState.isAutoScrollPaused) },
 					) {
-						Icon(
-							imageVector = Icons.Default.ChevronLeft,
-							contentDescription = "Slower",
-							tint = NemuriTheme.colors.textSecondary,
-							modifier = Modifier.size(18.dp),
-						)
+						Box(contentAlignment = Alignment.Center) {
+							Icon(
+								imageVector = if (uiState.isAutoScrollPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+								contentDescription = if (uiState.isAutoScrollPaused) "Resume auto-scroll" else "Pause auto-scroll",
+								tint = if (uiState.isAutoScrollPaused) NemuriTheme.colors.amber else NemuriTheme.colors.cyan,
+								modifier = Modifier.size(17.dp),
+							)
+						}
+					}
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = CircleShape,
+						border = BorderStroke(1.dp, NemuriTheme.colors.border),
+						modifier = Modifier
+							.size(28.dp)
+							.clip(CircleShape)
+							.clickable(enabled = canSlowDown) {
+								if (isContinuousScroll) {
+									viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed - 0.1f)
+								} else {
+									viewModel.setAutoScrollPageDelaySec(uiState.autoScrollPageDelaySec + 1)
+								}
+							},
+					) {
+						Box(contentAlignment = Alignment.Center) {
+							Text(
+								text = "−",
+								fontSize = 16.sp,
+								fontWeight = FontWeight.Bold,
+								color = if (canSlowDown) NemuriTheme.colors.textPrimary else NemuriTheme.colors.textDim,
+							)
+						}
 					}
 					Text(
 						text = if (isContinuousScroll) {
 							val mult = (uiState.autoScrollSpeed * 2f).coerceAtLeast(0.1f)
-							String.format(java.util.Locale.US, "Auto %.1fx", mult)
+							val speedLabel = String.format(java.util.Locale.US, "%.1fx", mult)
+							if (uiState.isAutoScrollPaused) "Paused • $speedLabel" else "Auto $speedLabel"
 						} else {
-							"Auto ${uiState.autoScrollPageDelaySec}s/p"
+							val delayLabel = "${uiState.autoScrollPageDelaySec}s/p"
+							if (uiState.isAutoScrollPaused) "Paused • $delayLabel" else "Auto $delayLabel"
 						},
 						style = MaterialTheme.typography.labelSmall,
 						fontWeight = FontWeight.Bold,
 						color = if (uiState.isAutoScrollPaused) NemuriTheme.colors.amber else NemuriTheme.colors.cyan,
 						modifier = Modifier.padding(horizontal = 4.dp),
 					)
-					IconButton(
-						onClick = {
-							if (isContinuousScroll) {
-								viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed + 0.1f)
-							} else {
-								viewModel.setAutoScrollPageDelaySec(uiState.autoScrollPageDelaySec - 1)
-							}
-						},
-						modifier = Modifier.size(30.dp),
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = CircleShape,
+						border = BorderStroke(1.dp, NemuriTheme.colors.border),
+						modifier = Modifier
+							.size(28.dp)
+							.clip(CircleShape)
+							.clickable(enabled = canSpeedUp) {
+								if (isContinuousScroll) {
+									viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed + 0.1f)
+								} else {
+									viewModel.setAutoScrollPageDelaySec(uiState.autoScrollPageDelaySec - 1)
+								}
+							},
 					) {
-						Icon(
-							imageVector = Icons.Default.ChevronRight,
-							contentDescription = "Faster",
-							tint = NemuriTheme.colors.textSecondary,
-							modifier = Modifier.size(18.dp),
-						)
+						Box(contentAlignment = Alignment.Center) {
+							Text(
+								text = "+",
+								fontSize = 15.sp,
+								fontWeight = FontWeight.Bold,
+								color = if (canSpeedUp) NemuriTheme.colors.textPrimary else NemuriTheme.colors.textDim,
+							)
+						}
 					}
 					IconButton(
 						onClick = { viewModel.setAutoScrollEnabled(false) },
-						modifier = Modifier.size(30.dp),
+						modifier = Modifier.size(28.dp),
 					) {
 						Icon(
 							imageVector = Icons.Default.Close,
 							contentDescription = "Stop auto-scroll",
 							tint = NemuriTheme.colors.textMuted,
-							modifier = Modifier.size(16.dp),
+							modifier = Modifier.size(15.dp),
 						)
 					}
 				}
@@ -862,6 +902,7 @@ private fun ReaderRootScreen(
 			val isEnhanceActive = !uiState.isTextMode && (
 				uiState.shaderConfig.isActive ||
 					!uiState.colorFilter.isEmpty ||
+					uiState.colorWarmth > 0.01f ||
 					(uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel)
 				)
 			Surface(
@@ -1057,6 +1098,10 @@ private fun ReaderRootScreen(
 			isOrientationLocked = isOrientationLocked,
 			onToggleManualRotate = onToggleManualRotate,
 			onResetAutoRotate = onResetAutoRotate,
+			onAutoScrollStarted = {
+				showSettingsSheet = false
+				showHud = false
+			},
 			onDismiss = { showSettingsSheet = false },
 		)
 	}
@@ -1117,12 +1162,14 @@ private fun MangaReaderViewport(
 	onLongPressPage: (ReaderPage) -> Unit,
 ) {
 	val pages = uiState.pages
+	val latestOnToggleHud by rememberUpdatedState(onToggleHud)
+	val latestOnLongPressPage by rememberUpdatedState(onLongPressPage)
 	if (pages.isEmpty()) {
 		Box(
 			modifier = Modifier
 				.fillMaxSize()
 				.pointerInput(Unit) {
-					detectTapGestures(onTap = { onToggleHud() })
+					detectTapGestures(onTap = { latestOnToggleHud() })
 				},
 			contentAlignment = Alignment.Center,
 		) {
@@ -1188,8 +1235,12 @@ private fun MangaReaderViewport(
 		}
 
 		fun handleWebtoonTap(normX: Float, normY: Float) {
+			if (uiState.isChapterLoading) {
+				latestOnToggleHud()
+				return
+			}
 			when (resolveTapZoneAction(normX, normY, currentTapZoneMode, isRtl = false, isWebtoon = true)) {
-				TapZoneAction.TOGGLE_HUD -> onToggleHud()
+				TapZoneAction.TOGGLE_HUD -> latestOnToggleHud()
 				TapZoneAction.PREV -> {
 					val target = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
 					coroutineScope.launch { listState.animateScrollToItem(target) }
@@ -1227,10 +1278,10 @@ private fun MangaReaderViewport(
 						} while (event.changes.any { it.pressed })
 					}
 				}
-				.pointerInput(currentTapZoneMode) {
+				.pointerInput(currentTapZoneMode, currentSmartZoom) {
 					detectTapGestures(
-						onDoubleTap = { offset ->
-							if (currentSmartZoom) {
+						onDoubleTap = if (currentSmartZoom) {
+							{ offset ->
 								if (webtoonZoom > 1.15f) {
 									webtoonZoom = 1f
 									webtoonPanX = 0f
@@ -1242,14 +1293,21 @@ private fun MangaReaderViewport(
 									webtoonPanX = focalPan.coerceIn(-maxPan, maxPan)
 								}
 							}
+						} else {
+							null
 						},
 						onLongPress = { offset ->
+							val unscaledY = if (webtoonZoom > 1.01f && size.height > 0) {
+								(offset.y - size.height * 0.5f) / webtoonZoom + size.height * 0.5f
+							} else {
+								offset.y
+							}
 							val hit = listState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
-								offset.y.toInt() in info.offset..(info.offset + info.size)
+								unscaledY.toInt() in info.offset..(info.offset + info.size)
 							}
 							val idx = (hit?.index ?: listState.firstVisibleItemIndex)
 								.coerceIn(0, (latestPages.size - 1).coerceAtLeast(0))
-							latestPages.getOrNull(idx)?.let(onLongPressPage)
+							latestPages.getOrNull(idx)?.let(latestOnLongPressPage)
 						},
 						onTap = { offset ->
 							val nx = if (size.width > 0) offset.x / size.width.toFloat() else 0.5f
@@ -1281,10 +1339,11 @@ private fun MangaReaderViewport(
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						colorFilter = uiState.colorFilter,
+						colorWarmth = uiState.colorWarmth,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTapNormalized = ::handleWebtoonTap,
-						onLongPress = { onLongPressPage(page) },
+						onLongPress = { latestOnLongPressPage(page) },
 						fallbackUrl = uiState.manga?.publicUrl,
 						onFindAlternative = migrateAction,
 						modifier = Modifier.fillMaxWidth(),
@@ -1405,8 +1464,12 @@ private fun MangaReaderViewport(
 		}
 
 		fun handlePagedTap(normX: Float, normY: Float) {
+			if (uiState.isChapterLoading) {
+				latestOnToggleHud()
+				return
+			}
 			when (resolveTapZoneAction(normX, normY, currentTapZoneMode, isRtl = isRtl, isWebtoon = false)) {
-				TapZoneAction.TOGGLE_HUD -> onToggleHud()
+				TapZoneAction.TOGGLE_HUD -> latestOnToggleHud()
 				TapZoneAction.PREV -> {
 					val target = pagerState.currentPage - 1
 					if (target >= 0) {
@@ -1414,7 +1477,7 @@ private fun MangaReaderViewport(
 					} else if (uiState.hasPrevChapter) {
 						viewModel.goToAdjacentChapter(isNext = false)
 					} else {
-						onToggleHud()
+						latestOnToggleHud()
 					}
 				}
 				TapZoneAction.NEXT -> {
@@ -1424,7 +1487,7 @@ private fun MangaReaderViewport(
 					} else if (uiState.hasNextChapter) {
 						viewModel.goToAdjacentChapter(isNext = true)
 					} else {
-						onToggleHud()
+						latestOnToggleHud()
 					}
 				}
 			}
@@ -1443,10 +1506,11 @@ private fun MangaReaderViewport(
 					isDoubleTapSmartZoom = currentSmartZoom,
 					shaderConfig = uiState.shaderConfig,
 					colorFilter = uiState.colorFilter,
+					colorWarmth = uiState.colorWarmth,
 					neuralRevision = uiState.neuralRevision,
 					loadPage = viewModel::loadPageImage,
 					onTapNormalized = ::handlePagedTap,
-					onLongPress = { onLongPressPage(firstPage) },
+					onLongPress = { latestOnLongPressPage(firstPage) },
 					fallbackUrl = uiState.manga?.publicUrl,
 					onFindAlternative = migrateAction,
 					modifier = Modifier.fillMaxSize(),
@@ -1465,10 +1529,11 @@ private fun MangaReaderViewport(
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						colorFilter = uiState.colorFilter,
+						colorWarmth = uiState.colorWarmth,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTapNormalized = { nx, ny -> handlePagedTap(nx * 0.5f, ny) },
-						onLongPress = { onLongPressPage(leftPage) },
+						onLongPress = { latestOnLongPressPage(leftPage) },
 						fallbackUrl = uiState.manga?.publicUrl,
 						onFindAlternative = migrateAction,
 						modifier = Modifier
@@ -1482,10 +1547,11 @@ private fun MangaReaderViewport(
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						colorFilter = uiState.colorFilter,
+						colorWarmth = uiState.colorWarmth,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTapNormalized = { nx, ny -> handlePagedTap(0.5f + nx * 0.5f, ny) },
-						onLongPress = { onLongPressPage(rightPage) },
+						onLongPress = { latestOnLongPressPage(rightPage) },
 						fallbackUrl = uiState.manga?.publicUrl,
 						onFindAlternative = migrateAction,
 						modifier = Modifier
@@ -1528,6 +1594,20 @@ private fun MangaReaderViewport(
 	}
 }
 
+private class ReaderSubsamplingImageView(
+	context: Context,
+	var isWebtoonMode: Boolean,
+) : SubsamplingScaleImageView(context) {
+	override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+		// Never swallow touches in Webtoon mode (parent Compose viewport owns scroll, zoom, tap, and long-press)
+		// or before tiles/header are decoded in Paged mode (outer Compose Box handles instant 0ms tap & long-press).
+		if (isWebtoonMode || !isReady) {
+			return false
+		}
+		return super.dispatchTouchEvent(event)
+	}
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SsivPageView(
@@ -1537,6 +1617,7 @@ private fun SsivPageView(
 	isDoubleTapSmartZoom: Boolean,
 	shaderConfig: ReaderShaderConfig,
 	colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
+	colorWarmth: Float = 0f,
 	neuralRevision: Int,
 	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
 	onTapNormalized: (Float, Float) -> Unit,
@@ -1548,6 +1629,7 @@ private fun SsivPageView(
 	val context = LocalContext.current
 	val latestShaderConfig by rememberUpdatedState(shaderConfig)
 	val latestColorFilter by rememberUpdatedState(colorFilter)
+	val latestColorWarmth by rememberUpdatedState(colorWarmth)
 	val latestOnTap by rememberUpdatedState(onTapNormalized)
 	val latestOnLongPress by rememberUpdatedState(onLongPress)
 	val latestSmartZoom by rememberUpdatedState(isDoubleTapSmartZoom)
@@ -1571,7 +1653,12 @@ private fun SsivPageView(
 			imageReady = false
 		}
 		loadPage(page, retryToken > 0)
-			.onSuccess { resolved = it }
+			.onSuccess { newPair ->
+				if (resolved?.first != newPair.first) {
+					imageReady = false
+				}
+				resolved = newPair
+			}
 			.onFailure { err ->
 				errorThrowable = err
 				errorText = err.getDisplayMessage(context.resources)
@@ -1598,8 +1685,9 @@ private fun SsivPageView(
 	}
 
 	val pair = resolved
-	// Forward center-taps and long-presses even BEFORE page URI resolves or when page fails to load!
-	val fallbackGestureModifier = if (!isWebtoon && (pair == null || errorText != null)) {
+	// Forward center-taps and long-presses with 0ms latency whenever fetching, decoding tiles (!imageReady), or failed!
+	val useComposeTapFallback = !isWebtoon && (pair == null || !imageReady || errorText != null)
+	val fallbackGestureModifier = if (useComposeTapFallback) {
 		Modifier.pointerInput(page.id) {
 			detectTapGestures(
 				onTap = { offset ->
@@ -1620,13 +1708,13 @@ private fun SsivPageView(
 			.then(fallbackGestureModifier),
 		contentAlignment = Alignment.Center,
 	) {
-		if (pair != null) {
+		if (pair != null && errorText == null) {
 			val (uri, bounds) = pair
 			AndroidView(
 				factory = { ctx ->
 					val isLowRam = (ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
 						?.isLowRamDevice == true
-					SubsamplingScaleImageView(ctx).apply {
+					ReaderSubsamplingImageView(ctx, isWebtoon).apply {
 						isEagerLoadingEnabled = !isLowRam
 						panLimit = SubsamplingScaleImageView.PAN_LIMIT_INSIDE
 						minimumScaleType = if (isWebtoon) {
@@ -1650,25 +1738,31 @@ private fun SsivPageView(
 								}
 
 								override fun onLongPress(e: MotionEvent) {
-									if (!isWebtoon) {
+									if (!isWebtoonMode) {
 										latestOnLongPress()
 									}
 								}
 							},
 						)
-						setOnTouchListener { view, event ->
+						setOnTouchListener { _, event ->
 							tapDetector.onTouchEvent(event)
-							!isWebtoon && !(view as SubsamplingScaleImageView).isReady
+							false
 						}
 						addOnImageEventListener(
 							object : DefaultOnImageEventListener {
 								override fun onReady() {
 									imageReady = true
-									configureSsivScaleAndZoom(this@apply, isWebtoon, latestSmartZoom)
-									applyShaderToSsiv(this@apply, latestShaderConfig, latestColorFilter)
+									configureSsivScaleAndZoom(this@apply, isWebtoonMode, latestSmartZoom)
+									applyShaderToSsiv(
+										this@apply,
+										latestShaderConfig,
+										latestColorFilter,
+										latestColorWarmth,
+									)
 								}
 
 								override fun onImageLoadError(e: Throwable) {
+									imageReady = false
 									errorText = e.localizedMessage ?: "Failed to decode page"
 								}
 							},
@@ -1676,10 +1770,14 @@ private fun SsivPageView(
 					}
 				},
 				update = { ssiv ->
+					ssiv.isWebtoonMode = isWebtoon
+					ssiv.isZoomEnabled = !isWebtoon
+					ssiv.isPanEnabled = !isWebtoon
 					val holder = ssivState(ssiv)
 					val tagKey = "${uri}_${bitmapConfig.name}"
 					if (holder.imageKey != tagKey) {
 						holder.imageKey = tagKey
+						imageReady = false
 						val isLowRam = (ssiv.context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
 							?.isLowRamDevice == true
 						ssiv.bitmapDecoderFactory = AvifCapableImageDecoder.Factory(bitmapConfig)
@@ -1692,7 +1790,7 @@ private fun SsivPageView(
 					if (ssiv.isReady) {
 						configureSsivScaleAndZoom(ssiv, isWebtoon, isDoubleTapSmartZoom)
 					}
-					applyShaderToSsiv(ssiv, shaderConfig, colorFilter)
+					applyShaderToSsiv(ssiv, shaderConfig, colorFilter, colorWarmth)
 				},
 				onRelease = { it.recycle() },
 				modifier = Modifier.fillMaxSize(),
@@ -1862,6 +1960,25 @@ private fun NovelReaderViewport(
 
 	val currentTapZoneMode by rememberUpdatedState(uiState.tapZoneMode)
 	val latestBlocksSize by rememberUpdatedState(uiState.novelBlocks.size)
+	val latestOnToggleHud by rememberUpdatedState(onToggleHud)
+	val latestIsChapterLoading by rememberUpdatedState(uiState.isChapterLoading)
+
+	if (uiState.novelBlocks.isEmpty()) {
+		Box(
+			modifier = Modifier
+				.fillMaxSize()
+				.background(bgColor)
+				.pointerInput(Unit) {
+					detectTapGestures(onTap = { latestOnToggleHud() })
+				},
+			contentAlignment = Alignment.Center,
+		) {
+			if (uiState.isChapterLoading) {
+				NemuriLoadingState(message = "Loading chapter…")
+			}
+		}
+		return
+	}
 
 	SelectionContainer {
 		LazyColumn(
@@ -1876,14 +1993,17 @@ private fun NovelReaderViewport(
 			modifier = Modifier
 				.fillMaxSize()
 				.background(bgColor)
-				.statusBarsPadding()
 				.pointerInput(Unit) {
 					detectTapGestures(
 						onTap = { offset ->
+							if (latestIsChapterLoading) {
+								latestOnToggleHud()
+								return@detectTapGestures
+							}
 							val nx = if (size.width > 0) offset.x / size.width.toFloat() else 0.5f
 							val ny = if (size.height > 0) offset.y / size.height.toFloat() else 0.5f
 							when (resolveTapZoneAction(nx, ny, currentTapZoneMode, isRtl = false, isWebtoon = true)) {
-								TapZoneAction.TOGGLE_HUD -> onToggleHud()
+								TapZoneAction.TOGGLE_HUD -> latestOnToggleHud()
 								TapZoneAction.PREV -> {
 									val target = (listState.firstVisibleItemIndex - 4).coerceAtLeast(0)
 									coroutineScope.launch { listState.animateScrollToItem(target) }
@@ -1896,7 +2016,8 @@ private fun NovelReaderViewport(
 							}
 						},
 					)
-				},
+				}
+				.statusBarsPadding(),
 		) {
 			item(key = "novel_chapter_header") {
 				Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2257,12 +2378,11 @@ private fun ReaderNavigatorModalSheet(
 
 			when (selectedTab) {
 				ReaderNavigatorTab.CHAPTERS -> {
-					Row(
+					Column(
 						modifier = Modifier
 							.fillMaxWidth()
 							.padding(horizontal = 18.dp, vertical = 2.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalArrangement = Arrangement.spacedBy(6.dp),
 					) {
 						OutlinedTextField(
 							value = chapterSearchQuery,
@@ -2284,27 +2404,70 @@ private fun ReaderNavigatorModalSheet(
 								focusedContainerColor = NemuriTheme.colors.surfaceElevated,
 								unfocusedContainerColor = NemuriTheme.colors.surfaceElevated,
 							),
-							modifier = Modifier.weight(1f),
+							modifier = Modifier.fillMaxWidth(),
 						)
-						Surface(
-							color = if (uiState.isChaptersReversed) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
-							border = BorderStroke(
-								1.dp,
-								if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-							),
-							modifier = Modifier
-								.size(48.dp)
-								.clip(RoundedCornerShape(12.dp))
-								.clickable(onClick = viewModel::toggleChaptersReversed),
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
 						) {
-							Box(contentAlignment = Alignment.Center) {
-								Icon(
-									imageVector = Icons.Default.SwapVert,
-									contentDescription = "Reverse chapter sort",
-									tint = if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-									modifier = Modifier.size(20.dp),
-								)
+							ReaderChapterSortMode.entries.forEach { sortMode ->
+								val selected = uiState.chapterSortMode == sortMode
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(10.dp),
+									border = BorderStroke(
+										1.dp,
+										if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.weight(1f)
+										.clip(RoundedCornerShape(10.dp))
+										.clickable { viewModel.setChapterSortMode(sortMode) },
+								) {
+									Text(
+										text = sortMode.label,
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										textAlign = TextAlign.Center,
+										maxLines = 1,
+										modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp),
+									)
+								}
+							}
+
+							Surface(
+								color = if (uiState.isChaptersReversed) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(
+									1.dp,
+									if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier
+									.clip(RoundedCornerShape(10.dp))
+									.clickable(onClick = viewModel::toggleChaptersReversed),
+							) {
+								Row(
+									modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.spacedBy(4.dp),
+								) {
+									Icon(
+										imageVector = Icons.Default.SwapVert,
+										contentDescription = "Reverse chapter order",
+										tint = if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										modifier = Modifier.size(14.dp),
+									)
+									Text(
+										text = "Reverse",
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = if (uiState.isChaptersReversed) FontWeight.Bold else FontWeight.Medium,
+										color = if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										maxLines = 1,
+									)
+								}
 							}
 						}
 					}
@@ -2312,7 +2475,17 @@ private fun ReaderNavigatorModalSheet(
 					val currentChapterIdx = remember(displayedChapters) {
 						displayedChapters.indexOfFirst { it.isCurrent }.coerceAtLeast(0)
 					}
-					val chaptersListState = rememberLazyListState(initialFirstVisibleItemIndex = currentChapterIdx)
+					val chaptersListState = rememberLazyListState(
+						initialFirstVisibleItemIndex = (currentChapterIdx - 2).coerceAtLeast(0),
+					)
+					LaunchedEffect(uiState.chapterSortMode, uiState.isChaptersReversed, uiState.currentChapterId) {
+						if (chapterSearchQuery.isBlank()) {
+							val idx = displayedChapters.indexOfFirst { it.isCurrent }
+							if (idx >= 0) {
+								chaptersListState.scrollToItem((idx - 2).coerceAtLeast(0))
+							}
+						}
+					}
 
 					LazyColumn(
 						state = chaptersListState,
@@ -2591,35 +2764,40 @@ private fun ReaderNavigatorModalSheet(
 							.padding(horizontal = 18.dp),
 						verticalArrangement = Arrangement.spacedBy(8.dp),
 					) {
-						if (!uiState.isBookmarked) {
-							Surface(
-								color = NemuriTheme.colors.tealContainer,
-								shape = RoundedCornerShape(12.dp),
-								border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f)),
-								modifier = Modifier
-									.fillMaxWidth()
-									.clip(RoundedCornerShape(12.dp))
-									.clickable(onClick = viewModel::toggleBookmark),
+						Surface(
+							color = if (uiState.isBookmarked) NemuriTheme.colors.amber.copy(alpha = 0.16f) else NemuriTheme.colors.tealContainer,
+							shape = RoundedCornerShape(12.dp),
+							border = BorderStroke(
+								1.dp,
+								if (uiState.isBookmarked) NemuriTheme.colors.amber.copy(alpha = 0.6f) else NemuriTheme.colors.cyan.copy(alpha = 0.5f),
+							),
+							modifier = Modifier
+								.fillMaxWidth()
+								.clip(RoundedCornerShape(12.dp))
+								.clickable(onClick = viewModel::toggleBookmark),
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.Center,
 							) {
-								Row(
-									modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-									verticalAlignment = Alignment.CenterVertically,
-									horizontalArrangement = Arrangement.Center,
-								) {
-									Icon(
-										imageVector = Icons.Default.BookmarkBorder,
-										contentDescription = null,
-										tint = NemuriTheme.colors.cyan,
-										modifier = Modifier.size(17.dp),
-									)
-									Spacer(modifier = Modifier.width(6.dp))
-									Text(
-										text = "Bookmark Current Page",
-										style = MaterialTheme.typography.labelLarge,
-										fontWeight = FontWeight.SemiBold,
-										color = NemuriTheme.colors.cyan,
-									)
-								}
+								Icon(
+									imageVector = if (uiState.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+									contentDescription = null,
+									tint = if (uiState.isBookmarked) NemuriTheme.colors.amber else NemuriTheme.colors.cyan,
+									modifier = Modifier.size(17.dp),
+								)
+								Spacer(modifier = Modifier.width(6.dp))
+								Text(
+									text = if (uiState.isBookmarked) {
+										"Current Page Bookmarked • Tap to Remove"
+									} else {
+										"Bookmark Current Page"
+									},
+									style = MaterialTheme.typography.labelLarge,
+									fontWeight = FontWeight.SemiBold,
+									color = if (uiState.isBookmarked) NemuriTheme.colors.amber else NemuriTheme.colors.cyan,
+								)
 							}
 						}
 
@@ -2758,6 +2936,7 @@ private fun ReaderPageQuickSheet(
 	onDismiss: () -> Unit,
 ) {
 	val context = LocalContext.current
+	val isVisualDiagram = uiState.selectionMenuStyle == SelectionMenuStyle.VISUAL_DIAGRAM
 	val isPageSavedBookmark = remember(uiState.mangaBookmarks, page.chapterId, page.index, page.endIndex) {
 		uiState.mangaBookmarks.any { bm ->
 			bm.chapterId == page.chapterId && bm.page in page.index..page.endIndex
@@ -2767,6 +2946,24 @@ private fun ReaderPageQuickSheet(
 		"Pages ${page.index + 1}–${page.endIndex + 1}"
 	} else {
 		"Page ${page.index + 1}"
+	}
+	val isNeuralActive = uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel
+	val isUpscaleActive = uiState.shaderConfig.isActive || isNeuralActive
+	val upscaleStatusLabel = remember(uiState.shaderConfig, isNeuralActive, uiState.activeNeuralModelLabel) {
+		when {
+			isNeuralActive && uiState.shaderConfig.isActive ->
+				"Active: Neural 2x + ${uiState.shaderConfig.summaryLabel()}"
+			isNeuralActive ->
+				"Active: Neural 2x (${uiState.activeNeuralModelLabel})"
+			uiState.shaderConfig.isActive ->
+				"Active: ${uiState.shaderConfig.summaryLabel()}"
+			uiState.hasReadyNeuralModel && uiState.isNeuralUpscaleSupported ->
+				"Off • 1-tap Neural 2x (${uiState.activeNeuralModelLabel})"
+			UpscaleEffect.isSupported ->
+				"Off • 1-tap Anime4K GPU Shader"
+			else ->
+				"Off • Configure in Mode & Tools"
+		}
 	}
 
 	NemuriModalSheet(
@@ -2838,54 +3035,176 @@ private fun ReaderPageQuickSheet(
 				horizontalArrangement = Arrangement.SpaceBetween,
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				Text(
-					text = "QUICK READ MODE",
-					style = MaterialTheme.typography.labelSmall,
-					color = NemuriTheme.colors.cyan,
-				)
-				Text(
-					text = "Remembered for this manga",
-					style = MaterialTheme.typography.labelSmall,
-					color = NemuriTheme.colors.textMuted,
-				)
-			}
-			Row(
-				modifier = Modifier.fillMaxWidth(),
-				horizontalArrangement = Arrangement.spacedBy(6.dp),
-			) {
-				listOf(
-					ReaderMode.STANDARD to "Standard",
-					ReaderMode.REVERSED to "R-to-L",
-					ReaderMode.VERTICAL to "Vertical",
-					ReaderMode.WEBTOON to "Webtoon",
-				).forEach { (mode, label) ->
-					val selected = uiState.readerMode == mode
-					Surface(
-						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(10.dp),
-						border = BorderStroke(
-							width = if (selected) 1.5.dp else 1.dp,
-							color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-						),
-						modifier = Modifier
-							.weight(1f)
-							.clip(RoundedCornerShape(10.dp))
-							.clickable { viewModel.setReaderMode(mode) },
+				Column(modifier = Modifier.weight(1f)) {
+					Text(
+						text = "QUICK READ MODE",
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.Bold,
+						color = NemuriTheme.colors.cyan,
+					)
+					Text(
+						text = "Remembered for this manga",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
+					)
+				}
+				Surface(
+					color = NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(999.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+					modifier = Modifier
+						.clip(RoundedCornerShape(999.dp))
+						.clickable {
+							val next = if (isVisualDiagram) {
+								SelectionMenuStyle.COMPACT_LIST
+							} else {
+								SelectionMenuStyle.VISUAL_DIAGRAM
+							}
+							viewModel.setSelectionMenuStyle(next)
+						},
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(4.dp),
 					) {
+						Icon(
+							imageVector = if (isVisualDiagram) Icons.Default.GridView else Icons.Default.ViewList,
+							contentDescription = "Toggle menu style",
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(13.dp),
+						)
 						Text(
-							text = label,
+							text = if (isVisualDiagram) "Visual ↔ Compact" else "Compact ↔ Visual",
 							style = MaterialTheme.typography.labelSmall,
-							fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-							color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-							textAlign = TextAlign.Center,
-							maxLines = 1,
-							modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+							fontWeight = FontWeight.SemiBold,
+							color = NemuriTheme.colors.cyan,
+						)
+					}
+				}
+			}
+
+			if (isVisualDiagram) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
+				) {
+					listOf(
+						ReaderMode.STANDARD to "Standard",
+						ReaderMode.REVERSED to "R-to-L",
+						ReaderMode.VERTICAL to "Vertical",
+						ReaderMode.WEBTOON to "Webtoon",
+					).forEach { (mode, label) ->
+						val selected = uiState.readerMode == mode
+						Surface(
+							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(12.dp),
+							border = BorderStroke(
+								width = if (selected) 1.5.dp else 1.dp,
+								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+							),
+							modifier = Modifier
+								.weight(1f)
+								.clip(RoundedCornerShape(12.dp))
+								.clickable { viewModel.setReaderMode(mode) },
+						) {
+							Column(
+								modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+								horizontalAlignment = Alignment.CenterHorizontally,
+								verticalArrangement = Arrangement.spacedBy(5.dp),
+							) {
+								ReaderModeDiagramCanvas(
+									mode = mode,
+									selected = selected,
+									modifier = Modifier.size(width = 40.dp, height = 30.dp),
+								)
+								Text(
+									text = label,
+									style = MaterialTheme.typography.labelSmall,
+									fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									textAlign = TextAlign.Center,
+									maxLines = 1,
+								)
+							}
+						}
+					}
+				}
+			} else {
+				Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+					listOf(
+						ReaderMode.STANDARD to "Left to Right (Paged)",
+						ReaderMode.REVERSED to "Right to Left (Manga)",
+						ReaderMode.VERTICAL to "Vertical (Paged)",
+						ReaderMode.WEBTOON to "Webtoon (Continuous)",
+					).forEach { (mode, label) ->
+						ReaderCompactChoiceRow(
+							label = label,
+							selected = uiState.readerMode == mode,
+							onClick = { viewModel.setReaderMode(mode) },
 						)
 					}
 				}
 			}
 
 			if (UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) {
+				HorizontalDivider(color = NemuriTheme.colors.border)
+
+				Surface(
+					color = if (isUpscaleActive) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(12.dp),
+					border = BorderStroke(
+						width = if (isUpscaleActive) 1.5.dp else 1.dp,
+						color = if (isUpscaleActive) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+					),
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(RoundedCornerShape(12.dp))
+						.clickable(onClick = viewModel::toggleQuickUpscale),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween,
+					) {
+						Row(
+							modifier = Modifier.weight(1f).padding(end = 8.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Icon(
+								imageVector = Icons.Default.AutoAwesome,
+								contentDescription = null,
+								tint = if (isUpscaleActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								modifier = Modifier.size(18.dp),
+							)
+							Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+								Text(
+									text = "Quick Upscale",
+									style = MaterialTheme.typography.labelLarge,
+									fontWeight = FontWeight.SemiBold,
+									color = if (isUpscaleActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = upscaleStatusLabel,
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.textMuted,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
+						}
+						Switch(
+							checked = isUpscaleActive,
+							onCheckedChange = { viewModel.toggleQuickUpscale() },
+							colors = SwitchDefaults.colors(
+								checkedThumbColor = NemuriTheme.colors.onCyan,
+								checkedTrackColor = NemuriTheme.colors.cyan,
+							),
+						)
+					}
+				}
+
 				Surface(
 					color = NemuriTheme.colors.surfaceElevated,
 					shape = RoundedCornerShape(12.dp),
@@ -2896,7 +3215,7 @@ private fun ReaderPageQuickSheet(
 						.clickable(onClick = onOpenCompareSplit),
 				) {
 					Row(
-						modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+						modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
 						verticalAlignment = Alignment.CenterVertically,
 						horizontalArrangement = Arrangement.Center,
 					) {
@@ -2908,7 +3227,7 @@ private fun ReaderPageQuickSheet(
 						)
 						Spacer(modifier = Modifier.width(8.dp))
 						Text(
-							text = "Compare Upscale / Shader (Before vs After)",
+							text = "Compare Split (Before vs After)",
 							style = MaterialTheme.typography.labelMedium,
 							fontWeight = FontWeight.SemiBold,
 							color = NemuriTheme.colors.cyan,
@@ -3430,11 +3749,13 @@ private fun ReaderSettingsModalSheet(
 	isOrientationLocked: Boolean,
 	onToggleManualRotate: () -> Unit,
 	onResetAutoRotate: () -> Unit,
+	onAutoScrollStarted: () -> Unit,
 	onDismiss: () -> Unit,
 ) {
 	val context = LocalContext.current
 	var showShaderPreview by remember { mutableStateOf(false) }
-	var showColorFilterControls by rememberSaveable { mutableStateOf(!uiState.colorFilter.isEmpty) }
+	val isColorCorrectionActive = !uiState.colorFilter.isEmpty || uiState.colorWarmth > 0.01f
+	var showColorFilterControls by rememberSaveable { mutableStateOf(isColorCorrectionActive) }
 	var showAdvancedLayoutControls by rememberSaveable { mutableStateOf(false) }
 	var showNeuralModelsList by rememberSaveable { mutableStateOf(uiState.neuralDownloadState.activeModelId != null) }
 	val isVisualDiagram = uiState.selectionMenuStyle == SelectionMenuStyle.VISUAL_DIAGRAM
@@ -3694,6 +4015,7 @@ private fun ReaderSettingsModalSheet(
 					ReaderQuickActionTile(
 						icon = if (uiState.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
 						label = if (uiState.isBookmarked) "Bookmarked" else "Bookmark",
+						subtitle = if (uiState.isBookmarked) "Tap to remove" else "Add marker",
 						highlighted = uiState.isBookmarked,
 						highlightTint = NemuriTheme.colors.amber,
 						onClick = viewModel::toggleBookmark,
@@ -3702,18 +4024,19 @@ private fun ReaderSettingsModalSheet(
 					ReaderQuickActionTile(
 						icon = Icons.Default.SlowMotionVideo,
 						label = "Auto-Scroll",
-						subtitle = if (uiState.isAutoScrollEnabled) "Active" else null,
+						subtitle = if (uiState.isAutoScrollEnabled) "Active" else "Play pill",
 						highlighted = uiState.isAutoScrollEnabled,
 						onClick = {
 							val turningOn = !uiState.isAutoScrollEnabled
 							viewModel.toggleAutoScroll()
-							if (turningOn) onDismiss()
+							if (turningOn) onAutoScrollStarted()
 						},
 						modifier = Modifier.weight(1f),
 					)
 					ReaderQuickActionTile(
 						icon = Icons.Default.Download,
 						label = "Save Page",
+						subtitle = "To Gallery",
 						enabled = !uiState.isTextMode && currentPage != null,
 						onClick = {
 							viewModel.savePageToGallery(currentPage)
@@ -3729,6 +4052,7 @@ private fun ReaderSettingsModalSheet(
 					ReaderQuickActionTile(
 						icon = Icons.Default.Share,
 						label = "Share Page",
+						subtitle = "Send image",
 						enabled = !uiState.isTextMode && currentPage != null,
 						onClick = {
 							viewModel.sharePage(currentPage) { chooser ->
@@ -3740,16 +4064,23 @@ private fun ReaderSettingsModalSheet(
 					)
 					ReaderQuickActionTile(
 						icon = Icons.Default.ScreenRotation,
-						label = if (isLandscape) "To Portrait" else "To Landscape",
+						label = "Rotate Screen",
+						subtitle = when {
+							isOrientationLocked && isLandscape -> "Locked Landscape"
+							isOrientationLocked -> "Locked Portrait"
+							isLandscape -> "To Portrait"
+							else -> "To Landscape"
+						},
 						highlighted = isOrientationLocked,
 						onClick = onToggleManualRotate,
 						modifier = Modifier.weight(1f),
 					)
 					ReaderQuickActionTile(
 						icon = Icons.Default.Palette,
-						label = "Color Filter",
+						label = "Color Correction",
+						subtitle = if (isColorCorrectionActive) "Active" else "Levels & Warmth",
 						enabled = !uiState.isTextMode,
-						highlighted = !uiState.colorFilter.isEmpty || showColorFilterControls,
+						highlighted = isColorCorrectionActive || showColorFilterControls,
 						onClick = { showColorFilterControls = !showColorFilterControls },
 						modifier = Modifier.weight(1f),
 					)
@@ -3780,7 +4111,7 @@ private fun ReaderSettingsModalSheet(
 								fontWeight = FontWeight.Bold,
 								color = NemuriTheme.colors.cyan,
 							)
-							if (!cf.isEmpty) {
+							if (isColorCorrectionActive) {
 								Text(
 									text = "Reset",
 									style = MaterialTheme.typography.labelSmall,
@@ -3824,12 +4155,29 @@ private fun ReaderSettingsModalSheet(
 
 						Row(
 							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Text("Warmth / Sepia", style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textPrimary)
+							Text("${(uiState.colorWarmth * 100f).roundToInt()}%", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan)
+						}
+						Slider(
+							value = uiState.colorWarmth,
+							onValueChange = viewModel::setColorWarmth,
+							valueRange = 0f..1f,
+							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+						)
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
 							horizontalArrangement = Arrangement.spacedBy(6.dp),
 						) {
 							listOf(
-								Triple("Invert", cf.isInverted) { viewModel.setColorFilter(cf.copy(isInverted = !cf.isInverted)) },
 								Triple("Grayscale", cf.isGrayscale) { viewModel.setColorFilter(cf.copy(isGrayscale = !cf.isGrayscale)) },
-								Triple("Warm Book", cf.isBookBackground) { viewModel.setColorFilter(cf.copy(isBookBackground = !cf.isBookBackground)) },
+								Triple("Invert", cf.isInverted) { viewModel.setColorFilter(cf.copy(isInverted = !cf.isInverted)) },
+								Triple("Warm Book", uiState.colorWarmth > 0.05f || cf.isBookBackground) {
+									val nextWarmth = if (uiState.colorWarmth > 0.05f || cf.isBookBackground) 0f else 0.45f
+									viewModel.setColorWarmth(nextWarmth)
+								},
 							).forEach { (label, active, toggle) ->
 								Surface(
 									color = if (active) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
@@ -3886,12 +4234,6 @@ private fun ReaderSettingsModalSheet(
 					subtitle = "Display subtle corner page indicator when HUD is hidden",
 					checked = uiState.showPageNumbers,
 					onCheckedChange = viewModel::setShowPageNumbers,
-				)
-				ReaderInlineSwitchRow(
-					title = "Seamless Smart Stitch",
-					subtitle = "Merges uneven sliver slices into single pages with 0px seams",
-					checked = uiState.isSeamlessStitchEnabled,
-					onCheckedChange = viewModel::setSeamlessStitchEnabled,
 				)
 			}
 
@@ -3972,6 +4314,15 @@ private fun ReaderSettingsModalSheet(
 						}
 					}
 				}
+			}
+
+			if (!uiState.isTextMode) {
+				ReaderInlineSwitchRow(
+					title = "Seamless Smart Stitch",
+					subtitle = "Merges uneven sliver slices into single pages with 0px seams",
+					checked = uiState.isSeamlessStitchEnabled,
+					onCheckedChange = viewModel::setSeamlessStitchEnabled,
+				)
 			}
 
 			if (!uiState.isTextMode) {
@@ -4446,7 +4797,7 @@ private fun ReaderSettingsModalSheet(
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						Text(
-							text = "Upscale cache: ${String.format(java.util.Locale.US, "%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))} / 250 MB",
+							text = "WebP cache: ${String.format(java.util.Locale.US, "%.1f MB / 250.0 MB", uiState.neuralCacheBytes / (1024f * 1024f))}",
 							style = MaterialTheme.typography.labelSmall,
 							color = NemuriTheme.colors.textMuted,
 						)
@@ -4792,6 +5143,7 @@ private fun openMigrateFromReader(context: Context, mangaId: Long) {
 private data class AppliedShaderState(
 	val shaderKey: Pair<ReaderShaderConfig, Float>?,
 	val colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
+	val quantizedWarmth: Int = 0,
 )
 
 private class SsivHolderState(
@@ -4802,10 +5154,80 @@ private class SsivHolderState(
 private fun ssivState(ssiv: SubsamplingScaleImageView): SsivHolderState =
 	(ssiv.tag as? SsivHolderState) ?: SsivHolderState().also { ssiv.tag = it }
 
+private fun buildEffectiveColorFilter(
+	colorFilter: ReaderColorFilter,
+	warmth: Float,
+): ColorMatrixColorFilter? {
+	val w = warmth.coerceIn(0f, 1f)
+	val effectiveWarmth = when {
+		w > 0.01f -> w
+		colorFilter.isBookBackground -> 0.45f
+		else -> 0f
+	}
+	if (!colorFilter.isGrayscale &&
+		!colorFilter.isInverted &&
+		colorFilter.brightness == 0f &&
+		colorFilter.contrast == 0f &&
+		effectiveWarmth <= 0f
+	) {
+		return null
+	}
+	val cm = ColorMatrix()
+	if (colorFilter.isGrayscale) {
+		cm.setSaturation(0f)
+	}
+	if (colorFilter.isInverted) {
+		cm.postConcat(
+			ColorMatrix(
+				floatArrayOf(
+					-1f, 0f, 0f, 0f, 255f,
+					0f, -1f, 0f, 0f, 255f,
+					0f, 0f, -1f, 0f, 255f,
+					0f, 0f, 0f, 1f, 0f,
+				),
+			),
+		)
+	}
+	if (colorFilter.brightness != 0f) {
+		val bScale = (colorFilter.brightness + 1f).coerceAtLeast(0.05f)
+		cm.postConcat(ColorMatrix().apply { setScale(bScale, bScale, bScale, 1f) })
+	}
+	if (colorFilter.contrast != 0f) {
+		val cScale = (colorFilter.contrast + 1f).coerceAtLeast(0.05f)
+		val translate = (-0.5f * cScale + 0.5f) * 255f
+		cm.postConcat(
+			ColorMatrix(
+				floatArrayOf(
+					cScale, 0f, 0f, 0f, translate,
+					0f, cScale, 0f, 0f, translate,
+					0f, 0f, cScale, 0f, translate,
+					0f, 0f, 0f, 1f, 0f,
+				),
+			),
+		)
+	}
+	if (effectiveWarmth > 0f) {
+		val gScale = 1f - (0.09f * effectiveWarmth)
+		val bScale = 1f - (0.28f * effectiveWarmth)
+		cm.postConcat(
+			ColorMatrix(
+				floatArrayOf(
+					1f, 0f, 0f, 0f, 0f,
+					0f, gScale, 0f, 0f, 0f,
+					0f, 0f, bScale, 0f, 0f,
+					0f, 0f, 0f, 1f, 0f,
+				),
+			),
+		)
+	}
+	return ColorMatrixColorFilter(cm)
+}
+
 private fun applyShaderToSsiv(
 	ssiv: SubsamplingScaleImageView,
 	config: ReaderShaderConfig,
 	colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
+	colorWarmth: Float = 0f,
 ) {
 	val pm = ssiv.context.getSystemService(Context.POWER_SERVICE) as? PowerManager
 	val isPowerSave = pm?.isPowerSaveMode == true
@@ -4814,6 +5236,7 @@ private fun applyShaderToSsiv(
 	} else {
 		UpscaleEffect.MIN_SCALE
 	}
+	val quantizedWarmth = (colorWarmth.coerceIn(0f, 1f) * 100f).roundToInt()
 	val desired = AppliedShaderState(
 		shaderKey = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && config.isActive && !isPowerSave) {
 			config to fitScale
@@ -4821,17 +5244,15 @@ private fun applyShaderToSsiv(
 			null
 		},
 		colorFilter = colorFilter,
+		quantizedWarmth = quantizedWarmth,
 	)
 	val holder = ssivState(ssiv)
 	if (holder.shaderState == desired) return
 	holder.shaderState = desired
 
+	val matrixFilter = buildEffectiveColorFilter(colorFilter, quantizedWarmth / 100f)
 	if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-		val cfEffect = if (!colorFilter.isEmpty) {
-			RenderEffect.createColorFilterEffect(colorFilter.toColorFilter())
-		} else {
-			null
-		}
+		val cfEffect = matrixFilter?.let { RenderEffect.createColorFilterEffect(it) }
 		val upscaleEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && desired.shaderKey != null) {
 			UpscaleEffect.create(fitScale, config)
 		} else {
@@ -4845,10 +5266,10 @@ private fun applyShaderToSsiv(
 		}
 		ssiv.setRenderEffect(combined)
 	} else {
-		if (!colorFilter.isEmpty) {
+		if (matrixFilter != null) {
 			ssiv.setLayerType(
 				View.LAYER_TYPE_HARDWARE,
-				Paint().apply { this.colorFilter = colorFilter.toColorFilter() },
+				Paint().apply { this.colorFilter = matrixFilter },
 			)
 		} else {
 			ssiv.setLayerType(View.LAYER_TYPE_NONE, null)
@@ -5010,7 +5431,7 @@ private fun ShaderSplitPreviewDialog(
 										iv.tag = desired
 										if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && config.isActive) {
 											iv.setRenderEffect(UpscaleEffect.create(2.0f, config))
-										} else {
+										} else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 											iv.setRenderEffect(null)
 										}
 									}

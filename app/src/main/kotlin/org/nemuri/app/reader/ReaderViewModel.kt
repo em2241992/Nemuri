@@ -59,6 +59,7 @@ import org.koitharu.kotatsu.core.nav.ReaderIntent
 import org.koitharu.kotatsu.core.parser.MangaDataRepository
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
+import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
 import org.koitharu.kotatsu.core.prefs.ReaderMode
 import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
@@ -87,6 +88,7 @@ import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
 import org.koitharu.kotatsu.reader.domain.ReaderColorFilter
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
+import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.koitharu.kotatsu.reader.ui.ReaderState
 import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
 import org.koitharu.kotatsu.stats.domain.StatsCollector
@@ -124,6 +126,12 @@ data class ReaderChapterItem(
 	val isCurrent: Boolean,
 )
 
+enum class ReaderChapterSortMode(val label: String) {
+	SOURCE("Source"),
+	NUMBER("Number"),
+	NAME("Name"),
+}
+
 @Immutable
 data class ReaderUiState(
 	val manga: Manga? = null,
@@ -147,8 +155,10 @@ data class ReaderUiState(
 	val isBookmarked: Boolean = false,
 	val mangaBookmarks: List<Bookmark> = emptyList(),
 	val isChaptersReversed: Boolean = false,
+	val chapterSortMode: ReaderChapterSortMode = ReaderChapterSortMode.SOURCE,
 	val pagesGridColumns: Int = 3,
 	val colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
+	val colorWarmth: Float = 0f,
 	val isAutoScrollEnabled: Boolean = false,
 	val isAutoScrollPaused: Boolean = false,
 	val autoScrollSpeed: Float = AppSettings.DEFAULT_AUTOSCROLL_SPEED,
@@ -227,44 +237,54 @@ class ReaderViewModel @Inject constructor(
 	private val isPeek = savedStateHandle.get<Boolean>(ReaderIntent.EXTRA_PEEK) == true
 
 	private val _uiState = MutableStateFlow(
-		ReaderUiState(
-			keepScreenOn = settings.isReaderKeepScreenOn,
-			volumeButtonsEnabled = settings.isReaderVolumeButtonsEnabled,
-			is32BitColors = settings.is32BitColorsEnabled,
-			pagesGridColumns = settings.readerPagesGridColumns,
-			colorFilter = settings.readerColorFilter ?: ReaderColorFilter.EMPTY,
-			autoScrollSpeed = settings.readerAutoscrollSpeed,
-			autoScrollPageDelaySec = settings.readerAutoscrollPageDelay,
-			shaderConfig = ReaderShaderConfig(
-				preset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
-				descreen = settings.isReaderDescreenEnabled,
-				inkLevels = settings.isReaderInkLevelsEnabled,
-				strength = settings.readerShaderStrength,
-			),
-			isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
-			isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
-			neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
-			selectedNeuralModelId = settings.neuralUpscaleModelId,
-			isSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
-			tapZoneMode = ReaderTapZoneMode.fromKey(settings.readerTapZoneMode),
-			isDoubleTapSmartZoom = settings.isReaderDoubleTapFill,
-			scrubberEdge = settings.readerScrubberEdge,
-			selectionMenuStyle = settings.selectionMenuStyle,
-			defaultWebtoonZoomOutPercent = settings.defaultWebtoonZoomOutPercent,
-			isWebtoonGapsEnabled = settings.isWebtoonGapsEnabled,
-			isDoubleOnLandscape = settings.isReaderDoubleOnLandscape,
-			isDoubleOnFoldable = settings.isReaderDoubleOnFoldable,
-			doublePagesSensitivity = settings.readerDoublePagesSensitivity,
-			showPageNumbers = settings.isPagesNumbersEnabled,
-			epubTheme = settings.epubTheme,
-			epubFontSize = settings.epubFontSize,
-			epubLineHeight = settings.epubLineHeight,
-			epubFontFamily = settings.epubFontFamily,
-			epubHorizontalPadding = settings.epubHorizontalPadding,
-		),
+		run {
+			val initialCf = settings.readerColorFilter ?: ReaderColorFilter.EMPTY
+			ReaderUiState(
+				keepScreenOn = settings.isReaderKeepScreenOn,
+				volumeButtonsEnabled = settings.isReaderVolumeButtonsEnabled,
+				is32BitColors = settings.is32BitColorsEnabled,
+				isChaptersReversed = settings.isChaptersReverse,
+				pagesGridColumns = settings.readerPagesGridColumns,
+				colorFilter = initialCf,
+				colorWarmth = if (initialCf.isBookBackground) DEFAULT_WARMTH_LEVEL else 0f,
+				autoScrollSpeed = settings.readerAutoscrollSpeed,
+				autoScrollPageDelaySec = settings.readerAutoscrollPageDelay,
+				shaderConfig = ReaderShaderConfig(
+					preset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
+					descreen = settings.isReaderDescreenEnabled,
+					inkLevels = settings.isReaderInkLevelsEnabled,
+					strength = settings.readerShaderStrength,
+				),
+				isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
+				isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
+				neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
+				selectedNeuralModelId = settings.neuralUpscaleModelId,
+				isSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
+				tapZoneMode = ReaderTapZoneMode.fromKey(settings.readerTapZoneMode),
+				isDoubleTapSmartZoom = settings.isReaderDoubleTapFill,
+				scrubberEdge = settings.readerScrubberEdge,
+				selectionMenuStyle = settings.selectionMenuStyle,
+				defaultWebtoonZoomOutPercent = settings.defaultWebtoonZoomOutPercent,
+				isWebtoonGapsEnabled = settings.isWebtoonGapsEnabled,
+				isDoubleOnLandscape = settings.isReaderDoubleOnLandscape,
+				isDoubleOnFoldable = settings.isReaderDoubleOnFoldable,
+				doublePagesSensitivity = settings.readerDoublePagesSensitivity,
+				showPageNumbers = settings.isPagesNumbersEnabled,
+				epubTheme = settings.epubTheme,
+				epubFontSize = settings.epubFontSize,
+				epubLineHeight = settings.epubLineHeight,
+				epubFontFamily = settings.epubFontFamily,
+				epubHorizontalPadding = settings.epubHorizontalPadding,
+			)
+		},
 	)
 	val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
 
+	private var rawUnorderedDetails: MangaDetails? = null
+	private var currentBranchName: String? = null
+	private var hasSessionNumberSortOverride: Boolean = false
+	private var rememberedQuickShaderConfig: ReaderShaderConfig? = null
+	private var rememberedQuickNeuralEnabled: Boolean? = null
 	private var activeDetails: MangaDetails? = null
 	private var activeBranchChapters: List<MangaChapter> = emptyList()
 	private var activeChapter: MangaChapter? = null
@@ -458,7 +478,61 @@ class ReaderViewModel @Inject constructor(
 	}
 
 	fun toggleChaptersReversed() {
-		_uiState.update { it.copy(isChaptersReversed = !it.isChaptersReversed) }
+		val next = !_uiState.value.isChaptersReversed
+		settings.isChaptersReverse = next
+		_uiState.update { it.copy(isChaptersReversed = next) }
+	}
+
+	fun setChapterSortMode(mode: ReaderChapterSortMode) {
+		val baseDetails = rawUnorderedDetails ?: activeDetails ?: return
+		hasSessionNumberSortOverride = (mode == ReaderChapterSortMode.NUMBER)
+		when (mode) {
+			ReaderChapterSortMode.SOURCE -> settings.setChaptersSortOrder(baseDetails.id, ChaptersSortOrder.SOURCE)
+			ReaderChapterSortMode.NAME -> settings.setChaptersSortOrder(baseDetails.id, ChaptersSortOrder.NAME)
+			ReaderChapterSortMode.NUMBER -> Unit
+		}
+		val (sortedDetails, sortedChapters) = resolveSortedBranchChapters(
+			rawDetails = baseDetails,
+			branch = currentBranchName,
+			mode = mode,
+		)
+		activeDetails = sortedDetails
+		activeBranchChapters = sortedChapters
+		val curChId = _uiState.value.currentChapterId
+		val chIdx = sortedChapters.indexOfFirst { it.id == curChId }
+		_uiState.update { state ->
+			state.copy(
+				details = sortedDetails,
+				chapterSortMode = mode,
+				chapters = sortedChapters.map { c ->
+					ReaderChapterItem(c, chapterDisplayName(c), c.id == curChId)
+				},
+				hasPrevChapter = chIdx > 0,
+				hasNextChapter = chIdx in 0 until sortedChapters.lastIndex,
+			)
+		}
+	}
+
+	private fun resolveSortedBranchChapters(
+		rawDetails: MangaDetails,
+		branch: String?,
+		mode: ReaderChapterSortMode,
+	): Pair<MangaDetails, List<MangaChapter>> {
+		val engineOrder = when (mode) {
+			ReaderChapterSortMode.NAME -> ChaptersSortOrder.NAME
+			else -> ChaptersSortOrder.SOURCE
+		}
+		val detailsOrdered = rawDetails.withChaptersOrder(engineOrder)
+		val baseList = (detailsOrdered.chapters[branch] ?: detailsOrdered.allChapters).distinctBy { it.id }
+		val finalChapters = if (mode == ReaderChapterSortMode.NUMBER) {
+			baseList.sortedWith(
+				compareBy<MangaChapter> { ch -> ch.volume.takeIf { v -> v > 0 } ?: 0 }
+					.thenBy { ch -> if (ch.number > 0f) ch.number else Float.MAX_VALUE },
+			)
+		} else {
+			baseList
+		}
+		return detailsOrdered to finalChapters
 	}
 
 	fun toggleAutoScroll() {
@@ -504,9 +578,27 @@ class ReaderViewModel @Inject constructor(
 			isGrayscale = filter.isGrayscale,
 			isBookBackground = filter.isBookBackground,
 		)
+		val nextWarmth = when {
+			!normalized.isBookBackground -> 0f
+			_uiState.value.colorWarmth > WARMTH_SYNC_THRESHOLD -> _uiState.value.colorWarmth
+			else -> DEFAULT_WARMTH_LEVEL
+		}
 		val toPersist = normalized.takeUnless { it.isEmpty }
 		settings.readerColorFilter = toPersist
-		_uiState.update { it.copy(colorFilter = normalized) }
+		_uiState.update { it.copy(colorFilter = normalized, colorWarmth = nextWarmth) }
+		val manga = _uiState.value.manga ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching { mangaDataRepository.saveColorFilter(manga, toPersist) }
+		}
+	}
+
+	fun setColorWarmth(warmth: Float) {
+		val clamped = warmth.coerceIn(0f, 1f)
+		val current = _uiState.value.colorFilter
+		val updated = current.copy(isBookBackground = clamped > WARMTH_SYNC_THRESHOLD)
+		val toPersist = updated.takeUnless { it.isEmpty }
+		settings.readerColorFilter = toPersist
+		_uiState.update { it.copy(colorFilter = updated, colorWarmth = clamped) }
 		val manga = _uiState.value.manga ?: return
 		viewModelScope.launch(Dispatchers.IO) {
 			runCatching { mangaDataRepository.saveColorFilter(manga, toPersist) }
@@ -514,7 +606,12 @@ class ReaderViewModel @Inject constructor(
 	}
 
 	fun resetColorFilter() {
-		setColorFilter(ReaderColorFilter.EMPTY)
+		settings.readerColorFilter = null
+		_uiState.update { it.copy(colorFilter = ReaderColorFilter.EMPTY, colorWarmth = 0f) }
+		val manga = _uiState.value.manga ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching { mangaDataRepository.saveColorFilter(manga, null) }
+		}
 	}
 
 	fun getCachedPageSize(pageId: Long): Size? = pageBoundsCache[pageId]
@@ -656,6 +753,72 @@ class ReaderViewModel @Inject constructor(
 		val clamped = strength.coerceIn(0.3f, 1.0f)
 		settings.readerShaderStrength = clamped
 		_uiState.update { it.copy(shaderConfig = it.shaderConfig.copy(strength = clamped)) }
+	}
+
+	fun toggleQuickUpscale() {
+		val state = _uiState.value
+		val isNeuralActive = state.isNeuralUpscaleEnabled && state.hasReadyNeuralModel
+		val isAnyActive = state.shaderConfig.isActive || isNeuralActive
+		if (isAnyActive) {
+			rememberedQuickShaderConfig = state.shaderConfig
+			rememberedQuickNeuralEnabled = isNeuralActive
+			settings.readerShaderMode = ReaderShaderPreset.OFF.key
+			settings.isReaderDescreenEnabled = false
+			settings.isReaderInkLevelsEnabled = false
+			val wasNeuralEnabled = state.isNeuralUpscaleEnabled
+			if (wasNeuralEnabled) {
+				settings.isNeuralUpscaleEnabled = false
+			}
+			_uiState.update {
+				it.copy(
+					shaderConfig = it.shaderConfig.copy(
+						preset = ReaderShaderPreset.OFF,
+						descreen = false,
+						inkLevels = false,
+					),
+					isNeuralUpscaleEnabled = false,
+					neuralRevision = if (wasNeuralEnabled) it.neuralRevision + 1 else it.neuralRevision,
+				)
+			}
+			toastManager.show("Upscale disabled")
+		} else {
+			val prevShader = rememberedQuickShaderConfig
+			val prevNeural = rememberedQuickNeuralEnabled
+			val restoreNeural = state.isNeuralUpscaleSupported && state.hasReadyNeuralModel &&
+				(prevNeural == true || (prevNeural == null && prevShader == null))
+			val shaderToApply = when {
+				prevShader != null && prevShader.isActive -> prevShader
+				!restoreNeural && UpscaleEffect.isSupported -> state.shaderConfig.copy(
+					preset = ReaderShaderPreset.ANIME4K,
+				)
+				else -> null
+			}
+			if (shaderToApply != null && UpscaleEffect.isSupported) {
+				settings.readerShaderMode = shaderToApply.preset.key
+				settings.isReaderDescreenEnabled = shaderToApply.descreen
+				settings.isReaderInkLevelsEnabled = shaderToApply.inkLevels
+			}
+			if (restoreNeural) {
+				settings.isNeuralUpscaleEnabled = true
+			} else if (shaderToApply == null && state.isNeuralUpscaleSupported) {
+				setNeuralUpscaleEnabled(true)
+				return
+			}
+			_uiState.update {
+				it.copy(
+					shaderConfig = shaderToApply ?: it.shaderConfig,
+					isNeuralUpscaleEnabled = if (restoreNeural) true else it.isNeuralUpscaleEnabled,
+					neuralRevision = if (restoreNeural) it.neuralRevision + 1 else it.neuralRevision,
+				)
+			}
+			val activeSummary = when {
+				restoreNeural && shaderToApply != null -> "Neural 2x + ${shaderToApply.summaryLabel()}"
+				restoreNeural -> "Neural 2x (${state.activeNeuralModelLabel})"
+				shaderToApply != null -> shaderToApply.summaryLabel()
+				else -> "Upscale"
+			}
+			toastManager.show("Upscale enabled • $activeSummary")
+		}
 	}
 
 	fun setNeuralUpscaleEnabled(enabled: Boolean) {
@@ -1357,24 +1520,48 @@ class ReaderViewModel @Inject constructor(
 			try {
 				var initializedChapter = false
 				detailsLoadUseCase.invoke(intent, force = false).collect { rawLoaded ->
-					val sortOrder = settings.getChaptersSortOrder(rawLoaded.id)
-					val loaded = rawLoaded.withChaptersOrder(sortOrder)
-					activeDetails = loaded
-					val manga = loaded.toManga()
+					rawUnorderedDetails = rawLoaded
+					val storedSortOrder = settings.getChaptersSortOrder(rawLoaded.id)
+					val effectiveSortMode = when {
+						hasSessionNumberSortOverride -> ReaderChapterSortMode.NUMBER
+						storedSortOrder == ChaptersSortOrder.NAME -> ReaderChapterSortMode.NAME
+						else -> ReaderChapterSortMode.SOURCE
+					}
+					val prelimDetails = rawLoaded.withChaptersOrder(
+						if (effectiveSortMode == ReaderChapterSortMode.NAME) ChaptersSortOrder.NAME else ChaptersSortOrder.SOURCE,
+					)
+					val manga = prelimDetails.toManga()
 					activeMangaFlow.value = manga
 					MangaTransferCache.put(manga)
 					effectiveIncognito = extraIncognito || settings.isIncognitoModeEnabled(manga.isNsfw())
 					val savedColorFilter = runCatchingCancellable { mangaDataRepository.getColorFilter(manga.id) }.getOrNull()
 						?: settings.readerColorFilter
 						?: ReaderColorFilter.EMPTY
-					_uiState.update { it.copy(colorFilter = savedColorFilter) }
+					val restoredWarmth = when {
+						!savedColorFilter.isBookBackground -> 0f
+						_uiState.value.colorWarmth > WARMTH_SYNC_THRESHOLD -> _uiState.value.colorWarmth
+						else -> DEFAULT_WARMTH_LEVEL
+					}
 
 					val history = runCatchingCancellable { historyRepository.getOne(manga) }.getOrNull()
-					val branch = requestedBranch?.takeIf { loaded.chapters.containsKey(it) }
-						?: manga.getPreferredBranch(history).takeIf { loaded.chapters.containsKey(it) }
-						?: loaded.chapters.keys.firstOrNull()
-					val branchChapters = (loaded.chapters[branch] ?: loaded.allChapters).distinctBy { it.id }
+					val branch = requestedBranch?.takeIf { prelimDetails.chapters.containsKey(it) }
+						?: manga.getPreferredBranch(history).takeIf { prelimDetails.chapters.containsKey(it) }
+						?: prelimDetails.chapters.keys.firstOrNull()
+					currentBranchName = branch
+					val (loaded, branchChapters) = resolveSortedBranchChapters(
+						rawDetails = rawLoaded,
+						branch = branch,
+						mode = effectiveSortMode,
+					)
+					activeDetails = loaded
 					activeBranchChapters = branchChapters
+					_uiState.update {
+						it.copy(
+							colorFilter = savedColorFilter,
+							colorWarmth = restoredWarmth,
+							chapterSortMode = effectiveSortMode,
+						)
+					}
 
 					if (!initializedChapter && branchChapters.isNotEmpty()) {
 						initializedChapter = true
@@ -1813,4 +2000,9 @@ class ReaderViewModel @Inject constructor(
 		chapter.getLocalizedTitle(context.resources).ifBlank {
 			chapter.title?.takeIf { it.isNotBlank() } ?: "Chapter ${chapter.number.toInt()}"
 		}
+
+	private companion object {
+		const val DEFAULT_WARMTH_LEVEL = 0.45f
+		const val WARMTH_SYNC_THRESHOLD = 0.05f
+	}
 }

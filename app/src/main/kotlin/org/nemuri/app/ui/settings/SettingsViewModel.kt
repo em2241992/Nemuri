@@ -27,11 +27,13 @@ import org.koitharu.kotatsu.core.prefs.DownloadFormat
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
+import org.koitharu.kotatsu.core.prefs.QuickScrollButtonsMode
 import org.koitharu.kotatsu.core.prefs.ReaderMode
 import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.ScreenshotsPolicy
 import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
+import org.koitharu.kotatsu.core.prefs.TrackerCheckInterval
 import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
@@ -95,6 +97,10 @@ data class SettingsUiState(
 	val selectionMenuStyle: SelectionMenuStyle = SelectionMenuStyle.VISUAL_DIAGRAM,
 	val navLabelVisibility: NavLabelVisibility = NavLabelVisibility.SELECTED_ONLY,
 	val isSwipeActionsEnabled: Boolean = true,
+	val isFastScrollEnabled: Boolean = true,
+	val isFastScrollLeftHanded: Boolean = false,
+	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.LONG_LISTS_ONLY,
+	val isLastPositionPillEnabled: Boolean = true,
 	// Extensions
 	val isPrivateInstall: Boolean = false,
 	val isShizukuInstaller: Boolean = false,
@@ -141,6 +147,7 @@ data class SettingsUiState(
 	// Updates & Feed
 	val isTrackerEnabled: Boolean = true,
 	val isTrackerWifiOnly: Boolean = false,
+	val trackerCheckInterval: TrackerCheckInterval = TrackerCheckInterval.EVERY_12_HOURS,
 	val trackerFrequencyFactor: Float = 1f,
 	val isTrackerNsfwDisabled: Boolean = false,
 	val trackerDownloadStrategy: TrackerDownloadStrategy = TrackerDownloadStrategy.DISABLED,
@@ -253,6 +260,10 @@ class SettingsViewModel @Inject constructor(
 			selectionMenuStyle = settings.selectionMenuStyle,
 			navLabelVisibility = settings.navLabelVisibility,
 			isSwipeActionsEnabled = settings.isSwipeActionsEnabled,
+			isFastScrollEnabled = settings.isFastScrollEnabled,
+			isFastScrollLeftHanded = settings.isFastScrollLeftHanded,
+			quickScrollButtonsMode = settings.quickScrollButtonsMode,
+			isLastPositionPillEnabled = settings.isLastPositionPillEnabled,
 			isPrivateInstall = settings.isPrivateInstallEnabled,
 			isShizukuInstaller = settings.isShizukuInstallerEnabled,
 			isAutoUpdateExtensions = settings.isAutoUpdateExtensionsEnabled,
@@ -295,6 +306,7 @@ class SettingsViewModel @Inject constructor(
 			storageStats = storageStats,
 			isTrackerEnabled = settings.isTrackerEnabled,
 			isTrackerWifiOnly = settings.isTrackerWifiOnly,
+			trackerCheckInterval = settings.trackerCheckInterval,
 			trackerFrequencyFactor = settings.trackerFrequencyFactor,
 			isTrackerNsfwDisabled = settings.isTrackerNsfwDisabled,
 			trackerDownloadStrategy = settings.trackerDownloadStrategy,
@@ -384,6 +396,18 @@ class SettingsViewModel @Inject constructor(
 	}
 	fun setSwipeActionsEnabled(enabled: Boolean) {
 		settings.isSwipeActionsEnabled = enabled
+	}
+	fun setFastScrollEnabled(enabled: Boolean) {
+		settings.isFastScrollEnabled = enabled
+	}
+	fun setFastScrollLeftHanded(leftHanded: Boolean) {
+		settings.isFastScrollLeftHanded = leftHanded
+	}
+	fun setQuickScrollButtonsMode(mode: QuickScrollButtonsMode) {
+		settings.quickScrollButtonsMode = mode
+	}
+	fun setLastPositionPillEnabled(enabled: Boolean) {
+		settings.isLastPositionPillEnabled = enabled
 	}
 
 	// Extensions
@@ -582,8 +606,28 @@ class SettingsViewModel @Inject constructor(
 	}
 
 	// Updates & Feed
-	fun setTrackerEnabled(enabled: Boolean) = settings.setTrackerEnabled(enabled)
-	fun setTrackerWifiOnly(enabled: Boolean) = settings.setTrackerWifiOnly(enabled)
+	fun setTrackerEnabled(enabled: Boolean) {
+		if (enabled && settings.trackerCheckInterval == TrackerCheckInterval.MANUAL_ONLY) {
+			settings.trackerCheckInterval = TrackerCheckInterval.EVERY_12_HOURS
+		} else {
+			settings.setTrackerEnabled(enabled)
+		}
+		viewModelScope.launch(Dispatchers.IO) {
+			trackScheduler.schedule()
+		}
+	}
+	fun setTrackerWifiOnly(enabled: Boolean) {
+		settings.setTrackerWifiOnly(enabled)
+		viewModelScope.launch(Dispatchers.IO) {
+			trackScheduler.schedule()
+		}
+	}
+	fun setTrackerCheckInterval(interval: TrackerCheckInterval) {
+		settings.trackerCheckInterval = interval
+		viewModelScope.launch(Dispatchers.IO) {
+			trackScheduler.schedule()
+		}
+	}
 	fun setTrackerFrequency(factor: Float) = settings.setTrackerFrequencyFactor(factor)
 	fun setTrackerNsfwDisabled(disabled: Boolean) = settings.setTrackerNsfwDisabled(disabled)
 	fun setTrackerDownloadStrategy(strategy: TrackerDownloadStrategy) = settings.setTrackerDownloadStrategy(strategy)

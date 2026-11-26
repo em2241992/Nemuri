@@ -10,10 +10,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+private val YorhaVisorIvory = Color(0xFFDAD4BB)
+private val YorhaVisorSepiaInk = Color(0xFF3D3A33)
+
 /**
- * Zero-allocation 120Hz Android tactical HUD background overlay for [org.koitharu.kotatsu.core.prefs.ColorScheme.YORHA_VISOR_V2].
- * Renders 24.dp coordinate hairlines, 4th-cell intersection cross-ticks, faint 3.dp visor scanlines,
- * and subtle perimeter `[ ]` tactical corner reticles without allocating inside the draw loop.
+ * Polarity-aware zero-allocation 120Hz Android tactical HUD background overlay for
+ * [org.koitharu.kotatsu.core.prefs.ColorScheme.YORHA_VISOR_V2].
+ *
+ * - Dark & AMOLED (`isDark == true`): warm YoRHa Ivory (`#DAD4BB`) at `0.09f` minor `24.dp` grid,
+ *   `0.16f` major `96.dp` grid & `+` crosshairs, `0.03f` scanlines, and `0.26f` `[ ]` corner reticles.
+ * - Light (`isDark == false`): dark tactical sepia/charcoal ink (`#3D3A33`) at `0.08f` minor `24.dp` grid,
+ *   `0.14f` major `96.dp` grid & `+` crosshairs, `0.03f` scanlines, and `0.24f` `[ ]` corner reticles.
  */
 @Composable
 fun YorhaVisorHudBackground(
@@ -37,37 +44,42 @@ fun YorhaVisorHudBackground(
 	)
 }
 
+@Suppress("UNUSED_PARAMETER")
 fun Modifier.yorhaVisorHudCanvas(
-	hudTint: Color,
-	borderTint: Color,
+	hudTint: Color = YorhaVisorIvory,
+	borderTint: Color = YorhaVisorIvory,
 	isDark: Boolean,
 ): Modifier = this.drawWithCache {
 	val gridStepPx = 24.dp.toPx().coerceAtLeast(8f)
 	val scanlineStepPx = 3.dp.toPx().coerceAtLeast(2f)
 	val hairlinePx = 1.dp.toPx().coerceAtMost(1.4f)
-	val tickHalfPx = 3.5.dp.toPx()
+	val crosshairStrokePx = 1.2.dp.toPx().coerceAtMost(1.65f)
+	val tickHalfPx = 4.dp.toPx()
 	val reticleInsetX = 10.dp.toPx()
 	val reticleInsetTop = 38.dp.toPx()
 	val reticleInsetBottom = 22.dp.toPx()
 	val reticleArmPx = 14.dp.toPx()
-	val reticleStrokePx = 1.25.dp.toPx()
+	val reticleStrokePx = 1.35.dp.toPx()
 
-	val gridColor = borderTint.copy(alpha = if (isDark) 0.18f else 0.22f)
-	val tickColor = hudTint.copy(alpha = if (isDark) 0.13f else 0.16f)
-	val scanlineColor = hudTint.copy(alpha = if (isDark) 0.028f else 0.032f)
-	val reticleColor = hudTint.copy(alpha = if (isDark) 0.22f else 0.28f)
+	val baseVisorInk = if (isDark) YorhaVisorIvory else YorhaVisorSepiaInk
+	val minorGridColor = baseVisorInk.copy(alpha = if (isDark) 0.09f else 0.08f)
+	val majorGridColor = baseVisorInk.copy(alpha = if (isDark) 0.16f else 0.14f)
+	val tickColor = baseVisorInk.copy(alpha = if (isDark) 0.16f else 0.14f)
+	val scanlineColor = baseVisorInk.copy(alpha = 0.03f)
+	val reticleColor = baseVisorInk.copy(alpha = if (isDark) 0.26f else 0.24f)
 
 	onDrawBehind {
 		val w = size.width
 		val h = size.height
 		if (w <= 0f || h <= 0f) return@onDrawBehind
 
-		// 1. 24.dp coordinate grid lines (~4-5% effective visual contrast against background)
+		// 1. 24.dp minor coordinate hairlines + 96.dp (every 4th cell) major grid lines
 		var col = 0
 		var x = gridStepPx * 0.5f
 		while (x < w) {
+			val isMajorCol = col % 4 == 0
 			drawLine(
-				color = gridColor,
+				color = if (isMajorCol) majorGridColor else minorGridColor,
 				start = Offset(x, 0f),
 				end = Offset(x, h),
 				strokeWidth = hairlinePx,
@@ -79,14 +91,15 @@ fun Modifier.yorhaVisorHudCanvas(
 		var row = 0
 		var y = gridStepPx * 0.5f
 		while (y < h) {
+			val isMajorRow = row % 4 == 0
 			drawLine(
-				color = gridColor,
+				color = if (isMajorRow) majorGridColor else minorGridColor,
 				start = Offset(0f, y),
 				end = Offset(w, y),
 				strokeWidth = hairlinePx,
 			)
-			// Intersection cross-ticks every 4th cell
-			if (row % 4 == 0) {
+			// + Crosshair reticles at every 96.dp major intersection
+			if (isMajorRow) {
 				var tickCol = 0
 				var tx = gridStepPx * 0.5f
 				while (tx < w) {
@@ -95,13 +108,13 @@ fun Modifier.yorhaVisorHudCanvas(
 							color = tickColor,
 							start = Offset(tx - tickHalfPx, y),
 							end = Offset(tx + tickHalfPx, y),
-							strokeWidth = hairlinePx,
+							strokeWidth = crosshairStrokePx,
 						)
 						drawLine(
 							color = tickColor,
 							start = Offset(tx, y - tickHalfPx),
 							end = Offset(tx, y + tickHalfPx),
-							strokeWidth = hairlinePx,
+							strokeWidth = crosshairStrokePx,
 						)
 					}
 					tx += gridStepPx
@@ -112,7 +125,7 @@ fun Modifier.yorhaVisorHudCanvas(
 			row++
 		}
 
-		// 2. Faint horizontal visor scanlines (~2.8-3.2% alpha every 3.dp)
+		// 2. Faint horizontal visor scanlines (3% alpha every 3.dp)
 		var sy = 0f
 		while (sy < h) {
 			drawLine(
@@ -152,7 +165,9 @@ fun Modifier.yorhaVisorHudCanvas(
  */
 @Composable
 fun Modifier.yorhaTacticalBrackets(
-	color: Color = NemuriTheme.colors.cyan.copy(alpha = 0.55f),
+	color: Color = (if (NemuriTheme.colors.isDark) YorhaVisorIvory else YorhaVisorSepiaInk).copy(
+		alpha = if (NemuriTheme.colors.isDark) 0.50f else 0.44f,
+	),
 	bracketLength: Dp = 7.dp,
 	strokeWidth: Dp = 1.25.dp,
 	inset: Dp = 1.5.dp,
@@ -174,7 +189,7 @@ fun Modifier.yorhaTacticalBrackets(
 			val vArm = arm.coerceAtMost((bottom - top) * 0.42f)
 			if (hArm <= 0f || vArm <= 0f) return@onDrawBehind
 
-			// Left [ bracket (top + bottom arms & vertical spineicks)
+			// Left [ bracket
 			drawLine(color, Offset(left, top), Offset(left + hArm, top), stroke)
 			drawLine(color, Offset(left, top), Offset(left, top + vArm), stroke)
 			drawLine(color, Offset(left, bottom - vArm), Offset(left, bottom), stroke)

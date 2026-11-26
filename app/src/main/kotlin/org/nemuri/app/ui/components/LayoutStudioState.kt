@@ -23,6 +23,7 @@ import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
+import org.koitharu.kotatsu.core.prefs.QuickScrollButtonsMode
 import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
 
 @Immutable
@@ -30,6 +31,7 @@ data class LayoutStudioPrefs(
 	val cardStyle: MangaCardStyle = MangaCardStyle.COMPACT,
 	val gridColumnsPortrait: Int = 3,
 	val gridColumnsLandscape: Int = 5,
+	val feedGridColumnsOverride: Int = 0,
 	val cardCornerRadiusDp: Int = 12,
 	val gutterDensity: GridGutterDensity = GridGutterDensity.STANDARD,
 	val coverAspectRatio: CoverAspectRatio = CoverAspectRatio.STANDARD_2_3,
@@ -43,9 +45,21 @@ data class LayoutStudioPrefs(
 	val uiScalePercent: Int = 100,
 	val selectionMenuStyle: SelectionMenuStyle = SelectionMenuStyle.VISUAL_DIAGRAM,
 	val isClassicBottomBar: Boolean = false,
+	val isFastScrollEnabled: Boolean = true,
+	val isFastScrollLeftHanded: Boolean = false,
+	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.LONG_LISTS_ONLY,
+	val isLastPositionPillEnabled: Boolean = true,
 ) {
 	fun columnsForOrientation(isLandscape: Boolean): Int {
 		return if (isLandscape) gridColumnsLandscape else gridColumnsPortrait
+	}
+
+	fun feedColumnsForOrientation(isLandscape: Boolean): Int {
+		return if (feedGridColumnsOverride in 2..6) {
+			feedGridColumnsOverride
+		} else {
+			columnsForOrientation(isLandscape)
+		}
 	}
 }
 
@@ -75,6 +89,7 @@ fun AppSettings.toLayoutStudioPrefs(): LayoutStudioPrefs {
 		cardStyle = resolvedCardStyle,
 		gridColumnsPortrait = gridColumnsPortrait,
 		gridColumnsLandscape = gridColumnsLandscape,
+		feedGridColumnsOverride = feedGridColumnsOverride,
 		cardCornerRadiusDp = cardCornerRadiusDp,
 		gutterDensity = gridGutterDensity,
 		coverAspectRatio = coverAspectRatio,
@@ -88,6 +103,10 @@ fun AppSettings.toLayoutStudioPrefs(): LayoutStudioPrefs {
 		uiScalePercent = uiScalePercent,
 		selectionMenuStyle = selectionMenuStyle,
 		isClassicBottomBar = isLegacyNavigationBar,
+		isFastScrollEnabled = isFastScrollEnabled,
+		isFastScrollLeftHanded = isFastScrollLeftHanded,
+		quickScrollButtonsMode = quickScrollButtonsMode,
+		isLastPositionPillEnabled = isLastPositionPillEnabled,
 	)
 }
 

@@ -300,15 +300,13 @@ class TrackWorker @AssistedInject constructor(
 	) : PeriodicWorkScheduler {
 
 		override suspend fun schedule() {
-			val frequency = settings.trackerFrequencyFactor
-			if (frequency <= 0f) {
+			val checkInterval = settings.trackerCheckInterval
+			if (!settings.isTrackerEnabled || checkInterval.hours <= 0) {
 				return unschedule()
 			}
 			val constraints = createConstraints()
-			val runCount = dbProvider.get().getTracksDao().getTracksCount()
-			val runsPerFullCheck = (runCount / BATCH_SIZE.toFloat()).toIntUp().coerceAtLeast(1)
-			val interval = (18 / runsPerFullCheck / frequency).roundToInt().coerceAtLeast(2)
-			val request = PeriodicWorkRequestBuilder<TrackWorker>(interval.toLong(), TimeUnit.HOURS)
+			val intervalHours = checkInterval.hours.coerceAtLeast(1)
+			val request = PeriodicWorkRequestBuilder<TrackWorker>(intervalHours.toLong(), TimeUnit.HOURS)
 				.setConstraints(constraints)
 				.addTag(TAG)
 				.setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.MINUTES)

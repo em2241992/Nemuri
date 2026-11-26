@@ -46,7 +46,7 @@ fun NemuriTheme(
 	val (materialColors, extendedColors) = buildMaterialColorScheme(
 		context = context,
 		isDark = isDark,
-		amoled = amoled || colorScheme == ColorScheme.TRUE_AMOLED,
+		amoled = amoled,
 		colorScheme = colorScheme,
 	)
 	val isYorhaVisor = colorScheme == ColorScheme.YORHA_VISOR_V2

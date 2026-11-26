@@ -161,6 +161,27 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getInt(KEY_READER_PAGES_COLUMNS, 3).coerceIn(2, 6)
 		set(value) = prefs.edit { putInt(KEY_READER_PAGES_COLUMNS, value.coerceIn(2, 6)) }
 
+	/** 0 means match Library grid columns; 2..6 overrides Feed Gallery & For You columns. */
+	var feedGridColumnsOverride: Int
+		get() = prefs.getInt(KEY_FEED_GRID_COLUMNS_OVERRIDE, 0).let { if (it in 2..6) it else 0 }
+		set(value) = prefs.edit { putInt(KEY_FEED_GRID_COLUMNS_OVERRIDE, if (value in 2..6) value else 0) }
+
+	var isFastScrollEnabled: Boolean
+		get() = prefs.getBoolean(KEY_LIST_FAST_SCROLL, true)
+		set(value) = prefs.edit { putBoolean(KEY_LIST_FAST_SCROLL, value) }
+
+	var isFastScrollLeftHanded: Boolean
+		get() = prefs.getBoolean(KEY_LIST_FAST_SCROLL_LEFT, false)
+		set(value) = prefs.edit { putBoolean(KEY_LIST_FAST_SCROLL_LEFT, value) }
+
+	var quickScrollButtonsMode: QuickScrollButtonsMode
+		get() = QuickScrollButtonsMode.fromKey(prefs.getString(KEY_QUICK_SCROLL_BUTTONS, null))
+		set(value) = prefs.edit { putString(KEY_QUICK_SCROLL_BUTTONS, value.key) }
+
+	var isLastPositionPillEnabled: Boolean
+		get() = prefs.getBoolean(KEY_LAST_POSITION_PILL, true)
+		set(value) = prefs.edit { putBoolean(KEY_LAST_POSITION_PILL, value) }
+
 	var mainNavItems: List<NavItem>
 		get() {
 			val raw = prefs.getString(KEY_NAV_MAIN, null)?.split(',')
@@ -684,13 +705,43 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		set(value) = prefs.edit { putBoolean(KEY_ALL_FAVOURITES_VISIBLE, value) }
 
 	val isTrackerEnabled: Boolean
-		get() = prefs.getBoolean(KEY_TRACKER_ENABLED, true)
+		get() = prefs.getBoolean(KEY_TRACKER_ENABLED, true) &&
+			prefs.getString(KEY_TRACKER_INTERVAL, null) != TrackerCheckInterval.MANUAL_ONLY.key
 
 	val isTrackerWifiOnly: Boolean
 		get() = prefs.getBoolean(KEY_TRACKER_WIFI_ONLY, false)
 
 	val trackerFrequencyFactor: Float
 		get() = prefs.getString(KEY_TRACKER_FREQUENCY, null)?.toFloatOrNull() ?: 1f
+
+	var trackerCheckInterval: TrackerCheckInterval
+		get() {
+			val explicit = TrackerCheckInterval.fromKeyOrNull(prefs.getString(KEY_TRACKER_INTERVAL, null))
+			if (explicit != null) {
+				return if (!prefs.getBoolean(KEY_TRACKER_ENABLED, true)) {
+					TrackerCheckInterval.MANUAL_ONLY
+				} else {
+					explicit
+				}
+			}
+			return TrackerCheckInterval.fromLegacyFactor(
+				enabled = prefs.getBoolean(KEY_TRACKER_ENABLED, true),
+				factor = trackerFrequencyFactor,
+			)
+		}
+		set(value) = prefs.edit {
+			putString(KEY_TRACKER_INTERVAL, value.key)
+			putBoolean(KEY_TRACKER_ENABLED, value != TrackerCheckInterval.MANUAL_ONLY)
+			val legacyFactor = when (value) {
+				TrackerCheckInterval.MANUAL_ONLY -> 0f
+				TrackerCheckInterval.EVERY_2_HOURS -> 4f
+				TrackerCheckInterval.EVERY_6_HOURS -> 2f
+				TrackerCheckInterval.EVERY_12_HOURS -> 1f
+				TrackerCheckInterval.DAILY -> 0.5f
+				TrackerCheckInterval.EVERY_2_DAYS -> 0.25f
+			}
+			putString(KEY_TRACKER_FREQUENCY, legacyFactor.toString())
+		}
 
 	val isTrackerNsfwDisabled: Boolean
 		get() = prefs.getBoolean(KEY_TRACKER_NO_NSFW, false)
@@ -1131,7 +1182,7 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getEnumValue(KEY_DOWNLOADS_FORMAT, DownloadFormat.AUTOMATIC)
 
 	var isSuggestionsEnabled: Boolean
-		get() = prefs.getBoolean(KEY_SUGGESTIONS, false)
+		get() = prefs.getBoolean(KEY_SUGGESTIONS, true)
 		set(value) = prefs.edit { putBoolean(KEY_SUGGESTIONS, value) }
 
 	val isSuggestionsWiFiOnly: Boolean
@@ -2041,6 +2092,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 		const val KEY_ONBOARDING_INSTALL_ID = "onboarding_install_id"
 		const val KEY_READER_PAGES_COLUMNS = "reader_pages_grid_columns"
+		const val KEY_FEED_GRID_COLUMNS_OVERRIDE = "feed_grid_columns_override"
+		const val KEY_LIST_FAST_SCROLL = "ui_list_fast_scroll"
+		const val KEY_LIST_FAST_SCROLL_LEFT = "ui_list_fast_scroll_left"
+		const val KEY_QUICK_SCROLL_BUTTONS = "ui_quick_scroll_buttons"
+		const val KEY_LAST_POSITION_PILL = "ui_last_position_pill"
+		const val KEY_TRACKER_INTERVAL = "tracker_interval_v2"
 
 		/**
 		 * Keys that must never leave the device: credentials, app-lock state and per-install ids.

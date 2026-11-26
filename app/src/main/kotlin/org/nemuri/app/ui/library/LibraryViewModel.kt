@@ -15,10 +15,14 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.core.db.MangaDatabase
+import org.koitharu.kotatsu.core.db.TABLE_FAVOURITES
+import org.koitharu.kotatsu.core.db.TABLE_FAVOURITE_CATEGORIES
 import org.koitharu.kotatsu.core.model.FavouriteCategory
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
@@ -62,6 +66,7 @@ data class LibraryMangaItem(
 @Immutable
 data class LibraryUiState(
 	val categories: List<FavouriteCategory> = emptyList(),
+	val categoryCounts: Map<Long, Int> = emptyMap(),
 	val selectedCategoryId: Long = LibraryViewModel.ALL_CATEGORIES_ID,
 	val items: List<LibraryMangaItem> = emptyList(),
 	val totalLibraryCount: Int = 0,
@@ -92,6 +97,7 @@ private data class LibraryPrefSnapshot(
 
 private data class LibrarySupplementary(
 	val categories: List<FavouriteCategory>,
+	val categoryCounts: Map<Long, Int>,
 	val totalLibraryCount: Int,
 	val progressByManga: Map<Long, Float>,
 	val newChaptersByManga: Map<Long, Int>,
@@ -102,6 +108,7 @@ private data class LibrarySupplementary(
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
 	@ApplicationContext private val context: Context,
+	private val db: MangaDatabase,
 	private val favouritesRepository: FavouritesRepository,
 	private val historyRepository: HistoryRepository,
 	private val trackingRepository: TrackingRepository,
@@ -133,11 +140,22 @@ class LibraryViewModel @Inject constructor(
 			)
 		}
 
+	private val categoryCountsFlow = db.invalidationTracker
+		.createFlow(TABLE_FAVOURITES, TABLE_FAVOURITE_CATEGORIES, emitInitialState = true)
+		.mapLatest {
+			db.getFavouritesDao().findAllForSync()
+				.asSequence()
+				.filter { it.deletedAt == 0L }
+				.groupBy({ it.categoryId }, { it.mangaId })
+				.mapValues { (_, mangaIds) -> mangaIds.toHashSet().size }
+		}
+
 	private val supplementaryFlow = combine(
 		combine(
 			favouritesRepository.observeCategoriesForLibrary(),
 			favouritesRepository.observeMangaCount(),
-		) { categories, totalCount -> categories to totalCount },
+			categoryCountsFlow,
+		) { categories, totalCount, catCounts -> Triple(categories, totalCount, catCounts) },
 		historyRepository.observeAllWithHistory(ListSortOrder.LAST_READ, emptySet(), Int.MAX_VALUE)
 			.map { list ->
 				list.associate { entry ->
@@ -150,9 +168,10 @@ class LibraryViewModel @Inject constructor(
 		favouritesRepository.observeAll(ListSortOrder.ALPHABETIC, setOf(ListFilterOption.Downloaded), Int.MAX_VALUE)
 			.map { list -> list.mapTo(HashSet()) { it.id } },
 		trackScheduler.observeIsRunning(),
-	) { (categories, totalCount), progress, newChapters, downloaded, running ->
+	) { (categories, totalCount, catCounts), progress, newChapters, downloaded, running ->
 		LibrarySupplementary(
 			categories = categories,
+			categoryCounts = catCounts,
 			totalLibraryCount = totalCount,
 			progressByManga = progress,
 			newChaptersByManga = newChapters,
@@ -209,6 +228,7 @@ class LibraryViewModel @Inject constructor(
 
 		LibraryUiState(
 			categories = supp.categories,
+			categoryCounts = supp.categoryCounts,
 			selectedCategoryId = effectiveCatId,
 			items = mapped,
 			totalLibraryCount = supp.totalLibraryCount,

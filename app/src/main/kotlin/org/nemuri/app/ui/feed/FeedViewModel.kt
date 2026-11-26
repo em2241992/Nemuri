@@ -124,6 +124,7 @@ data class FeedUiState(
 	val groups: Map<String, List<FeedEntryItem>> = emptyMap(),
 	val totalCount: Int = 0,
 	val unreadCount: Int = 0,
+	val readFeedCount: Int = 0,
 	val query: String = "",
 	val isTrackerRunning: Boolean = false,
 	val isLoaded: Boolean = false,
@@ -139,10 +140,12 @@ data class FeedUiState(
 	val homeCarousels: List<FeedHubCarousel> = emptyList(),
 	val libraryMangaIds: Set<Long> = emptySet(),
 	val libraryMangaUrls: Set<String> = emptySet(),
-	// For You Recommendations
+	// For You Recommendations & Interactive Taste Profile Filter
 	val isDiscoveryLoading: Boolean = false,
+	val selectedGenre: String? = null,
 	val discoveryPreview: List<DiscoveryRecommendation> = emptyList(),
 	val discoverySections: List<DiscoverySection> = emptyList(),
+	val discoveryGridItems: List<DiscoveryRecommendation> = emptyList(),
 	val discoveryGenres: List<String> = emptyList(),
 )
 
@@ -188,6 +191,7 @@ class FeedViewModel @Inject constructor(
 	private val secondaryFilterFlow = MutableStateFlow(
 		if (settings.isFeedUnreadOnly) FeedSecondaryFilter.UNREAD else FeedSecondaryFilter.ALL,
 	)
+	private val selectedGenreFlow = MutableStateFlow<String?>(null)
 	private val homeSourceRawFlow = MutableStateFlow(HomeSourceRawState())
 	private val discoveryRawFlow = MutableStateFlow(DiscoveryRawState(isLoading = true))
 
@@ -239,6 +243,10 @@ class FeedViewModel @Inject constructor(
 		trackingRepository.observeTrackingLog(limit = 500, filterOptions = options)
 	}
 
+	private val readLogsCountFlow = trackingRepository.observeTrackingLog(limit = 500, filterOptions = emptySet())
+		.map { logs -> logs.count { !it.isNew } }
+		.distinctUntilChanged()
+
 	private val localHubDataFlow = secondaryFilterFlow.flatMapLatest { filter ->
 		val historyOptions: Set<ListFilterOption> = when (filter) {
 			FeedSecondaryFilter.ALL -> emptySet()
@@ -255,12 +263,14 @@ class FeedViewModel @Inject constructor(
 			favouritesRepository.observeAll(ListSortOrder.NEWEST, favOptions, 16),
 			favouritesRepository.observeAll(ListSortOrder.NEWEST, emptySet(), 2000),
 			trackingRepository.observeUnreadUpdatesCount(),
-		) { historyList, recentFavs, allFavs, unreadCount ->
+			readLogsCountFlow,
+		) { historyList, recentFavs, allFavs, unreadCount, readCount ->
 			LocalHubSnapshot(
 				historyList = historyList,
 				recentFavs = if (filter == FeedSecondaryFilter.NOT_IN_LIBRARY) emptyList() else recentFavs,
 				allFavs = allFavs,
 				unreadCount = unreadCount,
+				readFeedCount = readCount,
 			)
 		}
 	}
@@ -312,9 +322,10 @@ class FeedViewModel @Inject constructor(
 		enabledSourceOptionsFlow,
 		homeSourceRawFlow,
 		discoveryRawFlow,
+		selectedGenreFlow,
 		trackScheduler.observeIsRunning(),
-	) { sources, homeRaw, discoveryRaw, isTrackerRunning ->
-		RemoteFeedInputs(sources, homeRaw, discoveryRaw, isTrackerRunning)
+	) { sources, homeRaw, discoveryRaw, activeGenre, isTrackerRunning ->
+		RemoteFeedInputs(sources, homeRaw, discoveryRaw, activeGenre, isTrackerRunning)
 	}
 
 	val uiState: StateFlow<FeedUiState> = combine(
@@ -431,20 +442,53 @@ class FeedViewModel @Inject constructor(
 			if (items.isEmpty()) null else carousel.copy(items = items)
 		}
 
+		val availableGenres = remote.discoveryRaw.result.matchedGenres
+		val validSelectedGenre = remote.selectedGenre?.takeIf { sel ->
+			availableGenres.any { it.equals(sel, ignoreCase = true) }
+		}
+
+		fun DiscoveryRecommendation.matchesBaseFilters(): Boolean {
+			val matchesQuery = trimmed.isEmpty() ||
+				manga.title.contains(trimmed, ignoreCase = true) ||
+				reasonLabel.contains(trimmed, ignoreCase = true) ||
+				sourceTitle.contains(trimmed, ignoreCase = true)
+			val matchesNotInLib = base.secondaryFilter != FeedSecondaryFilter.NOT_IN_LIBRARY || !inLibrary
+			return matchesQuery && matchesNotInLib
+		}
+
+		fun DiscoveryRecommendation.matchesGenreChip(genre: String): Boolean {
+			return matchedGenres.any { it.equals(genre, ignoreCase = true) || it.contains(genre, ignoreCase = true) } ||
+				manga.tags.any { it.title.equals(genre, ignoreCase = true) || it.title.contains(genre, ignoreCase = true) } ||
+				reasonLabel.contains(genre, ignoreCase = true)
+		}
+
 		val discoveryFilteredSections = remote.discoveryRaw.result.sections.mapNotNull { sec ->
+			val sectionMatchesGenre = validSelectedGenre != null && sec.title.contains(validSelectedGenre, ignoreCase = true)
 			val items = sec.items.filter { rec ->
-				val matchesQuery = trimmed.isEmpty() ||
-					rec.manga.title.contains(trimmed, ignoreCase = true) ||
-					rec.reasonLabel.contains(trimmed, ignoreCase = true)
-				val matchesNotInLib = base.secondaryFilter != FeedSecondaryFilter.NOT_IN_LIBRARY || !rec.inLibrary
-				matchesQuery && matchesNotInLib
+				rec.matchesBaseFilters() &&
+					(validSelectedGenre == null || sectionMatchesGenre || rec.matchesGenreChip(validSelectedGenre))
 			}
 			if (items.isEmpty()) null else sec.copy(items = items)
 		}
-		val discoveryPreviewItems = discoveryFilteredSections
-			.flatMap { it.items }
+
+		val rawFilteredGrid = remote.discoveryRaw.result.discoveryGridItems.filter { rec ->
+			rec.matchesBaseFilters() && (validSelectedGenre == null || rec.matchesGenreChip(validSelectedGenre))
+		}
+		val discoveryFilteredGrid = if (validSelectedGenre != null && rawFilteredGrid.size < 12) {
+			(rawFilteredGrid + discoveryFilteredSections.flatMap { it.items })
+				.distinctBy { it.manga.id }
+				.take(48)
+		} else {
+			rawFilteredGrid
+		}
+
+		val hubPreviewItems = remote.discoveryRaw.result.previewItems
+			.ifEmpty {
+				(remote.discoveryRaw.result.sections.flatMap { it.items } + remote.discoveryRaw.result.discoveryGridItems)
+			}
+			.filter { it.matchesBaseFilters() }
 			.distinctBy { it.manga.id }
-			.take(14)
+			.take(16)
 
 		FeedUiState(
 			mode = base.prefs.mode,
@@ -456,6 +500,7 @@ class FeedViewModel @Inject constructor(
 			groups = filteredEntries.groupBy { it.dateGroup },
 			totalCount = filteredEntries.size,
 			unreadCount = base.localData.unreadCount,
+			readFeedCount = base.localData.readFeedCount,
 			query = base.query,
 			isTrackerRunning = remote.isTrackerRunning,
 			isLoaded = true,
@@ -471,9 +516,11 @@ class FeedViewModel @Inject constructor(
 			libraryMangaIds = libIds,
 			libraryMangaUrls = libUrls,
 			isDiscoveryLoading = remote.discoveryRaw.isLoading,
-			discoveryPreview = discoveryPreviewItems,
+			selectedGenre = validSelectedGenre,
+			discoveryPreview = hubPreviewItems,
 			discoverySections = discoveryFilteredSections,
-			discoveryGenres = remote.discoveryRaw.result.matchedGenres,
+			discoveryGridItems = discoveryFilteredGrid,
+			discoveryGenres = availableGenres,
 		)
 	}
 		.flowOn(Dispatchers.IO)
@@ -557,6 +604,14 @@ class FeedViewModel @Inject constructor(
 		secondaryFilterFlow.value = filter
 		if (filter == FeedSecondaryFilter.UNREAD || filter == FeedSecondaryFilter.ALL) {
 			settings.isFeedUnreadOnly = (filter == FeedSecondaryFilter.UNREAD)
+		}
+	}
+
+	fun setSelectedGenre(genre: String?) {
+		selectedGenreFlow.value = if (genre != null && selectedGenreFlow.value.equals(genre, ignoreCase = true)) {
+			null
+		} else {
+			genre
 		}
 	}
 
@@ -759,8 +814,37 @@ class FeedViewModel @Inject constructor(
 
 	fun markAllRead() {
 		viewModelScope.launch(Dispatchers.IO) {
+			val mangaIds = db.getTrackLogsDao().findMangaIds().toList()
 			trackingRepository.clearCounters()
-			toastManager.show("Cleared all unread update badges")
+			if (mangaIds.isNotEmpty()) {
+				trackingRepository.clearUpdates(mangaIds)
+			}
+			toastManager.show("Marked all updates read")
+		}
+	}
+
+	fun clearReadFeedEntries() {
+		viewModelScope.launch(Dispatchers.IO) {
+			val logsDao = db.getTrackLogsDao()
+			val readEntries = logsDao.findAllForSync().filter { !it.isUnread }
+			if (readEntries.isEmpty()) {
+				toastManager.show("No read feed entries to clear")
+				return@launch
+			}
+			for (entry in readEntries) {
+				logsDao.delete(entry.id)
+			}
+			toastManager.show(
+				message = "Cleared ${readEntries.size} read ${if (readEntries.size == 1) "entry" else "entries"}",
+				actionLabel = "Undo",
+				onAction = {
+					viewModelScope.launch(Dispatchers.IO) {
+						for (entry in readEntries) {
+							logsDao.insert(entry)
+						}
+					}
+				},
+			)
 		}
 	}
 
@@ -776,6 +860,7 @@ class FeedViewModel @Inject constructor(
 		val recentFavs: List<Manga>,
 		val allFavs: List<Manga>,
 		val unreadCount: Int,
+		val readFeedCount: Int,
 	)
 
 	private data class BaseFeedInputs(
@@ -790,6 +875,7 @@ class FeedViewModel @Inject constructor(
 		val sources: List<FeedSourceOption>,
 		val homeRaw: HomeSourceRawState,
 		val discoveryRaw: DiscoveryRawState,
+		val selectedGenre: String?,
 		val isTrackerRunning: Boolean,
 	)
 }

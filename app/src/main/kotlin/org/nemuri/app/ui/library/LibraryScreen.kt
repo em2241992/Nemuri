@@ -108,6 +108,7 @@ import org.nemuri.app.ui.components.MangaComfortableGridCard
 import org.nemuri.app.ui.components.MangaCompactGridCard
 import org.nemuri.app.ui.components.MangaListRow
 import org.nemuri.app.ui.components.NemuriEmptyState
+import org.nemuri.app.ui.components.NemuriListNavigationOverlay
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
@@ -115,6 +116,7 @@ import org.nemuri.app.ui.components.gridDragRangeSelect
 import org.nemuri.app.ui.components.listDragRangeSelect
 import org.nemuri.app.ui.components.pinchToStepColumns
 import org.nemuri.app.ui.components.rememberAppSettings
+import org.nemuri.app.ui.components.rememberNemuriScrollAdapter
 import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.theme.NemuriTheme
 import org.nemuri.app.ui.theme.nemuriEffectsSpring
@@ -156,6 +158,17 @@ fun LibraryScreen(
 	}
 
 	val orderedIds = remember(uiState.items) { uiState.items.map { it.manga.id } }
+	val libraryCalloutForIndex: (Int) -> String? = remember(uiState.items) {
+		{ idx ->
+			val title = uiState.items.getOrNull(idx)?.manga?.title?.trim().orEmpty()
+			val firstChar = title.firstOrNull { !it.isWhitespace() }?.uppercaseChar()
+			when {
+				title.isEmpty() -> null
+				firstChar != null && firstChar.isLetter() -> firstChar.toString()
+				else -> "#"
+			}
+		}
+	}
 
 	Box(modifier = Modifier.fillMaxSize()) {
 		Column(modifier = Modifier.fillMaxSize()) {
@@ -266,9 +279,14 @@ fun LibraryScreen(
 							}
 							uiState.categories.forEach { cat ->
 								val selected = uiState.selectedCategoryId == cat.id
+								val catCount = if (selected && uiState.query.isBlank() && uiState.quickFilter == LibraryQuickFilter.ALL) {
+									uiState.items.size
+								} else {
+									uiState.categoryCounts[cat.id] ?: 0
+								}
 								LibraryCategoryPill(
 									label = cat.title,
-									count = if (selected) uiState.items.size else null,
+									count = catCount,
 									selected = selected,
 									onClick = { viewModel.selectCategory(cat.id) },
 								)
@@ -379,116 +397,37 @@ fun LibraryScreen(
 
 				effectiveCardStyle == MangaCardStyle.DETAILED_LIST -> {
 					val listState = rememberLazyListState()
-					LazyColumn(
-						state = listState,
-						modifier = Modifier
-							.fillMaxSize()
-							.listDragRangeSelect(
-								listState = listState,
-								orderedIds = orderedIds,
-								selectedIds = uiState.selectedIds,
-								onSelectionChange = viewModel::setSelection,
+					val listAdapter = rememberNemuriScrollAdapter(listState)
+					Box(modifier = Modifier.fillMaxSize()) {
+						LazyColumn(
+							state = listState,
+							modifier = Modifier
+								.fillMaxSize()
+								.listDragRangeSelect(
+									listState = listState,
+									orderedIds = orderedIds,
+									selectedIds = uiState.selectedIds,
+									onSelectionChange = viewModel::setSelection,
+								),
+							contentPadding = PaddingValues(
+								start = layoutPrefs.gutterDensity.outerPaddingDp.dp,
+								end = layoutPrefs.gutterDensity.outerPaddingDp.dp,
+								top = 8.dp,
+								bottom = bottomClearance,
 							),
-						contentPadding = PaddingValues(
-							start = layoutPrefs.gutterDensity.outerPaddingDp.dp,
-							end = layoutPrefs.gutterDensity.outerPaddingDp.dp,
-							top = 8.dp,
-							bottom = bottomClearance,
-						),
-						verticalArrangement = Arrangement.spacedBy(layoutPrefs.gutterDensity.spacingDp.dp),
-					) {
-						items(uiState.items, key = { it.manga.id }) { item ->
-							val selected = item.manga.id in uiState.selectedIds
-							val shareKey = "lib-${item.manga.id}"
-							MangaListRow(
-								manga = item.manga,
-								subtitle = item.sourceTitle,
-								unreadCount = item.unreadCount,
-								progress = item.progress,
-								isSelected = selected,
-								isDownloaded = item.isDownloaded,
-								tagsSummary = item.manga.tags.take(3).joinToString(" • ") { it.title }.takeIf { it.isNotBlank() },
-								sharedCoverKey = shareKey,
-								onClick = {
-									if (isSelectionMode) {
-										viewModel.toggleSelection(item.manga.id)
-									} else {
-										MangaTransferCache.put(item.manga)
-										onOpenDetails(item.manga, shareKey)
-									}
-								},
-								onLongClick = { viewModel.toggleSelection(item.manga.id) },
-							)
-						}
-					}
-				}
-
-				else -> {
-					val gridState = rememberLazyGridState()
-					LazyVerticalGrid(
-						state = gridState,
-						columns = GridCells.Fixed(gridColumns),
-						modifier = Modifier
-							.fillMaxSize()
-							.pinchToStepColumns(
-								currentColumns = gridColumns,
-								minColumns = if (isLandscape) 4 else 2,
-								maxColumns = if (isLandscape) 9 else 6,
-								onStepColumns = { next ->
-									if (isLandscape) {
-										viewModel.setLandscapeColumns(next)
-									} else {
-										viewModel.setPortraitColumns(next)
-									}
-								},
-							)
-							.gridDragRangeSelect(
-								gridState = gridState,
-								orderedIds = orderedIds,
-								selectedIds = uiState.selectedIds,
-								onSelectionChange = viewModel::setSelection,
-							),
-						contentPadding = PaddingValues(
-							start = layoutPrefs.gutterDensity.outerPaddingDp.dp,
-							end = layoutPrefs.gutterDensity.outerPaddingDp.dp,
-							top = 8.dp,
-							bottom = bottomClearance,
-						),
-						horizontalArrangement = Arrangement.spacedBy(layoutPrefs.gutterDensity.spacingDp.dp),
-						verticalArrangement = Arrangement.spacedBy(layoutPrefs.gutterDensity.spacingDp.dp),
-					) {
-						items(uiState.items, key = { it.manga.id }) { item ->
-							val selected = item.manga.id in uiState.selectedIds
-							val shareKey = "lib-${item.manga.id}"
-							if (effectiveCardStyle == MangaCardStyle.COMFORTABLE) {
-								MangaComfortableGridCard(
+							verticalArrangement = Arrangement.spacedBy(layoutPrefs.gutterDensity.spacingDp.dp),
+						) {
+							items(uiState.items, key = { it.manga.id }) { item ->
+								val selected = item.manga.id in uiState.selectedIds
+								val shareKey = "lib-${item.manga.id}"
+								MangaListRow(
 									manga = item.manga,
+									subtitle = item.sourceTitle,
 									unreadCount = item.unreadCount,
-									isCaughtUp = item.isCaughtUp,
-									isDownloaded = item.isDownloaded,
-									sourceBadge = item.sourceTitle.take(6).uppercase(),
 									progress = item.progress,
 									isSelected = selected,
-									sharedCoverKey = shareKey,
-									onClick = {
-										if (isSelectionMode) {
-											viewModel.toggleSelection(item.manga.id)
-										} else {
-											MangaTransferCache.put(item.manga)
-											onOpenDetails(item.manga, shareKey)
-										}
-									},
-									onLongClick = { viewModel.toggleSelection(item.manga.id) },
-								)
-							} else {
-								MangaCompactGridCard(
-									manga = item.manga,
-									unreadCount = item.unreadCount,
-									isCaughtUp = item.isCaughtUp,
 									isDownloaded = item.isDownloaded,
-									sourceBadge = item.sourceTitle.take(6).uppercase(),
-									progress = item.progress,
-									isSelected = selected,
+									tagsSummary = item.manga.tags.take(3).joinToString(" • ") { it.title }.takeIf { it.isNotBlank() },
 									sharedCoverKey = shareKey,
 									onClick = {
 										if (isSelectionMode) {
@@ -502,6 +441,105 @@ fun LibraryScreen(
 								)
 							}
 						}
+
+						NemuriListNavigationOverlay(
+							adapter = listAdapter,
+							hasBottomDock = true,
+							visibleOverride = !isSelectionMode,
+							labelForIndex = libraryCalloutForIndex,
+						)
+					}
+				}
+
+				else -> {
+					val gridState = rememberLazyGridState()
+					val gridAdapter = rememberNemuriScrollAdapter(gridState)
+					Box(modifier = Modifier.fillMaxSize()) {
+						LazyVerticalGrid(
+							state = gridState,
+							columns = GridCells.Fixed(gridColumns),
+							modifier = Modifier
+								.fillMaxSize()
+								.pinchToStepColumns(
+									currentColumns = gridColumns,
+									minColumns = if (isLandscape) 4 else 2,
+									maxColumns = if (isLandscape) 9 else 6,
+									onStepColumns = { next ->
+										if (isLandscape) {
+											viewModel.setLandscapeColumns(next)
+										} else {
+											viewModel.setPortraitColumns(next)
+										}
+									},
+								)
+								.gridDragRangeSelect(
+									gridState = gridState,
+									orderedIds = orderedIds,
+									selectedIds = uiState.selectedIds,
+									onSelectionChange = viewModel::setSelection,
+								),
+							contentPadding = PaddingValues(
+								start = layoutPrefs.gutterDensity.outerPaddingDp.dp,
+								end = layoutPrefs.gutterDensity.outerPaddingDp.dp,
+								top = 8.dp,
+								bottom = bottomClearance,
+							),
+							horizontalArrangement = Arrangement.spacedBy(layoutPrefs.gutterDensity.spacingDp.dp),
+							verticalArrangement = Arrangement.spacedBy(layoutPrefs.gutterDensity.spacingDp.dp),
+						) {
+							items(uiState.items, key = { it.manga.id }) { item ->
+								val selected = item.manga.id in uiState.selectedIds
+								val shareKey = "lib-${item.manga.id}"
+								if (effectiveCardStyle == MangaCardStyle.COMFORTABLE) {
+									MangaComfortableGridCard(
+										manga = item.manga,
+										unreadCount = item.unreadCount,
+										isCaughtUp = item.isCaughtUp,
+										isDownloaded = item.isDownloaded,
+										sourceBadge = item.sourceTitle.take(6).uppercase(),
+										progress = item.progress,
+										isSelected = selected,
+										sharedCoverKey = shareKey,
+										onClick = {
+											if (isSelectionMode) {
+												viewModel.toggleSelection(item.manga.id)
+											} else {
+												MangaTransferCache.put(item.manga)
+												onOpenDetails(item.manga, shareKey)
+											}
+										},
+										onLongClick = { viewModel.toggleSelection(item.manga.id) },
+									)
+								} else {
+									MangaCompactGridCard(
+										manga = item.manga,
+										unreadCount = item.unreadCount,
+										isCaughtUp = item.isCaughtUp,
+										isDownloaded = item.isDownloaded,
+										sourceBadge = item.sourceTitle.take(6).uppercase(),
+										progress = item.progress,
+										isSelected = selected,
+										sharedCoverKey = shareKey,
+										onClick = {
+											if (isSelectionMode) {
+												viewModel.toggleSelection(item.manga.id)
+											} else {
+												MangaTransferCache.put(item.manga)
+												onOpenDetails(item.manga, shareKey)
+											}
+										},
+										onLongClick = { viewModel.toggleSelection(item.manga.id) },
+									)
+								}
+							}
+						}
+
+						NemuriListNavigationOverlay(
+							adapter = gridAdapter,
+							hasBottomDock = true,
+							visibleOverride = !isSelectionMode,
+							labelForIndex = libraryCalloutForIndex,
+						)
 					}
 				}
 			}

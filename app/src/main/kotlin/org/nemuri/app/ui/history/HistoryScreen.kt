@@ -76,10 +76,12 @@ import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.MangaListRow
 import org.nemuri.app.ui.components.NemuriEmptyState
+import org.nemuri.app.ui.components.NemuriListNavigationOverlay
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.components.listDragRangeSelect
+import org.nemuri.app.ui.components.rememberNemuriScrollAdapter
 import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.theme.NemuriTheme
 import org.nemuri.app.ui.theme.nemuriEffectsSpring
@@ -218,124 +220,148 @@ fun HistoryScreen(
 
 				else -> {
 					val listState = rememberLazyListState()
+					val listAdapter = rememberNemuriScrollAdapter(listState)
 					val safeRowCorner = layoutPrefs.cardCornerRadiusDp.coerceIn(8, 18)
-					LazyColumn(
-						state = listState,
-						modifier = Modifier
-							.fillMaxSize()
-							.listDragRangeSelect(
-								listState = listState,
-								orderedIds = uiState.allVisibleIds,
-								selectedIds = uiState.selectedIds,
-								onSelectionChange = viewModel::setSelection,
-							),
-						contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
-						verticalArrangement = Arrangement.spacedBy(10.dp),
-					) {
-						uiState.groups.forEach { (groupTitle, items) ->
-							if (uiState.groupByDate) {
-								item(key = "hdr:$groupTitle") {
-									Text(
-										text = groupTitle.uppercase(),
-										style = MaterialTheme.typography.labelSmall,
-										color = NemuriTheme.colors.cyan,
-										modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
-									)
+					val historyDateLabels = remember(uiState.groups, uiState.groupByDate) {
+						buildList {
+							uiState.groups.forEach { (groupTitle, items) ->
+								val shortDate = groupTitle.substringBefore(',')
+								if (uiState.groupByDate) {
+									add(shortDate)
 								}
-							}
-							items(items, key = { "${it.manga.id}_${it.history.updatedAt.toEpochMilli()}" }) { item ->
-								val selected = item.manga.id in uiState.selectedIds
-								val coverKey = "hist-${item.manga.id}"
-								val dismissState = rememberSwipeToDismissBoxState(
-									confirmValueChange = { target ->
-										if (target == SwipeToDismissBoxValue.EndToStart && !isSelectionMode) {
-											viewModel.removeEntry(item.manga)
-											false
-										} else {
-											false
-										}
-									},
-								)
-								SwipeToDismissBox(
-									state = dismissState,
-									enableDismissFromStartToEnd = false,
-									enableDismissFromEndToStart = !isSelectionMode,
-									backgroundContent = {
-										val isActiveSwipe = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart ||
-											dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
-										Box(
-											modifier = Modifier
-												.fillMaxSize()
-												.clip(RoundedCornerShape(safeRowCorner.dp))
-												.background(
-													if (isActiveSwipe) {
-														NemuriTheme.colors.danger.copy(alpha = 0.24f)
-													} else {
-														Color.Transparent
-													},
-												)
-												.border(
-													width = 1.dp,
-													color = if (isActiveSwipe) {
-														NemuriTheme.colors.danger.copy(alpha = 0.55f)
-													} else {
-														Color.Transparent
-													},
-													shape = RoundedCornerShape(safeRowCorner.dp),
-												)
-												.padding(horizontal = 20.dp),
-											contentAlignment = Alignment.CenterEnd,
-										) {
-											if (isActiveSwipe) {
-												Row(
-													verticalAlignment = Alignment.CenterVertically,
-													horizontalArrangement = Arrangement.spacedBy(6.dp),
-												) {
-													Text(
-														text = "Remove",
-														style = MaterialTheme.typography.labelMedium,
-														fontWeight = FontWeight.Bold,
-														color = NemuriTheme.colors.danger,
-													)
-													Icon(
-														imageVector = Icons.Default.DeleteOutline,
-														contentDescription = "Remove from history",
-														tint = NemuriTheme.colors.danger,
-														modifier = Modifier.size(20.dp),
-													)
-												}
-											}
-										}
-									},
-								) {
-									MangaListRow(
-										manga = item.manga,
-										subtitle = item.timeSummary,
-										progress = item.progressPercent,
-										isSelected = selected,
-										sharedCoverKey = coverKey,
-										onClick = {
-											if (isSelectionMode) {
-												viewModel.toggleSelection(item.manga.id)
-											} else {
-												MangaTransferCache.put(item.manga)
-												onOpenDetails(item.manga, coverKey)
-											}
-										},
-										onLongClick = { viewModel.toggleSelection(item.manga.id) },
-										onQuickActionClick = if (isSelectionMode) {
-											null
-										} else {
-											{
-												MangaTransferCache.put(item.manga)
-												onResumeReading(item.manga, item.history)
-											}
-										},
-										modifier = Modifier.fillMaxWidth(),
-									)
+								repeat(items.size) {
+									add(shortDate)
 								}
 							}
 						}
+					}
+					Box(modifier = Modifier.fillMaxSize()) {
+						LazyColumn(
+							state = listState,
+							modifier = Modifier
+								.fillMaxSize()
+								.listDragRangeSelect(
+									listState = listState,
+									orderedIds = uiState.allVisibleIds,
+									selectedIds = uiState.selectedIds,
+									onSelectionChange = viewModel::setSelection,
+								),
+							contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
+							verticalArrangement = Arrangement.spacedBy(10.dp),
+						) {
+							uiState.groups.forEach { (groupTitle, items) ->
+								if (uiState.groupByDate) {
+									item(key = "hdr:$groupTitle") {
+										Text(
+											text = groupTitle.uppercase(),
+											style = MaterialTheme.typography.labelSmall,
+											color = NemuriTheme.colors.cyan,
+											modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+										)
+									}
+								}
+								items(items, key = { "${it.manga.id}_${it.history.updatedAt.toEpochMilli()}" }) { item ->
+									val selected = item.manga.id in uiState.selectedIds
+									val coverKey = "hist-${item.manga.id}"
+									val dismissState = rememberSwipeToDismissBoxState(
+										confirmValueChange = { target ->
+											if (target == SwipeToDismissBoxValue.EndToStart && !isSelectionMode) {
+												viewModel.removeEntry(item.manga)
+												false
+											} else {
+												false
+											}
+										},
+									)
+									SwipeToDismissBox(
+										state = dismissState,
+										modifier = Modifier.animateItem(),
+										enableDismissFromStartToEnd = false,
+										enableDismissFromEndToStart = !isSelectionMode,
+										backgroundContent = {
+											val isActiveSwipe = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart ||
+												dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
+											Box(
+												modifier = Modifier
+													.fillMaxSize()
+													.clip(RoundedCornerShape(safeRowCorner.dp))
+													.background(
+														if (isActiveSwipe) {
+															NemuriTheme.colors.danger.copy(alpha = 0.24f)
+														} else {
+															Color.Transparent
+														},
+													)
+													.border(
+														width = 1.dp,
+														color = if (isActiveSwipe) {
+															NemuriTheme.colors.danger.copy(alpha = 0.55f)
+														} else {
+															Color.Transparent
+														},
+														shape = RoundedCornerShape(safeRowCorner.dp),
+													)
+													.padding(horizontal = 20.dp),
+												contentAlignment = Alignment.CenterEnd,
+											) {
+												if (isActiveSwipe) {
+													Row(
+														verticalAlignment = Alignment.CenterVertically,
+														horizontalArrangement = Arrangement.spacedBy(6.dp),
+													) {
+														Text(
+															text = "Remove",
+															style = MaterialTheme.typography.labelMedium,
+															fontWeight = FontWeight.Bold,
+															color = NemuriTheme.colors.danger,
+														)
+														Icon(
+															imageVector = Icons.Default.DeleteOutline,
+															contentDescription = "Remove from history",
+															tint = NemuriTheme.colors.danger,
+															modifier = Modifier.size(20.dp),
+														)
+													}
+												}
+											}
+										},
+									) {
+										MangaListRow(
+											manga = item.manga,
+											subtitle = item.timeSummary,
+											progress = item.progressPercent,
+											isSelected = selected,
+											sharedCoverKey = coverKey,
+											onClick = {
+												if (isSelectionMode) {
+													viewModel.toggleSelection(item.manga.id)
+												} else {
+													MangaTransferCache.put(item.manga)
+													onOpenDetails(item.manga, coverKey)
+												}
+											},
+											onLongClick = { viewModel.toggleSelection(item.manga.id) },
+											onQuickActionClick = if (isSelectionMode) {
+												null
+											} else {
+												{
+													MangaTransferCache.put(item.manga)
+													onResumeReading(item.manga, item.history)
+												}
+											},
+											modifier = Modifier.fillMaxWidth(),
+										)
+									}
+								}
+							}
+						}
+
+						NemuriListNavigationOverlay(
+							adapter = listAdapter,
+							hasBottomDock = true,
+							visibleOverride = !isSelectionMode && snackbarHostState.currentSnackbarData == null,
+							labelForIndex = { idx -> historyDateLabels.getOrNull(idx) },
+						)
 					}
 				}
 			}

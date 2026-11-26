@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -67,7 +68,7 @@ fun cornerSafeBadgeInset(cornerRadiusDp: Int): Dp = max(6f, cornerRadiusDp * 0.4
 /**
  * Corner-safe inset reading progress capsule (`height = 3.dp`, `CircleShape` ends,
  * `bottomPadding = 5.dp`, `horizontalPadding = max(8.dp, cardCornerRadius * 0.50f)`)
- * over a subtle dark backing track so even 2% or 100% progress stays 100% visible
+ * over a subtle dark backing track so even 1% or 100% progress stays 100% visible
  * inside any card corner radius (`0.dp`–`24.dp`).
  */
 @Composable
@@ -92,6 +93,7 @@ fun CornerSafeCoverProgressBar(
 	) {
 		Box(
 			modifier = Modifier
+				.widthIn(min = 6.dp)
 				.fillMaxWidth(clamped.coerceAtLeast(0.04f))
 				.fillMaxHeight()
 				.clip(CircleShape)

@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +83,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.android.material.color.DynamicColors
 import org.koitharu.kotatsu.core.model.ContentWarning
 import org.koitharu.kotatsu.core.network.DoHProvider
 import org.koitharu.kotatsu.core.prefs.ColorScheme
@@ -90,11 +92,13 @@ import org.koitharu.kotatsu.core.prefs.DownloadFormat
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
+import org.koitharu.kotatsu.core.prefs.QuickScrollButtonsMode
 import org.koitharu.kotatsu.core.prefs.ReaderMode
 import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.ScreenshotsPolicy
 import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
+import org.koitharu.kotatsu.core.prefs.TrackerCheckInterval
 import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
@@ -111,6 +115,8 @@ import org.nemuri.app.ui.components.cornerSafeBottomPadding
 import org.nemuri.app.ui.components.cornerSafeHorizontalPadding
 import org.nemuri.app.ui.theme.NemuriTheme
 import org.nemuri.app.ui.theme.nemuriSpatialSpring
+import org.nemuri.app.ui.theme.paletteDisplayName
+import org.nemuri.app.ui.theme.palettePreviewSwatch
 import java.net.Proxy
 import kotlin.math.roundToInt
 
@@ -120,8 +126,20 @@ fun AppearanceSettingsScreen(
 	viewModel: SettingsViewModel,
 	onBack: () -> Unit,
 ) {
+	val context = LocalContext.current
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
-	val schemes = remember { ColorScheme.nemuriCuratedPalettes }
+	val systemDark = isSystemInDarkTheme()
+	val effectiveDark = when (state.themeMode) {
+		AppCompatDelegate.MODE_NIGHT_NO -> false
+		AppCompatDelegate.MODE_NIGHT_YES -> true
+		else -> systemDark
+	}
+	val signaturePersonas = remember {
+		ColorScheme.signaturePersonas.filter {
+			it != ColorScheme.EXPRESSIVE || DynamicColors.isDynamicColorAvailable()
+		}
+	}
+	val classicAccents = remember { ColorScheme.classicAccents }
 
 	SettingsLazyPage(
 		title = SettingsSection.APPEARANCE.title,
@@ -172,42 +190,74 @@ fun AppearanceSettingsScreen(
 
 		item {
 			SettingsGroupCard("Accent Color Scheme") {
-				FlowRow(
+				Column(
 					modifier = Modifier
 						.fillMaxWidth()
 						.padding(14.dp),
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					verticalArrangement = Arrangement.spacedBy(8.dp),
+					verticalArrangement = Arrangement.spacedBy(10.dp),
 				) {
-					schemes.forEach { scheme ->
-						val selected = state.colorScheme == scheme
-						val dotColor = colorSchemeSwatchColor(scheme)
-						Surface(
-							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
-							border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
-							modifier = Modifier
-								.clip(RoundedCornerShape(12.dp))
-								.clickable { viewModel.setColorScheme(scheme) },
-						) {
-							Row(
-								modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
-							) {
-								Box(
-									modifier = Modifier
-										.size(12.dp)
-										.clip(CircleShape)
-										.background(dotColor)
-										.border(1.dp, NemuriTheme.colors.border, CircleShape),
-								)
-								Text(
-									text = colorSchemeDisplayLabel(scheme),
-									style = MaterialTheme.typography.labelMedium,
-									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+					Text(
+						text = "SIGNATURE & PERSONA THEMES",
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.Bold,
+						color = NemuriTheme.colors.cyan,
+					)
+					FlowRow(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						signaturePersonas.forEach { scheme ->
+							val swatch = remember(scheme, effectiveDark, state.isAmoled) {
+								palettePreviewSwatch(
+									scheme = scheme,
+									isDark = effectiveDark,
+									amoled = state.isAmoled,
+									context = context,
 								)
 							}
+							ThemeSwatchChip(
+								label = paletteDisplayName(scheme),
+								swatch = swatch,
+								selected = state.colorScheme == scheme,
+								onClick = { viewModel.setColorScheme(scheme) },
+							)
+						}
+					}
+				}
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(10.dp),
+				) {
+					Text(
+						text = "CLASSIC ACCENT PALETTES",
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.Bold,
+						color = NemuriTheme.colors.textMuted,
+					)
+					FlowRow(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						classicAccents.forEach { scheme ->
+							val swatch = remember(scheme, effectiveDark, state.isAmoled) {
+								palettePreviewSwatch(
+									scheme = scheme,
+									isDark = effectiveDark,
+									amoled = state.isAmoled,
+									context = context,
+								)
+							}
+							ThemeSwatchChip(
+								label = paletteDisplayName(scheme),
+								swatch = swatch,
+								selected = state.colorScheme == scheme,
+								onClick = { viewModel.setColorScheme(scheme) },
+							)
 						}
 					}
 				}
@@ -530,6 +580,155 @@ fun AppearanceSettingsScreen(
 					onCheckedChange = viewModel::setSwipeActionsEnabled,
 				)
 			}
+		}
+
+		item {
+			SettingsGroupCard("List Navigation & One-Hand Controls") {
+				SettingsToggleRow(
+					title = "Fast-Scroll Thumb & Callout Bubble",
+					subtitle = "Draggable edge scrollbar with live A–Z, chapter, or date callout bubble",
+					checked = state.isFastScrollEnabled,
+					onCheckedChange = viewModel::setFastScrollEnabled,
+				)
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "One-Hand Scroll Edge",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						listOf(
+							false to "Right Hand",
+							true to "Left Hand",
+						).forEach { (isLeft, label) ->
+							val selected = state.isFastScrollLeftHanded == isLeft
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setFastScrollLeftHanded(isLeft) },
+							) {
+								Text(
+									text = label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 9.dp, horizontal = 6.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Show ▲ / ▼ Quick-Scroll Buttons",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Text(
+						text = state.quickScrollButtonsMode.subtitle,
+						style = MaterialTheme.typography.bodySmall,
+						color = NemuriTheme.colors.textMuted,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						QuickScrollButtonsMode.entries.forEach { mode ->
+							val selected = state.quickScrollButtonsMode == mode
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setQuickScrollButtonsMode(mode) },
+							) {
+								Text(
+									text = mode.label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Smart \"Last Position / Top\" Pill",
+					subtitle = "Floating return pill to jump to top or restore your previous scroll position",
+					checked = state.isLastPositionPillEnabled,
+					onCheckedChange = viewModel::setLastPositionPillEnabled,
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun ThemeSwatchChip(
+	label: String,
+	swatch: org.nemuri.app.ui.theme.PalettePreviewSwatch,
+	selected: Boolean,
+	onClick: () -> Unit,
+) {
+	Surface(
+		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+		shape = RoundedCornerShape(12.dp),
+		border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+		modifier = Modifier
+			.clip(RoundedCornerShape(12.dp))
+			.clickable(onClick = onClick),
+	) {
+		Row(
+			modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(3.dp),
+			) {
+				listOf(swatch.accent, swatch.card, swatch.tertiary).forEach { dotColor ->
+					Box(
+						modifier = Modifier
+							.size(10.dp)
+							.clip(CircleShape)
+							.background(dotColor)
+							.border(0.8.dp, NemuriTheme.colors.border, CircleShape),
+					)
+				}
+			}
+			Text(
+				text = label,
+				style = MaterialTheme.typography.labelMedium,
+				color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
 		}
 	}
 }
@@ -1614,8 +1813,8 @@ fun UpdatesSettingsScreen(
 				SettingsRowDivider()
 				SettingsChoiceRow(
 					title = "Check Frequency",
-					subtitle = "Multiplier applied to the background check interval",
-					currentLabel = frequencyLabel(state.trackerFrequencyFactor),
+					subtitle = state.trackerCheckInterval.subtitle,
+					currentLabel = state.trackerCheckInterval.label,
 					onClick = { showFreqDialog = true },
 				)
 				SettingsRowDivider()
@@ -1680,14 +1879,16 @@ fun UpdatesSettingsScreen(
 	if (showFreqDialog) {
 		SettingsOptionDialog(
 			title = "Check Frequency",
-			options = listOf(
-				0.5f to "Less often (0.5x)",
-				1f to "Normal (1x)",
-				2f to "Frequent (2x)",
-				4f to "Very frequent (4x)",
-			),
-			selected = state.trackerFrequencyFactor,
-			onSelect = viewModel::setTrackerFrequency,
+			options = TrackerCheckInterval.entries.map { interval ->
+				val optionLabel = if (interval == TrackerCheckInterval.EVERY_12_HOURS) {
+					"${interval.label} (Default)"
+				} else {
+					interval.label
+				}
+				interval to optionLabel
+			},
+			selected = state.trackerCheckInterval,
+			onSelect = viewModel::setTrackerCheckInterval,
 			onDismiss = { showFreqDialog = false },
 		)
 	}
@@ -2173,36 +2374,7 @@ private fun CreditLine(title: String, detail: String) {
 	}
 }
 
-internal fun colorSchemeDisplayLabel(scheme: ColorScheme): String = when (scheme) {
-	ColorScheme.EXPRESSIVE -> "Dynamic M3"
-	ColorScheme.DEFAULT -> "Nemuri Obsidian"
-	ColorScheme.TRUE_AMOLED -> "True AMOLED"
-	ColorScheme.BEDTIME_AMBER -> "Bedtime Warm Amber"
-	ColorScheme.YORHA -> "YoRHa Tactical"
-	ColorScheme.YORHA_VISOR_V2 -> "YoRHa Visor v2"
-	ColorScheme.KYOTO_WASHI -> "Kyoto Washi"
-	ColorScheme.SUIBOKUGA -> "Suibokuga"
-	else -> scheme.name.lowercase().replaceFirstChar { it.uppercase() }
-}
-
-private fun colorSchemeSwatchColor(scheme: ColorScheme): Color = when (scheme) {
-	ColorScheme.EXPRESSIVE -> Color(0xFF7DD3FC)
-	ColorScheme.DEFAULT -> Color(0xFF5CE1E6)
-	ColorScheme.TRUE_AMOLED -> Color(0xFF0B0E14)
-	ColorScheme.BEDTIME_AMBER -> Color(0xFFF59E0B)
-	ColorScheme.YORHA -> Color(0xFFD0C59B)
-	ColorScheme.YORHA_VISOR_V2 -> Color(0xFFA7A089)
-	ColorScheme.KYOTO_WASHI -> Color(0xFFE06D53)
-	ColorScheme.SUIBOKUGA -> Color(0xFF8FB0C5)
-	ColorScheme.MIKU -> Color(0xFF4CCAD0)
-	ColorScheme.RENA, ColorScheme.SHANA -> Color(0xFFFF4D6D)
-	ColorScheme.FROG -> Color(0xFF34D399)
-	ColorScheme.BLUEBERRY, ColorScheme.SKY -> Color(0xFF60A5FA)
-	ColorScheme.SAKURA, ColorScheme.MAMIMI -> Color(0xFFF472B6)
-	ColorScheme.KANADE, ColorScheme.ITSUKA -> Color(0xFFA78BFA)
-	ColorScheme.LIME -> Color(0xFF84CC16)
-	ColorScheme.AMBER -> Color(0xFFFBBF24)
-}
+internal fun colorSchemeDisplayLabel(scheme: ColorScheme): String = paletteDisplayName(scheme)
 
 internal fun dohProviderLabel(provider: DoHProvider): String = when (provider) {
 	DoHProvider.NONE -> "Disabled (System DNS)"
@@ -2238,13 +2410,6 @@ private fun triStateLabel(option: TriStateOption): String = when (option) {
 	TriStateOption.ENABLED -> "Always"
 	TriStateOption.ASK -> "Ask"
 	TriStateOption.DISABLED -> "Never"
-}
-
-private fun frequencyLabel(factor: Float): String = when {
-	factor <= 0.5f -> "0.5x (Slower)"
-	factor < 1.5f -> "1x (Default)"
-	factor < 3f -> "2x (Faster)"
-	else -> "4x (Frequent)"
 }
 
 private fun appLockTimeoutLabel(timeout: org.koitharu.kotatsu.core.prefs.AppProtectionTimeout): String = when (timeout) {
