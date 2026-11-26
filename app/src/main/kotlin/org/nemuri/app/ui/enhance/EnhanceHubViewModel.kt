@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.ai.domain.AiMode
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.prefs.AppSettings
+import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
@@ -32,6 +33,7 @@ data class EnhanceHubUiState(
 	val brokenSourcesCount: Int = 0,
 	val brokenTitlesCount: Int = 0,
 	val duplicatePairsCount: Int = 0,
+	val editionVariantPairsCount: Int = 0,
 	val totalReadingTimeMs: Long = 0L,
 	val currentStreakDays: Int = 0,
 	val activeShaderLabel: String = "Off",
@@ -41,6 +43,8 @@ data class EnhanceHubUiState(
 	val aiModeLabel: String = "Auto",
 	val isDuplicateCheckOnAdd: Boolean = true,
 	val isDuplicateProgressMigrated: Boolean = true,
+	val duplicateWinnerStrategy: DuplicateWinnerStrategy = DuplicateWinnerStrategy.MOST_CHAPTERS,
+	val ignoredDuplicatePairsCount: Int = 0,
 	val isStatsEnabled: Boolean = true,
 	val isScanningHealth: Boolean = true,
 )
@@ -113,6 +117,7 @@ class EnhanceHubViewModel @Inject constructor(
 			brokenSourcesCount = broken.size,
 			brokenTitlesCount = broken.sumOf { it.mangaCount },
 			duplicatePairsCount = dupSnap.exactPairCount,
+			editionVariantPairsCount = dupSnap.editionVariantCount,
 			totalReadingTimeMs = stats.totalReadingTimeMs,
 			currentStreakDays = stats.currentStreakDays,
 			activeShaderLabel = activeUpscalerLabel,
@@ -122,6 +127,8 @@ class EnhanceHubViewModel @Inject constructor(
 			aiModeLabel = AiMode.fromKey(settings.aiMode).label,
 			isDuplicateCheckOnAdd = settings.isDuplicateCheckEnabled,
 			isDuplicateProgressMigrated = settings.isDuplicateProgressMigrated,
+			duplicateWinnerStrategy = settings.duplicateWinnerStrategy,
+			ignoredDuplicatePairsCount = settings.ignoredDuplicatePairs.size,
 			isStatsEnabled = settings.isStatsEnabled,
 			isScanningHealth = stats.isScanning || dupSnap.isScanningTier1,
 		)
@@ -152,6 +159,15 @@ class EnhanceHubViewModel @Inject constructor(
 
 	fun setDuplicateProgressMigrated(enabled: Boolean) {
 		settings.isDuplicateProgressMigrated = enabled
+	}
+
+	fun setDuplicateWinnerStrategy(strategy: DuplicateWinnerStrategy) {
+		settings.duplicateWinnerStrategy = strategy
+	}
+
+	fun resetIgnoredDuplicatePairs() {
+		settings.clearIgnoredDuplicatePairs()
+		duplicateCache.ensureScanned(forceRefresh = true)
 	}
 
 	fun clearUpscaleCache() {

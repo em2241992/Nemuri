@@ -58,6 +58,7 @@ import org.nemuri.app.reader.ReaderActivity
 import org.nemuri.app.ui.bookmarks.BookmarksScreen
 import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.NemuriCapsuleToastHost
+import org.nemuri.app.ui.components.NemuriClassicBottomBar
 import org.nemuri.app.ui.components.NemuriFloatingDockBar
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriNavigationRail
@@ -79,11 +80,13 @@ import org.nemuri.app.ui.feed.FeedScreen
 import org.nemuri.app.ui.history.HistoryScreen
 import org.nemuri.app.ui.library.LibraryScreen
 import org.nemuri.app.ui.local.LocalStorageScreen
+import org.nemuri.app.ui.onboarding.OnboardingScreen
 import org.nemuri.app.ui.settings.SettingsRouterScreen
 import org.nemuri.app.ui.theme.LocalNavAnimatedVisibilityScope
 import org.nemuri.app.ui.theme.LocalReducedMotion
 import org.nemuri.app.ui.theme.LocalSharedTransitionScope
 import org.nemuri.app.ui.theme.NemuriTheme
+import org.nemuri.app.ui.theme.YorhaVisorHudBackground
 import org.nemuri.app.ui.theme.nemuriEffectsSpring
 import org.nemuri.app.ui.theme.nemuriSpatialSpring
 
@@ -143,7 +146,15 @@ private fun NemuriAppRoot(
 ) {
 	val context = LocalContext.current
 	val isWideLayout = LocalConfiguration.current.screenWidthDp >= 700
-	val destination = navController.currentDestination
+	val rawDestination = navController.currentDestination
+	val effectiveDestination = if (!shellState.isOnboardingCompleted) {
+		AppDestination.Onboarding
+	} else {
+		rawDestination
+	}
+	val isOnboardingActive = effectiveDestination is AppDestination.Onboarding
+	val showRootNavChrome = !isOnboardingActive && navController.showBottomDock
+
 	val layoutPrefs = rememberObservedLayoutStudioPrefs()
 	val baseDensity = LocalDensity.current
 	val scaleFactor = (layoutPrefs.uiScalePercent / 100f).coerceIn(0.75f, 1.25f)
@@ -158,7 +169,8 @@ private fun NemuriAppRoot(
 	var backGestureProgress by remember { mutableFloatStateOf(0f) }
 
 	PredictiveBackHandler(
-		enabled = navController.backStack.size > 1 || navController.currentTab != AppTab.LIBRARY,
+		enabled = !isOnboardingActive &&
+			(navController.backStack.size > 1 || navController.currentTab != AppTab.LIBRARY),
 	) { progressFlow ->
 		try {
 			progressFlow.collect { backEvent ->
@@ -179,19 +191,19 @@ private fun NemuriAppRoot(
 			LocalLayoutStudioPrefs provides layoutPrefs,
 			LocalDensity provides scaledDensity,
 		) {
-			val dockToastBottom = if (!isWideLayout && navController.showBottomDock) {
+			val dockToastBottom = if (!isWideLayout && showRootNavChrome) {
 				rememberRootTabBottomPadding(hasBottomDock = true, extraBottom = 4.dp)
 			} else {
 				20.dp
 			}
 
-			Box(
+			YorhaVisorHudBackground(
 				modifier = Modifier
 					.fillMaxSize()
 					.background(NemuriTheme.colors.background),
 			) {
 				Row(modifier = Modifier.fillMaxSize()) {
-					if (isWideLayout && navController.showBottomDock) {
+					if (isWideLayout && showRootNavChrome) {
 						NemuriNavigationRail(
 							currentTab = navController.currentTab,
 							unreadFeedCount = shellState.unreadFeedCount,
@@ -217,7 +229,7 @@ private fun NemuriAppRoot(
 							},
 					) {
 						AnimatedContent(
-							targetState = destination,
+							targetState = effectiveDestination,
 							transitionSpec = {
 								when {
 									reduceMotion -> {
@@ -257,6 +269,25 @@ private fun NemuriAppRoot(
 								}
 								saveableStateHolder.SaveableStateProvider(stateKey) {
 									when (targetDest) {
+										is AppDestination.Onboarding -> OnboardingScreen(
+											canDismiss = navController.backStack.size > 1,
+											onDismiss = {
+												shellViewModel.completeOnboarding()
+												if (navController.currentDestination is AppDestination.Onboarding) {
+													navController.popBackStack()
+												}
+											},
+											onOpenLibrary = {
+												shellViewModel.completeOnboarding()
+												navController.selectTab(AppTab.LIBRARY)
+											},
+											onBrowseExtensions = {
+												shellViewModel.completeOnboarding()
+												navController.selectTab(AppTab.EXPLORE)
+												navController.navigate(AppDestination.ExtensionsCatalog())
+											},
+										)
+
 										is AppDestination.TabRoot -> when (targetDest.tab) {
 											AppTab.LIBRARY -> LibraryScreen(
 												onOpenDetails = { manga, sharedKey ->
@@ -297,6 +328,10 @@ private fun NemuriAppRoot(
 														),
 													)
 												},
+												onOpenSourceBrowse = { sourceName ->
+													navController.navigate(AppDestination.SourceBrowse(sourceName))
+												},
+												onOpenExplore = { navController.selectTab(AppTab.EXPLORE) },
 												onOpenSettings = { navController.navigate(AppDestination.Settings()) },
 											)
 
@@ -531,6 +566,11 @@ private fun NemuriAppRoot(
 											onOpenExtensionsCatalog = {
 												navController.navigate(AppDestination.ExtensionsCatalog())
 											},
+											onOpenOnboarding = {
+												if (navController.currentDestination !is AppDestination.Onboarding) {
+													navController.navigate(AppDestination.Onboarding)
+												}
+											},
 											onBack = { navController.popBackStack() },
 										)
 									}
@@ -541,30 +581,46 @@ private fun NemuriAppRoot(
 				}
 
 				AnimatedVisibility(
-					visible = !isWideLayout && navController.showBottomDock,
+					visible = !isWideLayout && showRootNavChrome,
 					enter = slideInVertically(nemuriSpatialSpring()) { it / 2 } + fadeIn(nemuriEffectsSpring()),
 					exit = slideOutVertically(nemuriSpatialSpring()) { it / 2 } + fadeOut(nemuriEffectsSpring()),
 					modifier = Modifier.align(Alignment.BottomCenter),
 				) {
-					NemuriFloatingDockBar(
-						currentTab = navController.currentTab,
-						unreadFeedCount = shellState.unreadFeedCount,
-						hasExtensionUpdates = shellState.hasExtensionUpdates,
-						isIncognito = shellState.isIncognito,
-						recentReads = shellState.recentReads,
-						isCompactHeight = layoutPrefs.isNavBarCompact,
-						labelVisibility = layoutPrefs.navLabelVisibility,
-						onSelectTab = navController::selectTab,
-						onContinueReading = { manga ->
-							if (manga != null) {
-								MangaTransferCache.put(manga)
-								context.startActivity(ReaderActivity.newIntent(context, manga))
-							} else {
-								shellViewModel.showToast("No reading history yet")
-							}
-						},
-						onToggleIncognito = shellViewModel::toggleIncognito,
-					)
+					val handleContinueReading: (org.koitharu.kotatsu.parsers.model.Manga?) -> Unit = { manga ->
+						if (manga != null) {
+							MangaTransferCache.put(manga)
+							context.startActivity(ReaderActivity.newIntent(context, manga))
+						} else {
+							shellViewModel.showToast("No reading history yet")
+						}
+					}
+					if (layoutPrefs.isClassicBottomBar) {
+						NemuriClassicBottomBar(
+							currentTab = navController.currentTab,
+							unreadFeedCount = shellState.unreadFeedCount,
+							hasExtensionUpdates = shellState.hasExtensionUpdates,
+							isIncognito = shellState.isIncognito,
+							recentReads = shellState.recentReads,
+							isCompactHeight = layoutPrefs.isNavBarCompact,
+							labelVisibility = layoutPrefs.navLabelVisibility,
+							onSelectTab = navController::selectTab,
+							onContinueReading = handleContinueReading,
+							onToggleIncognito = shellViewModel::toggleIncognito,
+						)
+					} else {
+						NemuriFloatingDockBar(
+							currentTab = navController.currentTab,
+							unreadFeedCount = shellState.unreadFeedCount,
+							hasExtensionUpdates = shellState.hasExtensionUpdates,
+							isIncognito = shellState.isIncognito,
+							recentReads = shellState.recentReads,
+							isCompactHeight = layoutPrefs.isNavBarCompact,
+							labelVisibility = layoutPrefs.navLabelVisibility,
+							onSelectTab = navController::selectTab,
+							onContinueReading = handleContinueReading,
+							onToggleIncognito = shellViewModel::toggleIncognito,
+						)
+					}
 				}
 
 				NemuriCapsuleToastHost(

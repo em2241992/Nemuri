@@ -3,6 +3,7 @@ package org.nemuri.app.ui.enhance
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +16,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GraphicEq
@@ -30,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -42,7 +46,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
 import org.nemuri.app.BuildConfig
+import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.settings.SettingsGroupCard
@@ -205,8 +211,13 @@ fun EnhanceHubScreen(
 					EnhanceToolCard(
 						icon = Icons.Default.ContentCopy,
 						title = "Library Duplicate Scanner",
-						subtitle = "Detect duplicate series by tracker ID or title and safely consolidate progress",
-						badge = if (uiState.duplicatePairsCount > 0) "${uiState.duplicatePairsCount} ready" else null,
+						subtitle = buildString {
+							append("Edition-aware Exact, Variants & Review scanner")
+							if (uiState.editionVariantPairsCount > 0) {
+								append(" • ${uiState.editionVariantPairsCount} edition variant(s)")
+							}
+						},
+						badge = if (uiState.duplicatePairsCount > 0) "${uiState.duplicatePairsCount} exact" else null,
 						badgeTint = NemuriTheme.colors.cyan,
 						onClick = onOpenDuplicates,
 					)
@@ -235,6 +246,15 @@ fun EnhanceHubScreen(
 						},
 						onClick = onOpenReadingSettings,
 					)
+					HardwareTelemetryStrip(
+						activeDelegateOverride = when {
+							uiState.isNeuralUpscaleEnabled && uiState.activeNeuralDelegateLabel.isNotBlank() ->
+								uiState.activeNeuralDelegateLabel
+							uiState.activeShaderLabel != "Off" ->
+								"Active: GPU Shader (${uiState.activeShaderLabel})"
+							else -> null
+						},
+					)
 					Surface(
 						color = NemuriTheme.colors.card,
 						shape = RoundedCornerShape(14.dp),
@@ -258,7 +278,7 @@ fun EnhanceHubScreen(
 									color = NemuriTheme.colors.textMuted,
 								)
 							}
-							androidx.compose.material3.TextButton(
+							TextButton(
 								onClick = viewModel::clearUpscaleCache,
 								enabled = uiState.neuralCacheBytes > 0L,
 							) {
@@ -275,7 +295,7 @@ fun EnhanceHubScreen(
 			item {
 				SettingsGroupCard("Duplicate Guard Preferences") {
 					SettingsToggleRow(
-						title = "Check Duplicates When Adding",
+						title = "Check & Swap on Add",
 						subtitle = "Warn and offer 1-tap Replace before adding an existing library title",
 						checked = uiState.isDuplicateCheckOnAdd,
 						onCheckedChange = viewModel::setDuplicateCheckOnAdd,
@@ -287,6 +307,82 @@ fun EnhanceHubScreen(
 						checked = uiState.isDuplicateProgressMigrated,
 						onCheckedChange = viewModel::setDuplicateProgressMigrated,
 					)
+					SettingsRowDivider()
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 14.dp, vertical = 12.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = "Primary Winner Strategy",
+									style = MaterialTheme.typography.titleSmall,
+									color = NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = uiState.duplicateWinnerStrategy.label,
+									style = MaterialTheme.typography.bodySmall,
+									color = NemuriTheme.colors.textMuted,
+								)
+							}
+							if (uiState.ignoredDuplicatePairsCount > 0) {
+								TextButton(onClick = viewModel::resetIgnoredDuplicatePairs) {
+									Text(
+										text = "Reset Ignored Pairs (${uiState.ignoredDuplicatePairsCount})",
+										style = MaterialTheme.typography.labelSmall,
+										color = NemuriTheme.colors.amber,
+									)
+								}
+							}
+						}
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.horizontalScroll(rememberScrollState()),
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							DuplicateWinnerStrategy.entries.forEach { strategy ->
+								val selected = uiState.duplicateWinnerStrategy == strategy
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(999.dp),
+									border = BorderStroke(
+										1.dp,
+										if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.clip(RoundedCornerShape(999.dp))
+										.clickable { viewModel.setDuplicateWinnerStrategy(strategy) },
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(4.dp),
+									) {
+										if (selected) {
+											Icon(
+												imageVector = Icons.Default.Check,
+												contentDescription = null,
+												tint = NemuriTheme.colors.cyan,
+												modifier = Modifier.size(13.dp),
+											)
+										}
+										Text(
+											text = strategy.shortLabel,
+											style = MaterialTheme.typography.labelSmall,
+											color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										)
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 

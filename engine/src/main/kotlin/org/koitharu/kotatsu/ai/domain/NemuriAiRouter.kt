@@ -237,10 +237,11 @@ class NemuriAiRouter @Inject constructor(
 		val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
 		return res.fold(
 			onSuccess = { out ->
+				val snippet = out.text.replace('\n', ' ').trim().take(60)
 				AiConnectionTestResult(
 					ok = true,
 					engineName = out.engineUsed,
-					message = "Connected (${elapsed}ms) • Reply: ${out.text.take(60)}",
+					message = "✓ Connected — ${out.engineUsed} (${elapsed}ms) • Reply: $snippet",
 					latencyMs = elapsed,
 				)
 			},
@@ -291,6 +292,6 @@ class NemuriAiRouter @Inject constructor(
 	private companion object {
 		const val DEFAULT_LOCAL_OLLAMA_URL = "http://127.0.0.1:11434/v1"
 		const val HEALTH_CHECK_ARTICLE =
-			"Reader status health check passage: A long-running serialized fantasy adventure follows a young cartographer mapping an archipelago of floating ruins while searching for lost chapters of an ancient chronicle. After completing forty-two chapters of the prologue arc and crossing the storm barrier, the party arrives safely at the sky harbor citadel to regroup before the next expedition."
+			"High above the sunken kingdom of Veridia, a young cartographer named Ren and his clockwork hawk chart the drifting sky islands left behind after the Great Sundering. Across the opening arc, Ren discovers an ancient brass astrolabe hidden inside the library of Port Halcyon, drawing the attention of the Iron Fleet and their ruthless commander, Lady Vaelen. Joined by Mira, an exiled swordswoman guarding a sealed relic, and Toren, a runaway alchemist, the small crew repairs a battered wind-skiff and crosses the Tempest Wall. By Chapter 42, the companions reach the Spire Harbor citadel, where an old guild master recognizes the astrolabe's star-map."
 	}
 }

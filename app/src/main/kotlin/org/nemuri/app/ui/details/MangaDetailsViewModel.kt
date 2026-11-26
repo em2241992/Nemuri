@@ -1,6 +1,7 @@
 package org.nemuri.app.ui.details
 
 import android.content.Context
+import android.net.Uri
 import android.text.format.DateUtils
 import androidx.compose.runtime.Immutable
 import androidx.core.text.HtmlCompat
@@ -26,8 +27,12 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 import org.koitharu.kotatsu.ai.data.MangaAiRecapEntity
 import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.NemuriAiRouter
 import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.koitharu.kotatsu.ai.domain.WhereWasIRecapUseCase
 import org.koitharu.kotatsu.alternatives.domain.MigrateUseCase
@@ -43,12 +48,15 @@ import org.koitharu.kotatsu.core.model.getLocalizedTitle
 import org.koitharu.kotatsu.core.model.getPreferredBranch
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
+import org.koitharu.kotatsu.core.model.isNsfw
 import org.koitharu.kotatsu.core.model.parcelable.ParcelableManga
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.nav.MangaIntent
+import org.koitharu.kotatsu.core.network.BaseHttpClient
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
+import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
@@ -167,6 +175,20 @@ data class MangaDetailsUiState(
 	val isRecapCardEnabled: Boolean = true,
 	val aiModeLabel: String = "Auto",
 	val recapDepth: RecapDepth = RecapDepth.DETAILED,
+	val translatedSynopsis: String? = null,
+	val isTranslatingSynopsis: Boolean = false,
+	val showTranslatedSynopsis: Boolean = false,
+	val isIncognitoActive: Boolean = false,
+	val isSessionIncognito: Boolean = false,
+	val incognitoForNsfw: TriStateOption = TriStateOption.ASK,
+	val isAdultTitle: Boolean = false,
+	val duplicateWinnerStrategy: DuplicateWinnerStrategy = DuplicateWinnerStrategy.MOST_CHAPTERS,
+)
+
+private data class SynopsisTranslationState(
+	val translatedText: String? = null,
+	val isTranslating: Boolean = false,
+	val showTranslated: Boolean = false,
 )
 
 private data class DetailsChapterControls(
@@ -203,6 +225,8 @@ class MangaDetailsViewModel @Inject constructor(
 	private val statsRepository: StatsRepository,
 	private val databaseProvider: Provider<MangaDatabase>,
 	private val recapUseCaseProvider: Provider<WhereWasIRecapUseCase>,
+	private val aiRouterProvider: Provider<NemuriAiRouter>,
+	@BaseHttpClient private val httpClient: OkHttpClient,
 	@LocalStorageChanges private val localStorageChanges: SharedFlow<LocalManga?>,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
@@ -226,7 +250,10 @@ class MangaDetailsViewModel @Inject constructor(
 	private val titleStatsFlow = MutableStateFlow(MangaTitleStats())
 	private val generatingRecapFlow = MutableStateFlow(false)
 	private val selectedRecapDepthFlow = MutableStateFlow<RecapDepth?>(null)
+	private val translationStateFlow = MutableStateFlow(SynopsisTranslationState())
+	private val sessionIncognitoFlow = MutableStateFlow(false)
 	private var recapJob: Job? = null
+	private var translateJob: Job? = null
 
 	private val _uiState = MutableStateFlow(MangaDetailsUiState())
 	val uiState: StateFlow<MangaDetailsUiState> = _uiState.asStateFlow()
@@ -259,8 +286,11 @@ class MangaDetailsViewModel @Inject constructor(
 		loadJob?.cancel()
 		auxiliaryJob?.cancel()
 		recapJob?.cancel()
+		translateJob?.cancel()
 		generatingRecapFlow.value = false
 		selectedRecapDepthFlow.value = null
+		translationStateFlow.value = SynopsisTranslationState()
+		sessionIncognitoFlow.value = false
 		selectedChaptersFlow.value = emptySet()
 		relatedFlow.value = emptyList()
 
@@ -453,9 +483,12 @@ class MangaDetailsViewModel @Inject constructor(
 	private suspend fun addWithDuplicateCheck(manga: Manga, category: FavouriteCategory) {
 		if (settings.isDuplicateCheckEnabled) {
 			val useCase = duplicatesUseCaseProvider.get()
-			val duplicates = runCatchingCancellable { useCase(manga) }.getOrDefault(emptyList())
+			val duplicates = runCatchingCancellable { useCase(manga) }
+				.getOrDefault(emptyList())
+				.filterNot { settings.isDuplicatePairIgnored(manga.id, it.manga.id) }
 			if (duplicates.isNotEmpty()) {
-				val incomingCount = useCase.getLocalChaptersCount(manga)
+				val incomingCount = rawDetailsFlow.value?.allChapters?.size?.takeIf { it > 0 }
+					?: useCase.getLocalChaptersCount(manga)
 				duplicatePromptFlow.value = PendingDuplicatePrompt(
 					incoming = manga,
 					targetCategory = category,
@@ -480,6 +513,98 @@ class MangaDetailsViewModel @Inject constructor(
 		viewModelScope.launch(Dispatchers.IO) {
 			favouritesRepository.addToCategory(prompt.targetCategory.id, listOf(prompt.incoming))
 			toastManager.show("Added to ${prompt.targetCategory.title}")
+		}
+	}
+
+	fun keepBothAndIgnoreDuplicates() {
+		val prompt = duplicatePromptFlow.value ?: return
+		duplicatePromptFlow.value = null
+		viewModelScope.launch(Dispatchers.IO) {
+			prompt.duplicates.forEach { dup ->
+				settings.ignoreDuplicatePair(prompt.incoming.id, dup.manga.id)
+			}
+			favouritesRepository.addToCategory(prompt.targetCategory.id, listOf(prompt.incoming))
+			toastManager.show("Kept both & ignored duplicate pair")
+		}
+	}
+
+	fun toggleHeaderIncognito() {
+		if (settings.isIncognitoModeEnabled) {
+			settings.isIncognitoModeEnabled = false
+			sessionIncognitoFlow.value = false
+			toastManager.show("Global Incognito disabled")
+		} else {
+			val next = !sessionIncognitoFlow.value
+			sessionIncognitoFlow.value = next
+			toastManager.show(if (next) "Incognito active for this session" else "Session Incognito disabled")
+		}
+	}
+
+	fun setIncognitoForNsfw(option: TriStateOption) {
+		settings.incognitoModeForNsfw = option
+	}
+
+	fun toggleSynopsisTranslation() {
+		val cur = translationStateFlow.value
+		if (cur.isTranslating) return
+		if (!cur.translatedText.isNullOrBlank()) {
+			translationStateFlow.update { it.copy(showTranslated = !it.showTranslated) }
+			return
+		}
+		val rawSynopsis = uiState.value.descriptionText.trim()
+		if (rawSynopsis.isBlank()) return
+
+		translateJob?.cancel()
+		translateJob = viewModelScope.launch(Dispatchers.IO) {
+			translationStateFlow.update { it.copy(isTranslating = true) }
+			val appLang = if (!settings.appLocales.isEmpty) settings.appLocales[0]?.language else null
+			val targetLang = appLang?.takeIf { it.isNotBlank() }
+				?: java.util.Locale.getDefault().language.ifBlank { "en" }
+
+			val primaryHttp = runCatchingCancellable {
+				val url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${Uri.encode(targetLang)}&dt=t&q=${Uri.encode(rawSynopsis)}"
+				val req = Request.Builder()
+					.url(url)
+					.header("User-Agent", "Mozilla/5.0")
+					.get()
+					.build()
+				httpClient.newCall(req).execute().use { resp ->
+					if (!resp.isSuccessful) error("HTTP ${resp.code}")
+					val body = resp.body?.string().orEmpty()
+					val sentences = JSONArray(body).getJSONArray(0)
+					val sb = StringBuilder()
+					for (i in 0 until sentences.length()) {
+						val chunk = sentences.optJSONArray(i)?.optString(0)
+						if (!chunk.isNullOrEmpty()) sb.append(chunk)
+					}
+					sb.toString().trim().takeIf { it.isNotBlank() } ?: error("Empty translation")
+				}
+			}.getOrNull()
+
+			val resolvedText = primaryHttp ?: run {
+				val aiRouter = aiRouterProvider.get()
+				if (aiRouter.isAiEnabled()) {
+					val targetDisplay = java.util.Locale.forLanguageTag(targetLang).displayLanguage.ifBlank { targetLang }
+					aiRouter.generate(
+						systemPrompt = "You are a precise manga and novel synopsis translator. Translate the synopsis naturally and accurately into $targetDisplay ($targetLang). Output ONLY the translated synopsis text.",
+						userPrompt = rawSynopsis,
+						maxTokens = 512,
+					).getOrNull()?.text?.trim()?.takeIf { it.isNotBlank() }
+				} else {
+					null
+				}
+			}
+
+			if (!resolvedText.isNullOrBlank()) {
+				translationStateFlow.value = SynopsisTranslationState(
+					translatedText = resolvedText,
+					isTranslating = false,
+					showTranslated = true,
+				)
+			} else {
+				translationStateFlow.update { it.copy(isTranslating = false) }
+				toastManager.show("Translation unavailable right now")
+			}
 		}
 	}
 
@@ -580,6 +705,7 @@ class MangaDetailsViewModel @Inject constructor(
 		val trimmed = title.trim()
 		if (trimmed.isEmpty()) return
 		val manga = rawDetailsFlow.value?.toManga()
+		val memberIds = uiState.value.memberCategoryIds
 		viewModelScope.launch(Dispatchers.IO) {
 			val created = favouritesRepository.createCategory(
 				title = trimmed,
@@ -589,8 +715,12 @@ class MangaDetailsViewModel @Inject constructor(
 				isVisibleOnShelf = true,
 			)
 			if (manga != null) {
-				favouritesRepository.addToCategory(created.id, listOf(manga))
-				toastManager.show("Added to \"${created.title}\"")
+				if (memberIds.isEmpty()) {
+					addWithDuplicateCheck(manga, created)
+				} else {
+					favouritesRepository.addToCategory(created.id, listOf(manga))
+					toastManager.show("Added to \"${created.title}\"")
+				}
 			} else {
 				toastManager.show("Created category \"${created.title}\"")
 			}
@@ -768,8 +898,14 @@ class MangaDetailsViewModel @Inject constructor(
 	}
 
 	private fun startObserveCombined(mangaId: Long) {
-		val reversedPrefFlow = settings.observeChanges()
-			.filter { it == null || it == AppSettings.KEY_REVERSE_CHAPTERS }
+		val settingsPrefFlow = settings.observeChanges()
+			.filter {
+				it == null ||
+					it == AppSettings.KEY_REVERSE_CHAPTERS ||
+					it == AppSettings.KEY_INCOGNITO_MODE ||
+					it == AppSettings.KEY_INCOGNITO_NSFW ||
+					it == AppSettings.KEY_DUPLICATE_WINNER_STRATEGY
+			}
 			.onStart { emit(null) }
 
 		val bookmarksFlow = rawDetailsFlow.flatMapLatest { details ->
@@ -795,7 +931,7 @@ class MangaDetailsViewModel @Inject constructor(
 				bookmarkedChapterIds = bookmarks.mapTo(HashSet()) { it.chapterId },
 				isReversed = settings.isChaptersReverse,
 			)
-		}.combine(reversedPrefFlow) { snapshot, _ ->
+		}.combine(settingsPrefFlow) { snapshot, _ ->
 			snapshot.copy(isReversed = settings.isChaptersReverse)
 		}
 
@@ -856,6 +992,16 @@ class MangaDetailsViewModel @Inject constructor(
 				isRecapCardEnabled = recapBundle.isCardEnabled,
 				aiModeLabel = recapBundle.aiModeLabel,
 				recapDepth = recapBundle.recapDepth,
+			)
+		}.combine(translationStateFlow) { meta, trans ->
+			meta.copy(translationState = trans)
+		}.combine(sessionIncognitoFlow) { meta, sessionIncog ->
+			meta.copy(isSessionIncognito = sessionIncog)
+		}.combine(settingsPrefFlow) { meta, _ ->
+			meta.copy(
+				isGlobalIncognito = settings.isIncognitoModeEnabled,
+				incognitoForNsfw = settings.incognitoModeForNsfw,
+				winnerStrategy = settings.duplicateWinnerStrategy,
 			)
 		}
 
@@ -983,6 +1129,16 @@ class MangaDetailsViewModel @Inject constructor(
 					String.format("%.1f ★", (m.rating * 5f).coerceIn(0f, 5f))
 				}
 
+				val isAdultTitle = manga != null && (
+					manga.isNsfw() || manga.tags.any { tag ->
+						val lower = tag.title.trim().lowercase(java.util.Locale.ROOT)
+						lower == "18+" || lower == "r18" || lower == "r-18" ||
+							lower.contains("adult") || lower.contains("erotica") ||
+							lower.contains("pornographic") || lower.contains("smut") ||
+							lower.contains("hentai")
+					}
+					)
+
 				MangaDetailsUiState(
 					mangaId = mangaId,
 					manga = manga,
@@ -1032,6 +1188,14 @@ class MangaDetailsViewModel @Inject constructor(
 					isRecapCardEnabled = meta.isRecapCardEnabled,
 					aiModeLabel = meta.aiModeLabel,
 					recapDepth = meta.recapDepth,
+					translatedSynopsis = meta.translationState.translatedText,
+					isTranslatingSynopsis = meta.translationState.isTranslating,
+					showTranslatedSynopsis = meta.translationState.showTranslated,
+					isIncognitoActive = meta.isGlobalIncognito || meta.isSessionIncognito,
+					isSessionIncognito = meta.isSessionIncognito,
+					incognitoForNsfw = meta.incognitoForNsfw,
+					isAdultTitle = isAdultTitle,
+					duplicateWinnerStrategy = meta.winnerStrategy,
 				)
 			}.flowOn(Dispatchers.Default)
 				.collect { state ->
@@ -1060,6 +1224,11 @@ class MangaDetailsViewModel @Inject constructor(
 		val isRecapCardEnabled: Boolean = true,
 		val aiModeLabel: String = "Auto",
 		val recapDepth: RecapDepth = RecapDepth.DETAILED,
+		val translationState: SynopsisTranslationState = SynopsisTranslationState(),
+		val isSessionIncognito: Boolean = false,
+		val isGlobalIncognito: Boolean = false,
+		val incognitoForNsfw: TriStateOption = TriStateOption.ASK,
+		val winnerStrategy: DuplicateWinnerStrategy = DuplicateWinnerStrategy.MOST_CHAPTERS,
 	)
 
 	private data class RecapMetaBundle(

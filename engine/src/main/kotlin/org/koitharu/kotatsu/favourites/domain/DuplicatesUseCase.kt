@@ -2,8 +2,13 @@ package org.koitharu.kotatsu.favourites.domain
 
 import dagger.Reusable
 import org.koitharu.kotatsu.core.db.MangaDatabase
+import org.koitharu.kotatsu.core.model.isBroken
 import org.koitharu.kotatsu.core.model.isLocal
+import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.parser.MangaRepository
+import org.koitharu.kotatsu.core.prefs.AppSettings
+import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
+import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.favourites.data.FavouriteManga
 import org.koitharu.kotatsu.favourites.data.toManga
 import org.koitharu.kotatsu.list.domain.ReadingProgress.Companion.PROGRESS_NONE
@@ -27,81 +32,245 @@ class MangaDuplicate(
 	val categories: List<String>,
 	val progress: Float,
 	val canReplace: Boolean,
+	val editionFlags: Set<EditionFlag> = emptySet(),
+	val isEditionVariant: Boolean = false,
+	val isRecommendedWinner: Boolean = false,
+	val isSourceHealthy: Boolean = true,
+	val matchReason: String = "Exact Title Match",
 )
 
 /**
- * Finds favourites that are probably the same series as [manga], ported from mihon's
- * `GetDuplicateLibraryManga`. Two independent signals:
+ * Edition-aware duplicate detector using [TitleSignatureParser]:
  *
- * 1. **Titles** — a loose SQL net (see [org.koitharu.kotatsu.favourites.data.FavouritesDao.findSimilar])
- *    refined here against titles normalized down to letters and digits, so `One Piece`, `one-piece`
- *    and `One Piece!` all collapse together. Matching is bidirectional, unlike mihon's one-way
- *    `LIKE '%new%'`, and alternative titles count on both sides.
- * 2. **Trackers** — anything linked to the same remote entry on the same tracker, whatever its title.
- *    Rarely fires for a brand new manga (it usually has no tracker link yet) but catches re-adds.
- *
- * Either way the two must be the same kind of work: prose only ever matches prose and comics only
- * ever match comics, keyed off [isEpub] so novel sources and imported EPUBs are treated alike.
+ * 1. Parses clean core titles, sequel/season markers, and edition flags (`COLORED`, `UNCENSORED`,
+ *    `ORIGIN_VARIANT`, `SPINOFF`) from titles and tags instead of loose substring `.contains()`.
+ * 2. Hard-vetoes `Manga != Novel` (`isEpub`, `isNovelSource`, `LN_*`, `settings.novelSourceIds`),
+ *    differing `partOrSequelMarker`, `SPINOFF` mismatches, ignored pairs, and conflicting authors
+ *    (unless explicitly linked to the same remote tracker entry).
+ * 3. Requires `wordJaccard >= 0.82f` (with short 1-word `<= 10` char exact match rule) and ranks
+ *    candidates according to [AppSettings.duplicateWinnerStrategy].
  */
 @Reusable
 class DuplicatesUseCase @Inject constructor(
 	private val db: MangaDatabase,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
+	private val settings: AppSettings,
+	private val sourcesRepository: MangaSourcesRepository,
 ) {
 
 	suspend operator fun invoke(manga: Manga): List<MangaDuplicate> {
-		val titles = manga.allTitles()
+		val incomingTags = manga.tags.map { it.title }
+		val primarySigIncoming = TitleSignatureParser.parse(manga.title, incomingTags)
+		val incomingSigs = manga.allTitles().map { TitleSignatureParser.parse(it, incomingTags) }
+		val novelSourceIds = settings.novelSourceIds
+		val isIncomingNovel = isNovelWork(manga, novelSourceIds)
+
+		val searchQueries = LinkedHashSet<String>().apply {
+			for (raw in manga.allTitles()) {
+				val lower = raw.trim().lowercase()
+				if (lower.length >= MIN_QUERY_LENGTH) add(lower)
+			}
+			for (sig in incomingSigs) {
+				val core = sig.cleanCoreTitle.trim()
+				if (core.length >= MIN_QUERY_LENGTH) add(core)
+			}
+		}
+
 		val found = HashMap<Long, MutableList<FavouriteManga>>()
 		val favouritesDao = db.getFavouritesDao()
-		for (title in titles) {
-			val query = title.lowercase()
-			if (query.length < MIN_QUERY_LENGTH) {
-				continue
-			}
+		for (query in searchQueries) {
 			for (row in favouritesDao.findSimilar(manga.id, query)) {
 				found.getOrPut(row.manga.id) { ArrayList(1) }.add(row)
 			}
 		}
-		val normalizedTitles = titles.mapNotNullTo(HashSet()) {
-			it.normalizeTitle().takeIf { s -> s.length >= MIN_NORMALIZED_LENGTH }
-		}
-		val matched = HashMap<Long, List<FavouriteManga>>(found.size)
-		for ((id, rows) in found) {
-			if (rows.first().toManga().matchesAnyOf(normalizedTitles)) {
-				matched[id] = rows
+
+		val trackerLinkedIds = db.getScrobblingDao().findLinkedMangaIds(manga.id).toSet()
+		val missingLinkedIds = trackerLinkedIds.filterNot { it in found }
+		if (missingLinkedIds.isNotEmpty()) {
+			for ((id, rows) in favouritesDao.findByIds(missingLinkedIds).groupBy { it.manga.id }) {
+				found[id] = rows.toMutableList()
 			}
 		}
-		// Tracker links bypass the title check entirely — a shared remote entry is proof enough.
-		val linkedIds = db.getScrobblingDao().findLinkedMangaIds(manga.id).filterNot { it in matched }
-		if (linkedIds.isNotEmpty()) {
-			for ((id, rows) in favouritesDao.findByIds(linkedIds).groupBy { it.manga.id }) {
-				matched[id] = rows
-			}
-		}
-		if (matched.isEmpty()) {
+
+		if (found.isEmpty()) {
 			return emptyList()
 		}
+
 		val chaptersDao = db.getChaptersDao()
 		val historyDao = db.getHistoryDao()
-		val isIncomingProse = manga.isEpub
-		return matched.values.mapNotNull { rows ->
+		val enabledSourceNames = runCatching {
+			sourcesRepository.getEnabledSources().mapTo(HashSet()) { it.name }
+		}.getOrDefault(emptySet())
+		val incomingAuthor = manga.authors.firstOrNull()
+
+		data class EvaluatedCandidate(
+			val existing: Manga,
+			val chaptersCount: Int,
+			val categories: List<String>,
+			val progress: Float,
+			val canReplace: Boolean,
+			val editionFlags: Set<EditionFlag>,
+			val isEditionVariant: Boolean,
+			val isSourceHealthy: Boolean,
+			val matchReason: String,
+		)
+
+		val evaluated = found.values.mapNotNull { rows ->
 			val existing = rows.first().toManga()
-			// A novel and a manga of the same name are different works, never duplicates of each other.
-			if (existing.isEpub != isIncomingProse) {
+			if (existing.id == manga.id) return@mapNotNull null
+			if (settings.isDuplicatePairIgnored(manga.id, existing.id)) return@mapNotNull null
+
+			val isCandidateNovel = isNovelWork(existing, novelSourceIds)
+			val existingTags = existing.tags.map { it.title }
+			val primarySigCandidate = TitleSignatureParser.parse(existing.title, existingTags)
+			if (TitleSignatureParser.isHardVeto(isIncomingNovel, isCandidateNovel, primarySigIncoming, primarySigCandidate)) {
 				return@mapNotNull null
 			}
-			MangaDuplicate(
-				manga = existing,
+
+			val isSharedTracker = existing.id in trackerLinkedIds
+			if (!isSharedTracker &&
+				TitleSignatureParser.hasAuthorConflict(incomingAuthor, existing.authors.firstOrNull())
+			) {
+				return@mapNotNull null
+			}
+
+			val candidateSigs = existing.allTitles().map { TitleSignatureParser.parse(it, existingTags) }
+			var bestJaccard = 0f
+			var exactCoreMatch = false
+			for (sigIn in incomingSigs) {
+				for (sigCand in candidateSigs) {
+					if (TitleSignatureParser.isHardVeto(isIncomingNovel, isCandidateNovel, sigIn, sigCand)) {
+						continue
+					}
+					if (sigIn.cleanCoreTitle.isNotBlank() && sigIn.cleanCoreTitle == sigCand.cleanCoreTitle) {
+						exactCoreMatch = true
+						bestJaccard = 1f
+						break
+					}
+					val jaccard = TitleSignatureParser.wordJaccard(sigIn, sigCand)
+					if (jaccard > bestJaccard) {
+						bestJaccard = jaccard
+					}
+				}
+				if (exactCoreMatch) break
+			}
+
+			if (!isSharedTracker && bestJaccard < MIN_WORD_JACCARD) {
+				return@mapNotNull null
+			}
+
+			val isEditionVariant = TitleSignatureParser.hasEditionDifference(primarySigIncoming, primarySigCandidate)
+			val matchReason = when {
+				isSharedTracker && isEditionVariant -> "Shared Tracker • Edition Variant"
+				isSharedTracker -> "Shared Tracker ID"
+				isEditionVariant -> "Edition Variant"
+				exactCoreMatch -> "Exact Title Match"
+				else -> "${(bestJaccard * 100).toInt()}% Title Match"
+			}
+
+			val isHealthy = existing.source.isLocal ||
+				(!existing.source.isBroken && (enabledSourceNames.isEmpty() || existing.source.name in enabledSourceNames))
+
+			EvaluatedCandidate(
+				existing = existing,
 				chaptersCount = chaptersDao.count(existing.id),
 				categories = rows.mapNotNull { row ->
 					row.categories.singleOrNull()?.takeIf { it.deletedAt == 0L }?.title
 				}.distinct(),
 				progress = historyDao.find(existing.id)?.percent ?: PROGRESS_NONE,
-				// Local/imported entries have no remote counterpart to re-key against.
 				canReplace = !existing.source.isLocal && !manga.source.isLocal,
+				editionFlags = primarySigCandidate.editionFlags,
+				isEditionVariant = isEditionVariant,
+				isSourceHealthy = isHealthy,
+				matchReason = matchReason,
 			)
-		}.sortedByDescending { it.chaptersCount }
+		}
+
+		if (evaluated.isEmpty()) {
+			return emptyList()
+		}
+
+		val strategy = settings.duplicateWinnerStrategy
+		val sorted = evaluated.sortedWith { a, b ->
+			// Non-variant matches rank ahead of edition variants; within each group sort by strategy.
+			val variantCmp = a.isEditionVariant.compareTo(b.isEditionVariant)
+			if (variantCmp != 0) {
+				variantCmp
+			} else {
+				compareByStrategy(
+					AnyCandidateMetrics(b.chaptersCount, b.progress, b.isSourceHealthy, b.existing.rating),
+					AnyCandidateMetrics(a.chaptersCount, a.progress, a.isSourceHealthy, a.existing.rating),
+					strategy,
+				)
+			}
+		}
+
+		val winnerId = sorted.firstOrNull { !it.isEditionVariant }?.existing?.id
+
+		return sorted.map { item ->
+			MangaDuplicate(
+				manga = item.existing,
+				chaptersCount = item.chaptersCount,
+				categories = item.categories,
+				progress = item.progress,
+				canReplace = item.canReplace,
+				editionFlags = item.editionFlags,
+				isEditionVariant = item.isEditionVariant,
+				isRecommendedWinner = winnerId != null && item.existing.id == winnerId,
+				isSourceHealthy = item.isSourceHealthy,
+				matchReason = item.matchReason,
+			)
+		}
 	}
+
+	private fun compareByStrategy(
+		left: AnyCandidateMetrics,
+		right: AnyCandidateMetrics,
+		strategy: DuplicateWinnerStrategy,
+	): Int = when (strategy) {
+		DuplicateWinnerStrategy.MOST_CHAPTERS -> compareValuesBy(
+			left,
+			right,
+			{ it.chaptersCount },
+			{ it.isSourceHealthy },
+			{ it.progress },
+			{ it.rating },
+		)
+
+		DuplicateWinnerStrategy.FURTHEST_READ -> compareValuesBy(
+			left,
+			right,
+			{ it.progress },
+			{ it.chaptersCount },
+			{ it.isSourceHealthy },
+			{ it.rating },
+		)
+
+		DuplicateWinnerStrategy.HEALTHY_SOURCE -> compareValuesBy(
+			left,
+			right,
+			{ it.isSourceHealthy },
+			{ it.chaptersCount },
+			{ it.progress },
+			{ it.rating },
+		)
+
+		DuplicateWinnerStrategy.HIGHEST_RATING -> compareValuesBy(
+			left,
+			right,
+			{ it.rating },
+			{ it.chaptersCount },
+			{ it.isSourceHealthy },
+			{ it.progress },
+		)
+	}
+
+	private data class AnyCandidateMetrics(
+		val chaptersCount: Int,
+		val progress: Float,
+		val isSourceHealthy: Boolean,
+		val rating: Float,
+	)
 
 	/**
 	 * Chapters known for [manga] without asking the network, or `null` when nothing is stored yet.
@@ -120,38 +289,26 @@ class DuplicatesUseCase @Inject constructor(
 		mangaRepositoryFactory.create(manga.source).getDetails(manga).chapters?.size
 	}.getOrNull()
 
-	private fun Manga.matchesAnyOf(normalizedTitles: Set<String>): Boolean {
-		for (candidate in allTitles()) {
-			val normalized = candidate.normalizeTitle()
-			if (normalized.length < MIN_NORMALIZED_LENGTH) {
-				continue
-			}
-			if (normalizedTitles.any { it.contains(normalized) || normalized.contains(it) }) {
-				return true
-			}
-		}
-		return false
-	}
-
 	private fun Manga.allTitles(): List<String> = buildList(altTitles.size + 1) {
 		add(title)
 		addAll(altTitles)
 	}.filter { it.isNotBlank() }
 
-	private fun String.normalizeTitle() = buildString(length) {
-		for (c in this@normalizeTitle) {
-			if (c.isLetterOrDigit()) {
-				append(c.lowercaseChar())
-			}
+	private fun isNovelWork(manga: Manga, novelSourceIds: Set<Long>): Boolean {
+		if (manga.isEpub || manga.source.isNovelSource) return true
+		val rawName = manga.source.name
+		if (rawName.startsWith("LN_", ignoreCase = true) || rawName.equals("LOCAL_EPUB", ignoreCase = true)) {
+			return true
 		}
+		if (rawName.startsWith("MIHON_")) {
+			val sourceId = rawName.removePrefix("MIHON_").substringBefore(':').toLongOrNull()
+			if (sourceId != null && sourceId in novelSourceIds) return true
+		}
+		return false
 	}
 
 	private companion object {
-
-		/** Below this the SQL `instr` net stops being selective and matches most of the library. */
 		const val MIN_QUERY_LENGTH = 3
-
-		/** Same idea after normalization, one higher because punctuation is gone by then. */
-		const val MIN_NORMALIZED_LENGTH = 4
+		const val MIN_WORD_JACCARD = 0.82f
 	}
 }

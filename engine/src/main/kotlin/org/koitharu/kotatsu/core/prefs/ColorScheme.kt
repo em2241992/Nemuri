@@ -10,9 +10,12 @@ enum class ColorScheme(
 	@StringRes val titleResId: Int,
 ) {
 
-	DEFAULT(R.string.theme_name_totoro),
+	DEFAULT(R.string.theme_name_nemuri_obsidian),
 	EXPRESSIVE(R.string.theme_name_expressive),
+	TRUE_AMOLED(R.string.theme_name_true_amoled),
+	BEDTIME_AMBER(R.string.theme_name_bedtime_amber),
 	YORHA(R.string.theme_name_yorha),
+	YORHA_VISOR_V2(R.string.theme_name_yorha_visor_v2),
 	KYOTO_WASHI(R.string.theme_name_kyoto_washi),
 	SUIBOKUGA(R.string.theme_name_suibokuga),
 	MIKU(R.string.theme_name_miku),
@@ -32,14 +35,22 @@ enum class ColorScheme(
 	companion object {
 
 		val default: ColorScheme
-			get() = if (DynamicColors.isDynamicColorAvailable()) {
-				EXPRESSIVE
-			} else {
-				DEFAULT
-			}
+			get() = DEFAULT
+
+		val nemuriCuratedPalettes: List<ColorScheme>
+			get() = listOf(
+				EXPRESSIVE,
+				DEFAULT,
+				TRUE_AMOLED,
+				BEDTIME_AMBER,
+				YORHA,
+				YORHA_VISOR_V2,
+				KYOTO_WASHI,
+				SUIBOKUGA,
+			)
 
 		fun getAvailableList(): List<ColorScheme> {
-			val list = ColorScheme.entries.toMutableList()
+			val list = nemuriCuratedPalettes.toMutableList()
 			if (!DynamicColors.isDynamicColorAvailable()) {
 				list.remove(EXPRESSIVE)
 			}

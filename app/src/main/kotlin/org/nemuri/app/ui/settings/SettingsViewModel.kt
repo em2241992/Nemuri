@@ -28,8 +28,10 @@ import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.ScreenshotsPolicy
+import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
 import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
@@ -89,6 +91,8 @@ data class SettingsUiState(
 	val showSourceBadge: Boolean = false,
 	val showBottomProgressBar: Boolean = true,
 	val isNavBarCompact: Boolean = false,
+	val isLegacyNavigationBar: Boolean = false,
+	val selectionMenuStyle: SelectionMenuStyle = SelectionMenuStyle.VISUAL_DIAGRAM,
 	val navLabelVisibility: NavLabelVisibility = NavLabelVisibility.SELECTED_ONLY,
 	val isSwipeActionsEnabled: Boolean = true,
 	// Extensions
@@ -107,6 +111,9 @@ data class SettingsUiState(
 	val isPagesNumbersEnabled: Boolean = false,
 	val isReaderSeamlessStitchEnabled: Boolean = true,
 	val readerTapZoneMode: ReaderTapZoneMode = ReaderTapZoneMode.DEFAULT,
+	val readerScrubberEdge: ReaderScrubberEdge = ReaderScrubberEdge.RIGHT,
+	val isWebtoonGapsEnabled: Boolean = false,
+	val defaultWebtoonZoomOutPercent: Int = 0,
 	val isReaderDoubleTapFill: Boolean = false,
 	val readerShaderPreset: ReaderShaderPreset = ReaderShaderPreset.OFF,
 	val isReaderDescreenEnabled: Boolean = false,
@@ -236,6 +243,8 @@ class SettingsViewModel @Inject constructor(
 			showSourceBadge = settings.showSourceBadge,
 			showBottomProgressBar = settings.showBottomProgressBar,
 			isNavBarCompact = settings.isNavBarCompact,
+			isLegacyNavigationBar = settings.isLegacyNavigationBar,
+			selectionMenuStyle = settings.selectionMenuStyle,
 			navLabelVisibility = settings.navLabelVisibility,
 			isSwipeActionsEnabled = settings.isSwipeActionsEnabled,
 			isPrivateInstall = settings.isPrivateInstallEnabled,
@@ -252,6 +261,9 @@ class SettingsViewModel @Inject constructor(
 			isPagesNumbersEnabled = settings.isPagesNumbersEnabled,
 			isReaderSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
 			readerTapZoneMode = ReaderTapZoneMode.fromKey(settings.readerTapZoneMode),
+			readerScrubberEdge = settings.readerScrubberEdge,
+			isWebtoonGapsEnabled = settings.isWebtoonGapsEnabled,
+			defaultWebtoonZoomOutPercent = settings.defaultWebtoonZoomOutPercent,
 			isReaderDoubleTapFill = settings.isReaderDoubleTapFill,
 			readerShaderPreset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
 			isReaderDescreenEnabled = settings.isReaderDescreenEnabled,
@@ -352,6 +364,12 @@ class SettingsViewModel @Inject constructor(
 	fun setNavBarCompact(compact: Boolean) {
 		settings.isNavBarCompact = compact
 	}
+	fun setLegacyNavigationBar(legacy: Boolean) {
+		settings.isLegacyNavigationBar = legacy
+	}
+	fun setSelectionMenuStyle(style: SelectionMenuStyle) {
+		settings.selectionMenuStyle = style
+	}
 	fun setNavLabelVisibility(visibility: NavLabelVisibility) {
 		settings.navLabelVisibility = visibility
 	}
@@ -392,6 +410,15 @@ class SettingsViewModel @Inject constructor(
 	}
 	fun setReaderTapZoneMode(mode: ReaderTapZoneMode) {
 		settings.readerTapZoneMode = mode.key
+	}
+	fun setReaderScrubberEdge(edge: ReaderScrubberEdge) {
+		settings.readerScrubberEdge = edge
+	}
+	fun setWebtoonGapsEnabled(enabled: Boolean) {
+		settings.isWebtoonGapsEnabled = enabled
+	}
+	fun setDefaultWebtoonZoomOutPercent(percent: Int) {
+		settings.defaultWebtoonZoomOutPercent = percent.coerceIn(0, 50)
 	}
 	fun setReaderDoubleTapFill(enabled: Boolean) {
 		settings.isReaderDoubleTapFill = enabled
@@ -612,5 +639,10 @@ class SettingsViewModel @Inject constructor(
 		settings.isVerboseLoggingEnabled = enabled
 		appLogger.setEnabled(enabled)
 		toastManager.show(if (enabled) "Verbose logging enabled" else "Verbose logging disabled")
+	}
+
+	fun rerunSetupWizard() {
+		settings.isOnboardingCompleted = false
+		toastManager.show("Setup wizard reopened")
 	}
 }

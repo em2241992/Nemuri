@@ -6,19 +6,27 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import org.koitharu.kotatsu.core.prefs.ColorScheme
+
+val LocalIsYorhaVisor: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
 object NemuriTheme {
 	val colors: NemuriExtendedColors
 		@Composable
 		@ReadOnlyComposable
 		get() = LocalNemuriColors.current
+
+	val isYorhaVisor: Boolean
+		@Composable
+		@ReadOnlyComposable
+		get() = LocalIsYorhaVisor.current
 }
 
 @Composable
@@ -38,9 +46,10 @@ fun NemuriTheme(
 	val (materialColors, extendedColors) = buildMaterialColorScheme(
 		context = context,
 		isDark = isDark,
-		amoled = amoled,
+		amoled = amoled || colorScheme == ColorScheme.TRUE_AMOLED,
 		colorScheme = colorScheme,
 	)
+	val isYorhaVisor = colorScheme == ColorScheme.YORHA_VISOR_V2
 
 	val view = LocalView.current
 	val reduceMotion = rememberShouldReduceMotion()
@@ -55,6 +64,7 @@ fun NemuriTheme(
 
 	CompositionLocalProvider(
 		LocalNemuriColors provides extendedColors,
+		LocalIsYorhaVisor provides isYorhaVisor,
 		LocalReducedMotion provides reduceMotion,
 	) {
 		MaterialTheme(

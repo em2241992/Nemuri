@@ -10,13 +10,20 @@ fun SettingsRouterScreen(
 	onNavigateSection: (SettingsSection) -> Unit,
 	onOpenExtensionsCatalog: () -> Unit,
 	onBack: () -> Unit,
+	onOpenOnboarding: (() -> Unit)? = null,
 	settingsViewModel: SettingsViewModel = viewModel(),
 ) {
+	val handleRerunSetupWizard: () -> Unit = {
+		settingsViewModel.rerunSetupWizard()
+		onOpenOnboarding?.invoke()
+	}
+
 	when (section) {
 		SettingsSection.ROOT -> SettingsRootScreen(
 			viewModel = settingsViewModel,
 			onNavigateSection = onNavigateSection,
 			onBack = onBack,
+			onRerunSetupWizard = handleRerunSetupWizard,
 		)
 
 		SettingsSection.APPEARANCE -> AppearanceSettingsScreen(
@@ -66,6 +73,7 @@ fun SettingsRouterScreen(
 		SettingsSection.ABOUT -> AboutSettingsScreen(
 			viewModel = settingsViewModel,
 			onBack = onBack,
+			onRerunSetupWizard = handleRerunSetupWizard,
 		)
 	}
 }

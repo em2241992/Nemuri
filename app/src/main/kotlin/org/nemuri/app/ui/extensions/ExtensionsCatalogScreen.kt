@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.SystemUpdateAlt
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WarningAmber
@@ -106,6 +107,7 @@ fun ExtensionsCatalogScreen(
 	var showAddStoreDialog by rememberSaveable { mutableStateOf(false) }
 	var pendingRepoInput by rememberSaveable { mutableStateOf("") }
 	var showLanguageSheet by remember { mutableStateOf(false) }
+	var showInstallerSheet by rememberSaveable { mutableStateOf(false) }
 	var showFailedExtensions by remember { mutableStateOf(false) }
 
 	// Consume repo deep-link URLs by opening the Add Store dialog prefilled.
@@ -237,6 +239,19 @@ fun ExtensionsCatalogScreen(
 					text = "${uiState.installedItems.size} installed • ${uiState.stores.size} stores",
 					style = MaterialTheme.typography.labelSmall,
 					color = NemuriTheme.colors.textMuted,
+				)
+			}
+			IconButton(
+				onClick = { showInstallerSheet = true },
+			) {
+				Icon(
+					imageVector = Icons.Default.Tune,
+					contentDescription = "Installer & update settings",
+					tint = if (uiState.isPrivateMode || uiState.isShizukuEnabled) {
+						NemuriTheme.colors.cyan
+					} else {
+						NemuriTheme.colors.textSecondary
+					},
 				)
 			}
 			IconButton(
@@ -516,9 +531,13 @@ fun ExtensionsCatalogScreen(
 				isPrivateMode = uiState.isPrivateMode,
 				isShizukuEnabled = uiState.isShizukuEnabled,
 				isShizukuInstalled = uiState.isShizukuInstalled,
+				isShizukuBinderAlive = uiState.isShizukuBinderAlive,
 				isShizukuReady = uiState.isShizukuReady,
+				isAutoUpdateEnabled = uiState.isAutoUpdateEnabled,
 				onSetPrivateMode = viewModel::setPrivateInstallEnabled,
 				onSetShizuku = viewModel::setShizukuEnabled,
+				onRequestShizukuPermission = viewModel::requestShizukuPermission,
+				onSetAutoUpdate = viewModel::setAutoUpdateEnabled,
 				onAddStore = {
 					pendingRepoInput = ""
 					showAddStoreDialog = true
@@ -526,6 +545,33 @@ fun ExtensionsCatalogScreen(
 				onRefresh = viewModel::refreshStores,
 				onRemoveStore = viewModel::removeStore,
 			)
+		}
+	}
+
+	if (showInstallerSheet) {
+		NemuriModalSheet(
+			title = "Installer & Auto-Update",
+			subtitle = "Configure Shizuku silent install, App-isolated sandbox, and background updates",
+			onDismiss = { showInstallerSheet = false },
+		) {
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(bottom = 12.dp),
+			) {
+				ExtensionInstallerSettingsCard(
+					isPrivateMode = uiState.isPrivateMode,
+					isShizukuEnabled = uiState.isShizukuEnabled,
+					isShizukuInstalled = uiState.isShizukuInstalled,
+					isShizukuBinderAlive = uiState.isShizukuBinderAlive,
+					isShizukuReady = uiState.isShizukuReady,
+					isAutoUpdateEnabled = uiState.isAutoUpdateEnabled,
+					onSetPrivateMode = viewModel::setPrivateInstallEnabled,
+					onSetShizuku = viewModel::setShizukuEnabled,
+					onRequestShizukuPermission = viewModel::requestShizukuPermission,
+					onSetAutoUpdate = viewModel::setAutoUpdateEnabled,
+				)
+			}
 		}
 	}
 
@@ -1038,6 +1084,131 @@ private fun CatalogExtensionRow(
 	}
 }
 
+@Composable
+private fun ExtensionInstallerSettingsCard(
+	isPrivateMode: Boolean,
+	isShizukuEnabled: Boolean,
+	isShizukuInstalled: Boolean,
+	isShizukuBinderAlive: Boolean,
+	isShizukuReady: Boolean,
+	isAutoUpdateEnabled: Boolean,
+	onSetPrivateMode: (Boolean) -> Unit,
+	onSetShizuku: (Boolean) -> Unit,
+	onRequestShizukuPermission: () -> Unit,
+	onSetAutoUpdate: (Boolean) -> Unit,
+) {
+	Surface(
+		color = NemuriTheme.colors.card,
+		shape = RoundedCornerShape(16.dp),
+		modifier = Modifier
+			.fillMaxWidth()
+			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp)),
+	) {
+		Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+			Text(
+				text = "APK INSTALLER & UPDATES",
+				style = MaterialTheme.typography.labelSmall,
+				color = NemuriTheme.colors.cyan,
+			)
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+					Text(
+						text = "App-Isolated Mode (Sandbox)",
+						style = MaterialTheme.typography.titleSmall,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Text(
+						text = "Installs extension APKs inside Nemuri without OS prompts while keeping existing OS extensions active.",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
+					)
+				}
+				Switch(
+					checked = isPrivateMode,
+					onCheckedChange = onSetPrivateMode,
+					colors = SwitchDefaults.colors(checkedTrackColor = NemuriTheme.colors.cyan),
+				)
+			}
+			HorizontalDivider(color = NemuriTheme.colors.border)
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+					Text(
+						text = "Shizuku Silent Installer",
+						style = MaterialTheme.typography.titleSmall,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Text(
+						text = when {
+							!isShizukuInstalled -> "Shizuku app is not installed."
+							isShizukuReady -> "Shizuku binder connected and authorized."
+							isShizukuBinderAlive -> "Shizuku service running — tap Authorize to grant permission."
+							else -> "Shizuku service is stopped — start Shizuku to install silently."
+						},
+						style = MaterialTheme.typography.labelSmall,
+						color = if (isShizukuReady) NemuriTheme.colors.healthy else NemuriTheme.colors.textMuted,
+					)
+					if (isShizukuInstalled && !isShizukuReady) {
+						TextButton(
+							onClick = onRequestShizukuPermission,
+							contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
+						) {
+							Text(
+								text = if (isShizukuBinderAlive) "Authorize Shizuku" else "Retry Connection",
+								style = MaterialTheme.typography.labelMedium,
+								color = NemuriTheme.colors.cyan,
+							)
+						}
+					}
+				}
+				Switch(
+					checked = isShizukuEnabled,
+					onCheckedChange = onSetShizuku,
+					enabled = isShizukuInstalled,
+					colors = SwitchDefaults.colors(checkedTrackColor = NemuriTheme.colors.cyan),
+				)
+			}
+			HorizontalDivider(color = NemuriTheme.colors.border)
+			val canAutoUpdateSilently = isPrivateMode || isShizukuEnabled
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+					Text(
+						text = "Auto-Update Extensions",
+						style = MaterialTheme.typography.titleSmall,
+						color = if (canAutoUpdateSilently) NemuriTheme.colors.textPrimary else NemuriTheme.colors.textMuted,
+					)
+					Text(
+						text = if (canAutoUpdateSilently) {
+							"Silently installs background extension updates via ${if (isPrivateMode) "App-Isolated Sandbox" else "Shizuku"}."
+						} else {
+							"Enable App-Isolated Mode or Shizuku Silent Installer above to allow background APK updates."
+						},
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
+					)
+				}
+				Switch(
+					checked = isAutoUpdateEnabled && canAutoUpdateSilently,
+					onCheckedChange = onSetAutoUpdate,
+					enabled = canAutoUpdateSilently,
+					colors = SwitchDefaults.colors(checkedTrackColor = NemuriTheme.colors.cyan),
+				)
+			}
+		}
+	}
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StoresTabList(
@@ -1045,9 +1216,13 @@ private fun StoresTabList(
 	isPrivateMode: Boolean,
 	isShizukuEnabled: Boolean,
 	isShizukuInstalled: Boolean,
+	isShizukuBinderAlive: Boolean,
 	isShizukuReady: Boolean,
+	isAutoUpdateEnabled: Boolean,
 	onSetPrivateMode: (Boolean) -> Unit,
 	onSetShizuku: (Boolean) -> Unit,
+	onRequestShizukuPermission: () -> Unit,
+	onSetAutoUpdate: (Boolean) -> Unit,
 	onAddStore: () -> Unit,
 	onRefresh: () -> Unit,
 	onRemoveStore: (String) -> Unit,
@@ -1058,73 +1233,18 @@ private fun StoresTabList(
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		item {
-			Surface(
-				color = NemuriTheme.colors.card,
-				shape = RoundedCornerShape(16.dp),
-				modifier = Modifier
-					.fillMaxWidth()
-					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp)),
-			) {
-				Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-					Text(
-						text = "APK INSTALLER BACKEND",
-						style = MaterialTheme.typography.labelSmall,
-						color = NemuriTheme.colors.cyan,
-					)
-					Row(
-						modifier = Modifier.fillMaxWidth(),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.SpaceBetween,
-					) {
-						Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-							Text(
-								text = "Private Sandbox Mode",
-								style = MaterialTheme.typography.titleSmall,
-								color = NemuriTheme.colors.textPrimary,
-							)
-							Text(
-								text = "Loads extension APKs inside Nemuri without OS package installation.",
-								style = MaterialTheme.typography.labelSmall,
-								color = NemuriTheme.colors.textMuted,
-							)
-						}
-						Switch(
-							checked = isPrivateMode,
-							onCheckedChange = onSetPrivateMode,
-							colors = SwitchDefaults.colors(checkedTrackColor = NemuriTheme.colors.cyan),
-						)
-					}
-					HorizontalDivider(color = NemuriTheme.colors.border)
-					Row(
-						modifier = Modifier.fillMaxWidth(),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.SpaceBetween,
-					) {
-						Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-							Text(
-								text = "Shizuku Silent Installer",
-								style = MaterialTheme.typography.titleSmall,
-								color = NemuriTheme.colors.textPrimary,
-							)
-							Text(
-								text = when {
-									!isShizukuInstalled -> "Shizuku app is not installed."
-									!isShizukuReady -> "Shizuku service running or permission not granted yet."
-									else -> "Shizuku binder connected and authorized."
-								},
-								style = MaterialTheme.typography.labelSmall,
-								color = NemuriTheme.colors.textMuted,
-							)
-						}
-						Switch(
-							checked = isShizukuEnabled,
-							onCheckedChange = onSetShizuku,
-							enabled = isShizukuInstalled,
-							colors = SwitchDefaults.colors(checkedTrackColor = NemuriTheme.colors.cyan),
-						)
-					}
-				}
-			}
+			ExtensionInstallerSettingsCard(
+				isPrivateMode = isPrivateMode,
+				isShizukuEnabled = isShizukuEnabled,
+				isShizukuInstalled = isShizukuInstalled,
+				isShizukuBinderAlive = isShizukuBinderAlive,
+				isShizukuReady = isShizukuReady,
+				isAutoUpdateEnabled = isAutoUpdateEnabled,
+				onSetPrivateMode = onSetPrivateMode,
+				onSetShizuku = onSetShizuku,
+				onRequestShizukuPermission = onRequestShizukuPermission,
+				onSetAutoUpdate = onSetAutoUpdate,
+			)
 		}
 
 		item {

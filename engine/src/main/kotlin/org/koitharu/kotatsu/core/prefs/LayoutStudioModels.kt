@@ -64,3 +64,60 @@ enum class ReaderTapZoneMode(val key: String, val label: String, val description
 			entries.firstOrNull { it.key == key } ?: DEFAULT
 	}
 }
+
+enum class SelectionMenuStyle(val key: String, val label: String) {
+	VISUAL_DIAGRAM("VISUAL", "Visual Diagram Cards"),
+	COMPACT_LIST("COMPACT", "Compact List"),
+	;
+
+	companion object {
+		fun fromKey(key: String?): SelectionMenuStyle =
+			entries.firstOrNull { it.key == key } ?: VISUAL_DIAGRAM
+	}
+}
+
+enum class ReaderScrubberEdge(val key: String, val label: String) {
+	RIGHT("RIGHT", "Right Edge"),
+	LEFT("LEFT", "Left Edge"),
+	BOTTOM("BOTTOM", "Bottom Edge"),
+	TOP("TOP", "Top Edge"),
+	;
+
+	val isVertical: Boolean
+		get() = this == RIGHT || this == LEFT
+
+	companion object {
+		fun fromKey(key: String?): ReaderScrubberEdge =
+			entries.firstOrNull { it.key == key } ?: RIGHT
+	}
+}
+
+enum class DuplicateWinnerStrategy(
+	val key: String,
+	val label: String,
+	val shortLabel: String,
+) {
+	MOST_CHAPTERS("MOST_CHAPTERS", "Keep Entry with Most Chapters", "Most Chapters"),
+	FURTHEST_READ("FURTHEST_READ", "Keep Entry with Furthest Read Progress", "Furthest Read"),
+	HEALTHY_SOURCE("HEALTHY_SOURCE", "Prefer Healthy / Enabled Source", "Healthy Source"),
+	HIGHEST_RATING("HIGHEST_RATING", "Prefer Entry with Highest Rating", "Highest Rating"),
+	;
+
+	companion object {
+		fun fromKey(key: String?): DuplicateWinnerStrategy =
+			entries.firstOrNull { it.key == key } ?: MOST_CHAPTERS
+	}
+}
+
+enum class FeedScreenMode(val key: String, val label: String) {
+	HUB("HUB", "Hub"),
+	UPDATES("UPDATES", "Updates"),
+	GALLERY("GALLERY", "Gallery"),
+	FOR_YOU("FOR_YOU", "For You"),
+	;
+
+	companion object {
+		fun fromKey(key: String?): FeedScreenMode =
+			entries.firstOrNull { it.key == key } ?: HUB
+	}
+}

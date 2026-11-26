@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed as lazyColumnItemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
@@ -89,12 +92,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import eu.kanade.tachiyomi.source.model.Filter
 import org.koitharu.kotatsu.core.nav.AppRouter
+import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.SortOrder
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
+import org.nemuri.app.ui.components.MangaComfortableGridCard
 import org.nemuri.app.ui.components.MangaCompactGridCard
+import org.nemuri.app.ui.components.MangaListRow
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
@@ -114,6 +121,7 @@ fun SourceBrowseScreen(
 ) {
 	val context = LocalContext.current
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val layoutPrefs = LocalLayoutStudioPrefs.current
 
 	LaunchedEffect(sourceName, initialQuery) {
 		viewModel.bind(sourceName, initialQuery)
@@ -126,7 +134,6 @@ fun SourceBrowseScreen(
 		viewModel.onChallengeResolved(success)
 	}
 
-	// Auto-launch CloudFlare or Browser verification once when a source load hits a challenge.
 	var lastLaunchedCfUrl by remember { mutableStateOf<String?>(null) }
 	var lastLaunchedInteractiveUrl by remember { mutableStateOf<String?>(null) }
 
@@ -169,7 +176,7 @@ fun SourceBrowseScreen(
 			.statusBarsPadding()
 			.navigationBarsPadding(),
 	) {
-		// Header Bar
+		// Header Bar (with persisted Grid <-> List toggle)
 		Row(
 			modifier = Modifier
 				.fillMaxWidth()
@@ -327,6 +334,15 @@ fun SourceBrowseScreen(
 				}
 			}
 
+			// Persisted Top-Bar Grid <-> List Toggle
+			IconButton(onClick = viewModel::toggleGridMode) {
+				Icon(
+					imageVector = if (uiState.isGridMode) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
+					contentDescription = if (uiState.isGridMode) "Switch to list view" else "Switch to grid view",
+					tint = NemuriTheme.colors.cyan,
+				)
+			}
+
 			val homeUrl = uiState.homeUrl
 			if (!homeUrl.isNullOrBlank()) {
 				IconButton(
@@ -474,7 +490,8 @@ fun SourceBrowseScreen(
 				)
 			}
 
-			else -> {
+			uiState.isGridMode -> {
+				val useComfortable = layoutPrefs.cardStyle == MangaCardStyle.COMFORTABLE
 				LazyVerticalGrid(
 					columns = GridCells.Adaptive(minSize = 108.dp),
 					modifier = Modifier.fillMaxSize(),
@@ -488,9 +505,74 @@ fun SourceBrowseScreen(
 								viewModel.loadNextPage()
 							}
 						}
-						MangaCompactGridCard(
+						val inLib = manga.id in uiState.favouriteIds
+						val coverKey = "browse-${manga.id}"
+						if (useComfortable) {
+							MangaComfortableGridCard(
+								manga = manga,
+								inLibraryBadge = inLib,
+								sharedCoverKey = coverKey,
+								onClick = {
+									MangaTransferCache.put(manga)
+									onOpenDetails(manga)
+								},
+							)
+						} else {
+							MangaCompactGridCard(
+								manga = manga,
+								inLibraryBadge = inLib,
+								sharedCoverKey = coverKey,
+								onClick = {
+									MangaTransferCache.put(manga)
+									onOpenDetails(manga)
+								},
+							)
+						}
+					}
+
+					if (uiState.isLoadingMore) {
+						item(span = { GridItemSpan(maxLineSpan) }) {
+							BrowsePaginationSpinner()
+						}
+					} else if (uiState.errorMessage != null) {
+						item(span = { GridItemSpan(maxLineSpan) }) {
+							BrowsePaginationRetryRow(
+								message = uiState.errorMessage!!,
+								onRetry = viewModel::loadNextPage,
+							)
+						}
+					}
+				}
+			}
+
+			else -> {
+				LazyColumn(
+					modifier = Modifier.fillMaxSize(),
+					contentPadding = PaddingValues(12.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					lazyColumnItemsIndexed(uiState.items, key = { _, manga -> manga.id }) { index, manga ->
+						if (index >= uiState.items.lastIndex - 6 && uiState.hasMorePages && !uiState.isLoadingMore) {
+							LaunchedEffect(uiState.items.size) {
+								viewModel.loadNextPage()
+							}
+						}
+						val inLib = manga.id in uiState.favouriteIds
+						val authorsText = manga.authors.take(2).joinToString(", ")
+						val subtitle = buildString {
+							if (inLib) append("In Library")
+							if (authorsText.isNotBlank()) {
+								if (isNotEmpty()) append(" • ")
+								append(authorsText)
+							}
+							if (isEmpty()) append(uiState.sourceTitle)
+						}
+						val tagsText = manga.tags.take(4).joinToString(" • ") { it.title }.ifBlank { null }
+						MangaListRow(
 							manga = manga,
-							inLibraryBadge = manga.id in uiState.favouriteIds,
+							subtitle = subtitle,
+							tagsSummary = tagsText,
+							sharedCoverKey = "browse-${manga.id}",
 							onClick = {
 								MangaTransferCache.put(manga)
 								onOpenDetails(manga)
@@ -499,46 +581,13 @@ fun SourceBrowseScreen(
 					}
 
 					if (uiState.isLoadingMore) {
-						item(span = { GridItemSpan(maxLineSpan) }) {
-							Box(
-								modifier = Modifier
-									.fillMaxWidth()
-									.padding(vertical = 18.dp),
-								contentAlignment = Alignment.Center,
-							) {
-								CircularProgressIndicator(
-									color = NemuriTheme.colors.cyan,
-									strokeWidth = 2.5.dp,
-									modifier = Modifier.size(24.dp),
-								)
-							}
-						}
+						item { BrowsePaginationSpinner() }
 					} else if (uiState.errorMessage != null) {
-						item(span = { GridItemSpan(maxLineSpan) }) {
-							Row(
-								modifier = Modifier
-									.fillMaxWidth()
-									.padding(vertical = 10.dp),
-								horizontalArrangement = Arrangement.Center,
-								verticalAlignment = Alignment.CenterVertically,
-							) {
-								Text(
-									text = uiState.errorMessage!!,
-									style = MaterialTheme.typography.bodySmall,
-									color = NemuriTheme.colors.danger,
-									modifier = Modifier.weight(1f),
-								)
-								Spacer(modifier = Modifier.width(8.dp))
-								OutlinedButton(onClick = viewModel::loadNextPage) {
-									Icon(
-										imageVector = Icons.Default.Refresh,
-										contentDescription = null,
-										modifier = Modifier.size(16.dp),
-									)
-									Spacer(modifier = Modifier.width(4.dp))
-									Text("Retry")
-								}
-							}
+						item {
+							BrowsePaginationRetryRow(
+								message = uiState.errorMessage!!,
+								onRetry = viewModel::loadNextPage,
+							)
 						}
 					}
 				}
@@ -626,6 +675,53 @@ fun SourceBrowseScreen(
 					}
 				}
 			}
+		}
+	}
+}
+
+@Composable
+private fun BrowsePaginationSpinner() {
+	Box(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(vertical = 18.dp),
+		contentAlignment = Alignment.Center,
+	) {
+		CircularProgressIndicator(
+			color = NemuriTheme.colors.cyan,
+			strokeWidth = 2.5.dp,
+			modifier = Modifier.size(24.dp),
+		)
+	}
+}
+
+@Composable
+private fun BrowsePaginationRetryRow(
+	message: String,
+	onRetry: () -> Unit,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(vertical = 10.dp),
+		horizontalArrangement = Arrangement.Center,
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Text(
+			text = message,
+			style = MaterialTheme.typography.bodySmall,
+			color = NemuriTheme.colors.danger,
+			modifier = Modifier.weight(1f),
+		)
+		Spacer(modifier = Modifier.width(8.dp))
+		OutlinedButton(onClick = onRetry) {
+			Icon(
+				imageVector = Icons.Default.Refresh,
+				contentDescription = null,
+				modifier = Modifier.size(16.dp),
+			)
+			Spacer(modifier = Modifier.width(4.dp))
+			Text("Retry")
 		}
 	}
 }

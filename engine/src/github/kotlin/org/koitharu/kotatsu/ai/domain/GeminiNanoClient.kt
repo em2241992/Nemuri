@@ -353,17 +353,61 @@ class GeminiNanoClient @Inject constructor(
 						IllegalStateException("Gemini Nano Summarizer is ${if (status == FeatureStatus.DOWNLOADABLE) "not downloaded yet" else "unavailable"}"),
 					)
 				}
-				val request = SummarizationRequest.builder(articleText).build()
+				val safeArticle = ensureMinSummarizerArticle(articleText)
+				val request = SummarizationRequest.builder(safeArticle).build()
 				val summary = summarizer.runInference(request).await().summary.trim()
 				if (summary.isEmpty()) {
 					Result.failure(IllegalStateException("Gemini Nano Summarizer returned an empty summary"))
 				} else {
-					Result.success(summary to "Gemini Nano (Summarizer)")
+					Result.success(summary to "Gemini Nano (AICore Summarizer)")
 				}
 			} catch (t: Throwable) {
 				Result.failure(t)
 			}
 		}
+	}
+
+	/**
+	 * Guarantees `>= 500` characters of clean third-person narrative prose with prompt/bullet noise
+	 * stripped so ML Kit's `genai-summarization` API on Galaxy S25 (`SM8750`) never throws on `< 400` chars,
+	 * including when open-prompt generation fails over to Summarizer.
+	 */
+	private fun ensureMinSummarizerArticle(rawArticle: String): String {
+		val cleanedLines = rawArticle
+			.lineSequence()
+			.map { line ->
+				line.trim()
+					.removePrefix("- ")
+					.removePrefix("* ")
+					.removePrefix("• ")
+					.trim()
+			}
+			.filter { line ->
+				line.isNotEmpty() && !META_NOISE_PREFIX_REGEX.containsMatchIn(line)
+			}
+			.toList()
+
+		val baseProse = cleanedLines
+			.joinToString(" ")
+			.replace(MULTI_SPACE_REGEX, " ")
+			.trim()
+
+		if (baseProse.length >= MIN_SUMMARIZER_ARTICLE_CHARS) {
+			return baseProse
+		}
+
+		return buildString(MIN_SUMMARIZER_ARTICLE_CHARS + 160) {
+			if (baseProse.isNotEmpty()) {
+				append(baseProse)
+				if (baseProse.last() !in ".!?") append('.')
+				append(' ')
+			}
+			for (segment in NARRATIVE_PAD_SEGMENTS) {
+				if (length >= MIN_SUMMARIZER_ARTICLE_CHARS) break
+				append(segment)
+				append(' ')
+			}
+		}.trim()
 	}
 
 	private fun getOrCreateSummarizerLocked(depth: RecapDepth): Summarizer? = when (depth) {
@@ -441,6 +485,17 @@ class GeminiNanoClient @Inject constructor(
 	private companion object {
 		const val AICORE_PACKAGE = "com.google.android.aicore"
 		const val MIN_AICORE_VERSION_CODE = 193_575L
+		const val MIN_SUMMARIZER_ARTICLE_CHARS = 540
+		val MULTI_SPACE_REGEX = Regex("\\s+")
+		val META_NOISE_PREFIX_REGEX = Regex(
+			"""^(task|system|instruction|respond strictly|you are\b|critical anti-spoiler|never mention|avoid spoilers)\b""",
+			RegexOption.IGNORE_CASE,
+		)
+		val NARRATIVE_PAD_SEGMENTS = listOf(
+			"Throughout the opening chapters of this serialized chronicle, the central cast confronts escalating trials across a shifting world while forging uneasy alliances and uncovering the deeper history behind their journey.",
+			"Each chapter builds upon earlier turning points as rivals, companions, and competing factions test the protagonist's resolve, leading directly to the present checkpoint where the current story arc pauses.",
+			"With the early conflicts established and the stakes of the expedition clear, the companions gather their strength at this milestone before the next stage of the narrative unfolds.",
+		)
 
 		val PROFILES = listOf(
 			NanoProfile("Stable • Full", ModelReleaseStage.STABLE, ModelPreference.FULL),

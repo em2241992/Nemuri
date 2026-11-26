@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
@@ -83,8 +84,10 @@ import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.ScreenshotsPolicy
+import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
 import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
@@ -93,6 +96,7 @@ import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.nemuri.app.BuildConfig
 import org.nemuri.app.navigation.SettingsSection
+import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.components.NonWrappingBadgeText
 import org.nemuri.app.ui.components.cornerSafeBadgeInset
 import org.nemuri.app.ui.components.cornerSafeBottomPadding
@@ -109,7 +113,7 @@ fun AppearanceSettingsScreen(
 	onBack: () -> Unit,
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
-	val schemes = remember { ColorScheme.getAvailableList() }
+	val schemes = remember { ColorScheme.nemuriCuratedPalettes }
 
 	SettingsLazyPage(
 		title = SettingsSection.APPEARANCE.title,
@@ -187,10 +191,11 @@ fun AppearanceSettingsScreen(
 									modifier = Modifier
 										.size(12.dp)
 										.clip(CircleShape)
-										.background(dotColor),
+										.background(dotColor)
+										.border(1.dp, NemuriTheme.colors.border, CircleShape),
 								)
 								Text(
-									text = stringResource(scheme.titleResId),
+									text = colorSchemeDisplayLabel(scheme),
 									style = MaterialTheme.typography.labelMedium,
 									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 								)
@@ -386,6 +391,47 @@ fun AppearanceSettingsScreen(
 
 		item {
 			SettingsGroupCard("Navigation Bar & Gestures") {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Navigation Bar Style",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						listOf(
+							false to "Floating Capsule Dock",
+							true to "Classic Bottom Bar",
+						).forEach { (isLegacy, label) ->
+							val selected = state.isLegacyNavigationBar == isLegacy
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setLegacyNavigationBar(isLegacy) },
+							) {
+								Text(
+									text = label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 9.dp, horizontal = 6.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
 				SettingsToggleRow(
 					title = "Compact Navigation Dock",
 					subtitle = "Reduces floating dock pill height for extra vertical screen space",
@@ -424,6 +470,44 @@ fun AppearanceSettingsScreen(
 									style = MaterialTheme.typography.labelMedium,
 									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 									modifier = Modifier.padding(vertical = 8.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Selection Menu Style",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						SelectionMenuStyle.entries.forEach { menuStyle ->
+							val selected = state.selectionMenuStyle == menuStyle
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setSelectionMenuStyle(menuStyle) },
+							) {
+								Text(
+									text = menuStyle.label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 9.dp, horizontal = 6.dp),
 									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
 								)
 							}
@@ -654,6 +738,7 @@ fun ExtensionsSettingsScreen(
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 	var showFilterDialog by remember { mutableStateOf(false) }
 	var showUaDialog by remember { mutableStateOf(false) }
+	var showExtDohDialog by remember { mutableStateOf(false) }
 
 	SettingsLazyPage(
 		title = SettingsSection.EXTENSIONS.title,
@@ -718,8 +803,26 @@ fun ExtensionsSettingsScreen(
 					currentLabel = if (state.mihonUserAgentOverride.isNullOrBlank()) "Default" else "Custom",
 					onClick = { showUaDialog = true },
 				)
+				SettingsRowDivider()
+				SettingsChoiceRow(
+					icon = Icons.Default.Dns,
+					title = "DNS over HTTPS (DoH)",
+					subtitle = "Encrypt DNS queries to bypass ISP domain blocks on sources",
+					currentLabel = dohProviderLabel(state.dnsOverHttps),
+					onClick = { showExtDohDialog = true },
+				)
 			}
 		}
+	}
+
+	if (showExtDohDialog) {
+		SettingsOptionDialog(
+			title = "DNS over HTTPS Provider",
+			options = DoHProvider.entries.map { it to dohProviderLabel(it) },
+			selected = state.dnsOverHttps,
+			onSelect = viewModel::setDoH,
+			onDismiss = { showExtDohDialog = false },
+		)
 	}
 
 	if (showFilterDialog) {
@@ -788,6 +891,7 @@ fun ReadingSettingsScreen(
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 	var showModeDialog by remember { mutableStateOf(false) }
 	var showTapZoneDialog by remember { mutableStateOf(false) }
+	var showScrubberEdgeDialog by remember { mutableStateOf(false) }
 	var showShaderDialog by remember { mutableStateOf(false) }
 	var showAccelDialog by remember { mutableStateOf(false) }
 	val importOnnxLauncher = rememberLauncherForActivityResult(
@@ -860,6 +964,30 @@ fun ReadingSettingsScreen(
 					onClick = { showTapZoneDialog = true },
 				)
 				SettingsRowDivider()
+				SettingsChoiceRow(
+					title = "Reader Scrubber Edge",
+					subtitle = "Default screen edge for the capsule page scrubber (long-press in reader to drag)",
+					currentLabel = state.readerScrubberEdge.label,
+					onClick = { showScrubberEdgeDialog = true },
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Webtoon Panel Gaps",
+					subtitle = "Add 12dp spacing between vertical webtoon blocks",
+					checked = state.isWebtoonGapsEnabled,
+					onCheckedChange = viewModel::setWebtoonGapsEnabled,
+				)
+				SettingsRowDivider()
+				SettingsSliderRow(
+					title = "Default Webtoon Zoom-Out",
+					subtitle = "Horizontal scale inset for wide vertical manhwa strips",
+					valueLabel = "${state.defaultWebtoonZoomOutPercent}%",
+					value = state.defaultWebtoonZoomOutPercent.toFloat(),
+					valueRange = 0f..50f,
+					steps = 9,
+					onValueChange = { viewModel.setDefaultWebtoonZoomOutPercent(it.roundToInt()) },
+				)
+				SettingsRowDivider()
 				SettingsToggleRow(
 					title = "Smart Double-Tap Fill Zoom",
 					subtitle = "Zoom to screen fill width/height when double-tapping a page",
@@ -909,6 +1037,11 @@ fun ReadingSettingsScreen(
 
 		item {
 			SettingsGroupCard("Neural 2x Page Upscaler (ONNX)") {
+				HardwareTelemetryStrip(
+					activeDelegateOverride = state.activeNeuralDelegateLabel,
+					modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+				)
+				SettingsRowDivider()
 				SettingsToggleRow(
 					title = "Enable Neural 2x Upscaling",
 					subtitle = if (state.isNeuralUpscaleSupported) {
@@ -1168,6 +1301,21 @@ fun ReadingSettingsScreen(
 			selected = state.readerTapZoneMode,
 			onSelect = viewModel::setReaderTapZoneMode,
 			onDismiss = { showTapZoneDialog = false },
+		)
+	}
+
+	if (showScrubberEdgeDialog) {
+		SettingsOptionDialog(
+			title = "Reader Scrubber Edge",
+			options = listOf(
+				ReaderScrubberEdge.RIGHT to "Right",
+				ReaderScrubberEdge.LEFT to "Left",
+				ReaderScrubberEdge.BOTTOM to "Bottom",
+				ReaderScrubberEdge.TOP to "Top",
+			),
+			selected = state.readerScrubberEdge,
+			onSelect = viewModel::setReaderScrubberEdge,
+			onDismiss = { showScrubberEdgeDialog = false },
 		)
 	}
 
@@ -1543,7 +1691,7 @@ fun PrivacySettingsScreen(
 				SettingsChoiceRow(
 					title = "Auto-Incognito for 18+ Titles",
 					subtitle = "Automatically protect reading sessions on adult entries",
-					currentLabel = triStateLabel(state.incognitoForNsfw),
+					currentLabel = incognitoNsfwLabel(state.incognitoForNsfw),
 					onClick = { showIncognitoNsfwDialog = true },
 				)
 				SettingsRowDivider()
@@ -1570,7 +1718,7 @@ fun PrivacySettingsScreen(
 					icon = Icons.Default.Dns,
 					title = "DNS over HTTPS (DoH)",
 					subtitle = "Encrypt DNS lookups to bypass ISP DNS blocking",
-					currentLabel = state.dnsOverHttps.name,
+					currentLabel = dohProviderLabel(state.dnsOverHttps),
 					onClick = { showDohDialog = true },
 				)
 				SettingsRowDivider()
@@ -1612,7 +1760,11 @@ fun PrivacySettingsScreen(
 	if (showIncognitoNsfwDialog) {
 		SettingsOptionDialog(
 			title = "Auto-Incognito for 18+",
-			options = TriStateOption.entries.map { it to triStateLabel(it) },
+			options = listOf(
+				TriStateOption.ASK to incognitoNsfwLabel(TriStateOption.ASK),
+				TriStateOption.ENABLED to incognitoNsfwLabel(TriStateOption.ENABLED),
+				TriStateOption.DISABLED to incognitoNsfwLabel(TriStateOption.DISABLED),
+			),
 			selected = state.incognitoForNsfw,
 			onSelect = viewModel::setIncognitoForNsfw,
 			onDismiss = { showIncognitoNsfwDialog = false },
@@ -1632,7 +1784,7 @@ fun PrivacySettingsScreen(
 	if (showDohDialog) {
 		SettingsOptionDialog(
 			title = "DNS over HTTPS Provider",
-			options = DoHProvider.entries.map { it to it.name.replace('_', ' ') },
+			options = DoHProvider.entries.map { it to dohProviderLabel(it) },
 			selected = state.dnsOverHttps,
 			onSelect = viewModel::setDoH,
 			onDismiss = { showDohDialog = false },
@@ -1758,6 +1910,7 @@ private fun ProxyConfigDialog(
 fun AboutSettingsScreen(
 	viewModel: SettingsViewModel,
 	onBack: () -> Unit,
+	onRerunSetupWizard: () -> Unit = { viewModel.rerunSetupWizard() },
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -1789,6 +1942,13 @@ fun AboutSettingsScreen(
 						color = NemuriTheme.colors.textMuted,
 					)
 				}
+				SettingsRowDivider()
+				SettingsActionRow(
+					icon = Icons.Default.AutoAwesome,
+					title = "Re-run Setup Wizard",
+					subtitle = "Reopen the guided Nemuri onboarding & customization wizard",
+					onClick = onRerunSetupWizard,
+				)
 			}
 		}
 
@@ -1837,11 +1997,27 @@ private fun CreditLine(title: String, detail: String) {
 	}
 }
 
+internal fun colorSchemeDisplayLabel(scheme: ColorScheme): String = when (scheme) {
+	ColorScheme.EXPRESSIVE -> "Dynamic M3"
+	ColorScheme.DEFAULT -> "Nemuri Obsidian"
+	ColorScheme.TRUE_AMOLED -> "True AMOLED"
+	ColorScheme.BEDTIME_AMBER -> "Bedtime Warm Amber"
+	ColorScheme.YORHA -> "YoRHa Tactical"
+	ColorScheme.YORHA_VISOR_V2 -> "YoRHa Visor v2"
+	ColorScheme.KYOTO_WASHI -> "Kyoto Washi"
+	ColorScheme.SUIBOKUGA -> "Suibokuga"
+	else -> scheme.name.lowercase().replaceFirstChar { it.uppercase() }
+}
+
 private fun colorSchemeSwatchColor(scheme: ColorScheme): Color = when (scheme) {
-	ColorScheme.DEFAULT, ColorScheme.EXPRESSIVE -> Color(0xFF5CE1E6)
-	ColorScheme.YORHA -> Color(0xFFC8B88A)
-	ColorScheme.KYOTO_WASHI -> Color(0xFFC84B31)
-	ColorScheme.SUIBOKUGA -> Color(0xFF7C98AB)
+	ColorScheme.EXPRESSIVE -> Color(0xFF7DD3FC)
+	ColorScheme.DEFAULT -> Color(0xFF5CE1E6)
+	ColorScheme.TRUE_AMOLED -> Color(0xFF0B0E14)
+	ColorScheme.BEDTIME_AMBER -> Color(0xFFF59E0B)
+	ColorScheme.YORHA -> Color(0xFFD0C59B)
+	ColorScheme.YORHA_VISOR_V2 -> Color(0xFFA7A089)
+	ColorScheme.KYOTO_WASHI -> Color(0xFFE06D53)
+	ColorScheme.SUIBOKUGA -> Color(0xFF8FB0C5)
 	ColorScheme.MIKU -> Color(0xFF4CCAD0)
 	ColorScheme.RENA, ColorScheme.SHANA -> Color(0xFFFF4D6D)
 	ColorScheme.FROG -> Color(0xFF34D399)
@@ -1850,6 +2026,29 @@ private fun colorSchemeSwatchColor(scheme: ColorScheme): Color = when (scheme) {
 	ColorScheme.KANADE, ColorScheme.ITSUKA -> Color(0xFFA78BFA)
 	ColorScheme.LIME -> Color(0xFF84CC16)
 	ColorScheme.AMBER -> Color(0xFFFBBF24)
+}
+
+internal fun dohProviderLabel(provider: DoHProvider): String = when (provider) {
+	DoHProvider.NONE -> "Disabled (System DNS)"
+	DoHProvider.CLOUDFLARE -> "Cloudflare (1.1.1.1)"
+	DoHProvider.GOOGLE -> "Google (8.8.8.8)"
+	DoHProvider.ADGUARD -> "AdGuard DNS"
+	DoHProvider.QUAD9 -> "Quad9 (9.9.9.9)"
+	DoHProvider.ALIDNS -> "AliDNS (223.5.5.5)"
+	DoHProvider.DNSPOD -> "DNSPod (119.29.29.29)"
+	DoHProvider.THREE_SIXTY -> "360 DNS"
+	DoHProvider.QUAD101 -> "Quad101 (101.101.101.101)"
+	DoHProvider.MULLVAD -> "Mullvad DNS"
+	DoHProvider.CONTROLD -> "Control D"
+	DoHProvider.NJALLA -> "Njalla DNS"
+	DoHProvider.SHECAN -> "Shecan DNS"
+	DoHProvider.ZERO_MS -> "0ms DNS"
+}
+
+private fun incognitoNsfwLabel(option: TriStateOption): String = when (option) {
+	TriStateOption.ASK -> "Ask every time"
+	TriStateOption.ENABLED -> "Always enable Incognito"
+	TriStateOption.DISABLED -> "Disabled"
 }
 
 private fun readerModeLabel(mode: ReaderMode): String = when (mode) {

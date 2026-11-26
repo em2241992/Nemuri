@@ -6,6 +6,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,6 +35,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -56,7 +60,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -68,16 +76,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
+import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.ListMode
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
+import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
+import kotlin.math.roundToInt
 import org.koitharu.kotatsu.list.domain.ListSortOrder
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.navigation.MangaTransferCache
@@ -482,99 +499,367 @@ fun LibraryScreen(
 	}
 
 	if (showDisplaySheet) {
+		val isVisualDiagram = layoutPrefs.selectionMenuStyle == SelectionMenuStyle.VISUAL_DIAGRAM
 		NemuriModalSheet(
 			title = "Library Display",
-			subtitle = "${uiState.items.size} title(s)",
+			subtitle = "${uiState.items.size} title(s) • ${effectiveCardStyle.label}",
 			onDismiss = { showDisplaySheet = false },
 		) {
-			Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-				Text(
-					text = "CARD STYLE",
-					style = MaterialTheme.typography.labelSmall,
-					color = NemuriTheme.colors.cyan,
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.verticalScroll(rememberScrollState()),
+				verticalArrangement = Arrangement.spacedBy(14.dp),
+			) {
+				// Header Visual <-> Compact Menu Style Toggle
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Text(
+						text = "CARD STYLE",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.cyan,
+					)
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(999.dp),
+						border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+						modifier = Modifier
+							.clip(RoundedCornerShape(999.dp))
+							.clickable {
+								appSettings.selectionMenuStyle = if (isVisualDiagram) {
+									SelectionMenuStyle.COMPACT_LIST
+								} else {
+									SelectionMenuStyle.VISUAL_DIAGRAM
+								}
+							},
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(5.dp),
+						) {
+							Icon(
+								imageVector = if (isVisualDiagram) Icons.Default.GridView else Icons.Default.ViewList,
+								contentDescription = "Menu style",
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(14.dp),
+							)
+							Text(
+								text = if (isVisualDiagram) "Visual ↔ Compact" else "Compact ↔ Visual",
+								style = MaterialTheme.typography.labelSmall,
+								fontWeight = FontWeight.SemiBold,
+								color = NemuriTheme.colors.cyan,
+							)
+						}
+					}
+				}
+
+				val cardStyleEntries = listOf(
+					Triple(MangaCardStyle.COMPACT, ListMode.GRID, "Compact") to "Corner-Safe Overlay",
+					Triple(MangaCardStyle.COMFORTABLE, ListMode.GRID, "Comfortable") to "Title Below Cover",
+					Triple(MangaCardStyle.DETAILED_LIST, ListMode.LIST, "Detailed") to "Full List Row",
 				)
-				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					listOf(
-						Triple(MangaCardStyle.COMPACT, ListMode.GRID, Icons.Default.GridView) to "Compact",
-						Triple(MangaCardStyle.COMFORTABLE, ListMode.GRID, Icons.Default.ViewAgenda) to "Comfortable",
-						Triple(MangaCardStyle.DETAILED_LIST, ListMode.LIST, Icons.Default.ViewList) to "List Row",
-					).forEach { (triple, label) ->
-						val (style, listMode, icon) = triple
-						val selected = effectiveCardStyle == style
-						Surface(
-							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
-							modifier = Modifier
-								.weight(1f)
-								.border(
-									1.dp,
-									if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-									RoundedCornerShape(12.dp),
-								)
-								.clip(RoundedCornerShape(12.dp))
-								.clickable {
+				if (isVisualDiagram) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						cardStyleEntries.forEach { (triple, sub) ->
+							val (style, listMode, shortLabel) = triple
+							val selected = effectiveCardStyle == style
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(14.dp),
+								border = BorderStroke(
+									width = if (selected) 1.5.dp else 1.dp,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(14.dp))
+									.clickable {
+										appSettings.mangaCardStyle = style
+										appSettings.isTitleOverCover = style != MangaCardStyle.COMFORTABLE
+										viewModel.setListMode(listMode)
+									},
+							) {
+								Column(
+									modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(6.dp),
+								) {
+									CardStyleDiagramCanvas(
+										style = style,
+										selected = selected,
+										modifier = Modifier.size(width = 46.dp, height = 42.dp),
+									)
+									Text(
+										text = shortLabel,
+										style = MaterialTheme.typography.labelMedium,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+										maxLines = 1,
+									)
+									Text(
+										text = sub,
+										style = MaterialTheme.typography.labelSmall,
+										color = NemuriTheme.colors.textMuted,
+										textAlign = TextAlign.Center,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+								}
+							}
+						}
+					}
+				} else {
+					Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+						cardStyleEntries.forEach { (triple, sub) ->
+							val (style, listMode, shortLabel) = triple
+							val selected = effectiveCardStyle == style
+							LibrarySheetCompactRow(
+								label = "$shortLabel — $sub",
+								selected = selected,
+								onClick = {
 									appSettings.mangaCardStyle = style
 									appSettings.isTitleOverCover = style != MangaCardStyle.COMFORTABLE
 									viewModel.setListMode(listMode)
 								},
-						) {
-							Row(
-								modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-								horizontalArrangement = Arrangement.Center,
-								verticalAlignment = Alignment.CenterVertically,
-							) {
-								Icon(icon, null, tint = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary, modifier = Modifier.size(16.dp))
-								Spacer(modifier = Modifier.width(4.dp))
-								Text(
-									text = label,
-									style = MaterialTheme.typography.labelMedium,
-									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
-									maxLines = 1,
-									softWrap = false,
-								)
-							}
+							)
 						}
 					}
 				}
 
 				if (effectiveCardStyle != MangaCardStyle.DETAILED_LIST) {
 					Text(
-						text = if (isLandscape) "LANDSCAPE COLUMNS" else "PORTRAIT COLUMNS",
+						text = "COVER ASPECT RATIO",
 						style = MaterialTheme.typography.labelSmall,
 						color = NemuriTheme.colors.cyan,
 					)
-					val colChoices = if (isLandscape) listOf(4, 5, 6, 7, 8) else listOf(2, 3, 4, 5, 6)
-					Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-						colChoices.forEach { cols ->
-							LibraryChip(
-								label = "$cols",
-								selected = gridColumns == cols,
-								onClick = {
-									if (isLandscape) {
-										viewModel.setLandscapeColumns(cols)
-									} else {
-										viewModel.setPortraitColumns(cols)
+					if (isVisualDiagram) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							CoverAspectRatio.entries.forEach { ratio ->
+								val selected = layoutPrefs.coverAspectRatio == ratio
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(12.dp),
+									border = BorderStroke(
+										width = if (selected) 1.5.dp else 1.dp,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.weight(1f)
+										.clip(RoundedCornerShape(12.dp))
+										.clickable { appSettings.coverAspectRatio = ratio },
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(10.dp),
+									) {
+										AspectRatioDiagramCanvas(
+											ratio = ratio,
+											selected = selected,
+											modifier = Modifier.size(width = 28.dp, height = 34.dp),
+										)
+										Text(
+											text = ratio.label,
+											style = MaterialTheme.typography.labelMedium,
+											fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+											color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+											maxLines = 1,
+										)
 									}
-								},
-							)
+								}
+							}
+						}
+					} else {
+						Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+							CoverAspectRatio.entries.forEach { ratio ->
+								LibraryChip(
+									label = ratio.label,
+									selected = layoutPrefs.coverAspectRatio == ratio,
+									onClick = { appSettings.coverAspectRatio = ratio },
+								)
+							}
 						}
 					}
+				}
 
-					Text(
-						text = "CORNER RADIUS",
-						style = MaterialTheme.typography.labelSmall,
-						color = NemuriTheme.colors.cyan,
-					)
+				Text(
+					text = "GRID GUTTER DENSITY",
+					style = MaterialTheme.typography.labelSmall,
+					color = NemuriTheme.colors.cyan,
+				)
+				if (isVisualDiagram) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						GridGutterDensity.entries.forEach { density ->
+							val selected = layoutPrefs.gutterDensity == density
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(
+									width = if (selected) 1.5.dp else 1.dp,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(12.dp))
+									.clickable { appSettings.gridGutterDensity = density },
+							) {
+								Column(
+									modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(6.dp),
+								) {
+									GutterDensityDiagramCanvas(
+										density = density,
+										selected = selected,
+										modifier = Modifier.size(34.dp),
+									)
+									Text(
+										text = density.label,
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										maxLines = 1,
+									)
+								}
+							}
+						}
+					}
+				} else {
 					Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-						listOf(0, 8, 12, 16, 20).forEach { radius ->
+						GridGutterDensity.entries.forEach { density ->
 							LibraryChip(
-								label = "${radius}dp",
-								selected = layoutPrefs.cardCornerRadiusDp == radius,
-								onClick = { appSettings.cardCornerRadiusDp = radius },
+								label = "${density.label} (${density.spacingDp}dp)",
+								selected = layoutPrefs.gutterDensity == density,
+								onClick = { appSettings.gridGutterDensity = density },
 							)
 						}
 					}
 				}
+
+				if (effectiveCardStyle != MangaCardStyle.DETAILED_LIST) {
+					val minCols = if (isLandscape) 4 else 2
+					val maxCols = if (isLandscape) 9 else 6
+					Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Text(
+								text = if (isLandscape) "LANDSCAPE COLUMNS / CARD SIZE" else "PORTRAIT COLUMNS / CARD SIZE",
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.cyan,
+							)
+							Text(
+								text = "$gridColumns cols",
+								style = MaterialTheme.typography.labelLarge,
+								color = NemuriTheme.colors.cyan,
+							)
+						}
+						Slider(
+							value = gridColumns.coerceIn(minCols, maxCols).toFloat(),
+							onValueChange = { raw ->
+								val cols = raw.roundToInt().coerceIn(minCols, maxCols)
+								if (isLandscape) {
+									viewModel.setLandscapeColumns(cols)
+								} else {
+									viewModel.setPortraitColumns(cols)
+								}
+							},
+							valueRange = minCols.toFloat()..maxCols.toFloat(),
+							steps = (maxCols - minCols - 1).coerceAtLeast(0),
+							colors = SliderDefaults.colors(
+								thumbColor = NemuriTheme.colors.cyan,
+								activeTrackColor = NemuriTheme.colors.cyan,
+								inactiveTrackColor = NemuriTheme.colors.surfaceElevated,
+							),
+						)
+					}
+				}
+
+				Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text(
+								text = "CORNER RADIUS",
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.cyan,
+							)
+							Text(
+								text = "Automatically adjusts corner-safe title & badge insets",
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.textMuted,
+							)
+						}
+						Text(
+							text = "${layoutPrefs.cardCornerRadiusDp} dp",
+							style = MaterialTheme.typography.labelLarge,
+							color = NemuriTheme.colors.cyan,
+						)
+					}
+					Slider(
+						value = layoutPrefs.cardCornerRadiusDp.coerceIn(0, 24).toFloat(),
+						onValueChange = { appSettings.cardCornerRadiusDp = it.roundToInt().coerceIn(0, 24) },
+						valueRange = 0f..24f,
+						steps = 11,
+						colors = SliderDefaults.colors(
+							thumbColor = NemuriTheme.colors.cyan,
+							activeTrackColor = NemuriTheme.colors.cyan,
+							inactiveTrackColor = NemuriTheme.colors.surfaceElevated,
+						),
+					)
+				}
+
+				HorizontalDivider(color = NemuriTheme.colors.border)
+
+				Text(
+					text = "CARD BADGES & OVERLAYS",
+					style = MaterialTheme.typography.labelSmall,
+					color = NemuriTheme.colors.cyan,
+				)
+				LibraryBadgeToggleRow(
+					title = "Unread Count",
+					subtitle = "Show unread chapter pill / caught-up indicator",
+					checked = layoutPrefs.showUnreadBadge,
+					onCheckedChange = { appSettings.showUnreadBadge = it },
+				)
+				LibraryBadgeToggleRow(
+					title = "Downloaded",
+					subtitle = "Show offline saved badge on library covers",
+					checked = layoutPrefs.showDownloadedBadge,
+					onCheckedChange = { appSettings.showDownloadedBadge = it },
+				)
+				LibraryBadgeToggleRow(
+					title = "Source Badge",
+					subtitle = "Show compact source monogram on top-right of covers",
+					checked = layoutPrefs.showSourceBadge,
+					onCheckedChange = { appSettings.showSourceBadge = it },
+				)
+				LibraryBadgeToggleRow(
+					title = "Bottom Reading Progress Bar",
+					subtitle = "Show subtle progress bar along bottom edge of cards",
+					checked = layoutPrefs.showBottomProgressBar,
+					onCheckedChange = { appSettings.showBottomProgressBar = it },
+				)
+
+				HorizontalDivider(color = NemuriTheme.colors.border)
 
 				Text(
 					text = "SORT BY",
@@ -591,35 +876,11 @@ fun LibraryScreen(
 					ListSortOrder.TOTAL_CHAPTERS to "Total Chapters",
 				)
 				sortChoices.forEach { (order, label) ->
-					val selected = uiState.sortOrder == order
-					Surface(
-						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(12.dp),
-						modifier = Modifier
-							.fillMaxWidth()
-							.border(
-								1.dp,
-								if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-								RoundedCornerShape(12.dp),
-							)
-							.clip(RoundedCornerShape(12.dp))
-							.clickable { viewModel.setSortOrder(order) },
-					) {
-						Row(
-							modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.SpaceBetween,
-						) {
-							Text(
-								text = label,
-								style = MaterialTheme.typography.titleSmall,
-								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
-							)
-							if (selected) {
-								Icon(Icons.Default.Check, null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(18.dp))
-							}
-						}
-					}
+					LibrarySheetCompactRow(
+						label = label,
+						selected = uiState.sortOrder == order,
+						onClick = { viewModel.setSortOrder(order) },
+					)
 				}
 
 				if (uiState.selectedCategoryId != LibraryViewModel.ALL_CATEGORIES_ID) {
@@ -797,5 +1058,212 @@ private fun LibraryChip(
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
 		)
+	}
+}
+
+@Composable
+private fun LibrarySheetCompactRow(
+	label: String,
+	selected: Boolean,
+	onClick: () -> Unit,
+) {
+	Surface(
+		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+		shape = RoundedCornerShape(12.dp),
+		modifier = Modifier
+			.fillMaxWidth()
+			.border(
+				1.dp,
+				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+				RoundedCornerShape(12.dp),
+			)
+			.clip(RoundedCornerShape(12.dp))
+			.clickable(onClick = onClick),
+	) {
+		Row(
+			modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.SpaceBetween,
+		) {
+			Text(
+				text = label,
+				style = MaterialTheme.typography.titleSmall,
+				color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+			)
+			if (selected) {
+				Icon(Icons.Default.Check, null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(18.dp))
+			}
+		}
+	}
+}
+
+@Composable
+private fun LibraryBadgeToggleRow(
+	title: String,
+	subtitle: String,
+	checked: Boolean,
+	onCheckedChange: (Boolean) -> Unit,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(10.dp))
+			.clickable { onCheckedChange(!checked) }
+			.padding(vertical = 2.dp),
+		horizontalArrangement = Arrangement.SpaceBetween,
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+			Text(
+				text = title,
+				style = MaterialTheme.typography.bodyMedium,
+				fontWeight = FontWeight.Medium,
+				color = NemuriTheme.colors.textPrimary,
+			)
+			Text(
+				text = subtitle,
+				style = MaterialTheme.typography.labelSmall,
+				color = NemuriTheme.colors.textMuted,
+			)
+		}
+		Switch(
+			checked = checked,
+			onCheckedChange = onCheckedChange,
+			colors = SwitchDefaults.colors(
+				checkedThumbColor = NemuriTheme.colors.onCyan,
+				checkedTrackColor = NemuriTheme.colors.cyan,
+			),
+		)
+	}
+}
+
+@Composable
+private fun CardStyleDiagramCanvas(
+	style: MangaCardStyle,
+	selected: Boolean,
+	modifier: Modifier = Modifier,
+) {
+	val accent = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary
+	val frame = if (selected) NemuriTheme.colors.cyan.copy(alpha = 0.55f) else NemuriTheme.colors.border
+	Canvas(modifier = modifier) {
+		val stroke = Stroke(width = 1.4.dp.toPx())
+		when (style) {
+			MangaCardStyle.COMPACT -> {
+				val w = size.width * 0.62f
+				val h = size.height * 0.90f
+				val left = (size.width - w) * 0.5f
+				val top = (size.height - h) * 0.5f
+				drawRoundRect(frame, Offset(left, top), Size(w, h), CornerRadius(4.dp.toPx()), stroke)
+				drawRoundRect(
+					color = accent.copy(alpha = 0.45f),
+					topLeft = Offset(left + 3.dp.toPx(), top + h * 0.68f),
+					size = Size(w - 6.dp.toPx(), h * 0.22f),
+					cornerRadius = CornerRadius(2.dp.toPx()),
+				)
+			}
+			MangaCardStyle.COMFORTABLE -> {
+				val w = size.width * 0.60f
+				val coverH = size.height * 0.68f
+				val left = (size.width - w) * 0.5f
+				drawRoundRect(frame, Offset(left, size.height * 0.04f), Size(w, coverH), CornerRadius(4.dp.toPx()), stroke)
+				drawRoundRect(
+					color = accent,
+					topLeft = Offset(left, size.height * 0.80f),
+					size = Size(w * 0.90f, 3.dp.toPx()),
+					cornerRadius = CornerRadius(1.5.dp.toPx()),
+				)
+				drawRoundRect(
+					color = accent.copy(alpha = 0.55f),
+					topLeft = Offset(left, size.height * 0.90f),
+					size = Size(w * 0.62f, 2.5.dp.toPx()),
+					cornerRadius = CornerRadius(1.5.dp.toPx()),
+				)
+			}
+			MangaCardStyle.DETAILED_LIST -> {
+				val rowH = size.height * 0.40f
+				listOf(size.height * 0.06f, size.height * 0.54f).forEach { y ->
+					drawRoundRect(frame, Offset(0f, y), Size(size.width, rowH), CornerRadius(3.dp.toPx()), stroke)
+					val thumbW = rowH * 0.68f
+					drawRoundRect(
+						color = accent.copy(alpha = 0.45f),
+						topLeft = Offset(3.dp.toPx(), y + 2.5.dp.toPx()),
+						size = Size(thumbW, rowH - 5.dp.toPx()),
+						cornerRadius = CornerRadius(2.dp.toPx()),
+					)
+					drawRoundRect(
+						color = accent,
+						topLeft = Offset(thumbW + 7.dp.toPx(), y + rowH * 0.30f),
+						size = Size(size.width - thumbW - 11.dp.toPx(), 2.5.dp.toPx()),
+						cornerRadius = CornerRadius(1.2.dp.toPx()),
+					)
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun AspectRatioDiagramCanvas(
+	ratio: CoverAspectRatio,
+	selected: Boolean,
+	modifier: Modifier = Modifier,
+) {
+	val accent = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary
+	Canvas(modifier = modifier) {
+		val h = size.height * 0.90f
+		val w = (h * ratio.ratio).coerceAtMost(size.width * 0.94f)
+		val left = (size.width - w) * 0.5f
+		val top = (size.height - h) * 0.5f
+		drawRoundRect(
+			color = accent.copy(alpha = 0.22f),
+			topLeft = Offset(left, top),
+			size = Size(w, h),
+			cornerRadius = CornerRadius(3.dp.toPx()),
+		)
+		drawRoundRect(
+			color = accent,
+			topLeft = Offset(left, top),
+			size = Size(w, h),
+			cornerRadius = CornerRadius(3.dp.toPx()),
+			style = Stroke(width = 1.4.dp.toPx()),
+		)
+	}
+}
+
+@Composable
+private fun GutterDensityDiagramCanvas(
+	density: GridGutterDensity,
+	selected: Boolean,
+	modifier: Modifier = Modifier,
+) {
+	val accent = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary
+	Canvas(modifier = modifier) {
+		val gap = when (density) {
+			GridGutterDensity.COMPACT -> 2.dp.toPx()
+			GridGutterDensity.STANDARD -> 4.5.dp.toPx()
+			GridGutterDensity.RELAXED -> 7.dp.toPx()
+		}
+		val pad = gap * 0.7f
+		val cellW = (size.width - pad * 2f - gap) * 0.5f
+		val cellH = (size.height - pad * 2f - gap) * 0.5f
+		for (r in 0..1) {
+			for (c in 0..1) {
+				val x = pad + c * (cellW + gap)
+				val y = pad + r * (cellH + gap)
+				drawRoundRect(
+					color = accent.copy(alpha = if (selected) 0.45f else 0.25f),
+					topLeft = Offset(x, y),
+					size = Size(cellW, cellH),
+					cornerRadius = CornerRadius(2.dp.toPx()),
+				)
+				drawRoundRect(
+					color = accent,
+					topLeft = Offset(x, y),
+					size = Size(cellW, cellH),
+					cornerRadius = CornerRadius(2.dp.toPx()),
+					style = Stroke(width = 1.1.dp.toPx()),
+				)
+			}
+		}
 	}
 }

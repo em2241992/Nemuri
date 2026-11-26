@@ -50,10 +50,16 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Locale
 import java.util.zip.ZipException
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
+import javax.net.ssl.SSLProtocolException
 
 private const val MSG_NO_SPACE_LEFT = "No space left on device"
 private const val MSG_CONNECTION_RESET = "Connection reset"
 private const val IMAGE_FORMAT_NOT_SUPPORTED = "Image format not supported"
+private const val MSG_TLS_OR_SNI_BLOCK =
+    "TLS connection blocked or corrupted (possible ISP DNS/SNI block). Try enabling DNS over HTTPS (Cloudflare 1.1.1.1) in Settings → Privacy & Security."
 
 private val FNFE_MESSAGE_REGEX = Regex("^(/[^\\s:]+)?.+?\\s([A-Z]{2,6})?\\s.+$")
 
@@ -120,10 +126,11 @@ private fun Throwable.getDisplayMessageOrNull(resources: Resources): String? = w
     is ContentUnavailableException -> message
 
     is ParseException -> shortMessage
+    is SSLException -> MSG_TLS_OR_SNI_BLOCK
     is ConnectException,
     is UnknownHostException,
     is NoRouteToHostException,
-    is SocketTimeoutException -> resources.getString(R.string.network_error)
+    is SocketTimeoutException -> if (isTlsOrSniBlock()) MSG_TLS_OR_SNI_BLOCK else resources.getString(R.string.network_error)
 
     is ImageDecodeException -> {
         val type = format?.substringBefore('/')
@@ -149,13 +156,18 @@ private fun Throwable.getDisplayMessageOrNull(resources: Resources): String? = w
     is HttpException -> getHttpDisplayMessage(response.code, resources)
     is HttpStatusException -> getHttpDisplayMessage(statusCode, resources)
 
-    else -> mapDisplayMessage(message, resources) ?: message
+    else -> if (isTlsOrSniBlock()) {
+        MSG_TLS_OR_SNI_BLOCK
+    } else {
+        mapDisplayMessage(message, resources) ?: message
+    }
 }.takeUnless { it.isNullOrBlank() }
 
 @DrawableRes
 fun Throwable.getDisplayIcon(): Int = when (this) {
     is AuthRequiredException -> R.drawable.ic_auth_key_large
     is CloudFlareProtectedException -> R.drawable.ic_bot_large
+    is SSLException,
     is UnknownHostException,
     is SocketTimeoutException,
     is ConnectException,
@@ -165,7 +177,7 @@ fun Throwable.getDisplayIcon(): Int = when (this) {
     is CloudFlareBlockedException -> R.drawable.ic_denied_large
 
     is InteractiveActionRequiredException -> R.drawable.ic_interaction_large
-    else -> R.drawable.ic_error_large
+    else -> if (isTlsOrSniBlock()) R.drawable.ic_plug_large else R.drawable.ic_error_large
 }
 
 fun Throwable.getCauseUrl(): String? = when (this) {
@@ -195,6 +207,7 @@ private fun getHttpDisplayMessage(statusCode: Int, resources: Resources): String
 
 private fun mapDisplayMessage(msg: String?, resources: Resources): String? = when {
     msg.isNullOrEmpty() -> null
+    msg.isTlsOrSniBlockMessage() -> MSG_TLS_OR_SNI_BLOCK
     msg.contains(MSG_NO_SPACE_LEFT) -> resources.getString(R.string.error_no_space_left)
     msg.contains(IMAGE_FORMAT_NOT_SUPPORTED) -> resources.getString(R.string.error_corrupted_file)
     msg == MSG_CONNECTION_RESET -> resources.getString(R.string.error_connection_reset)
@@ -206,11 +219,41 @@ private fun mapDisplayMessage(msg: String?, resources: Resources): String? = whe
     else -> null
 }
 
+fun Throwable.isTlsOrSniBlock(): Boolean {
+    var cur: Throwable? = this
+    var depth = 0
+    while (cur != null && depth <= 16) {
+        if (cur is SSLHandshakeException ||
+            cur is SSLProtocolException ||
+            cur is SSLPeerUnverifiedException ||
+            cur is SSLException
+        ) {
+            return true
+        }
+        if (cur.message.orEmpty().isTlsOrSniBlockMessage()) {
+            return true
+        }
+        cur = cur.cause
+        depth++
+    }
+    return false
+}
+
+private fun String.isTlsOrSniBlockMessage(): Boolean {
+    if (isEmpty()) return false
+    return contains("Unable to parse TLS packet header", ignoreCase = true) ||
+        contains("SSL handshake", ignoreCase = true) ||
+        contains("WRONG_VERSION_NUMBER", ignoreCase = true) ||
+        contains("TLSV1_ALERT", ignoreCase = true)
+}
+
 fun Throwable.isNetworkError(): Boolean {
     return this is UnknownHostException
         || this is SocketTimeoutException
         || this is StreamResetException
         || this is SocketException
+        || this is SSLException
+        || isTlsOrSniBlock()
         || this is HttpException && response.code == HttpURLConnection.HTTP_GATEWAY_TIMEOUT
 }
 

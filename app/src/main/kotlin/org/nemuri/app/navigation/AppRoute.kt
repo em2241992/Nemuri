@@ -28,6 +28,7 @@ enum class SettingsSection(val title: String) {
 }
 
 sealed interface AppDestination {
+	data object Onboarding : AppDestination
 	data class TabRoot(val tab: AppTab) : AppDestination
 	data class ExtensionsCatalog(val initialRepoUrl: String? = null) : AppDestination
 	data class SourceBrowse(val sourceName: String, val initialQuery: String? = null) : AppDestination

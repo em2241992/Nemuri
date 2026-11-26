@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.util.Log
 import android.os.Bundle
 import android.os.Build
+import android.os.Process
 import androidx.core.content.pm.PackageInfoCompat
 import dagger.Lazy
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -20,12 +21,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.core.logs.AppLogger
 import org.koitharu.kotatsu.core.logs.breadcrumb
+import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.mihon.compat.KotoInjektBridge
 import org.koitharu.kotatsu.mihon.model.MihonExtensionInfo
 import org.koitharu.kotatsu.mihon.model.MihonLoadResult
 import eu.kanade.tachiyomi.util.lang.Hash
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
 import org.koitharu.kotatsu.core.model.ContentWarning
@@ -102,7 +105,17 @@ class MihonExtensionLoader @Inject constructor(
 			} else {
 				PackageManager.GET_SIGNATURES
 			}
-			getSignatures(context.packageManager.getPackageInfo(pkgName, flags))
+			val pkgInfo = try {
+				context.packageManager.getPackageInfo(pkgName, flags)
+			} catch (_: PackageManager.NameNotFoundException) {
+				val privateFile = File(getPrivateExtensionDir(context), "$pkgName.$PRIVATE_EXTENSION_EXT")
+				if (privateFile.isFile) {
+					context.packageManager.getPackageArchiveInfo(privateFile.absolutePath, flags)
+				} else {
+					null
+				}
+			} ?: return@runCatching emptyList()
+			getSignatures(pkgInfo)
 		}.getOrDefault(emptyList())
 		// Keep the accepted ABI window bounded by Mihon's source-api. Loading a hypothetical newer
 		// APK and hoping its missing host symbols are unused turns a clear incompatibility into a
@@ -115,6 +128,9 @@ class MihonExtensionLoader @Inject constructor(
 
 		fun getPrivateExtensionDir(context: Context): File =
 			File(context.filesDir, PRIVATE_EXTENSION_DIR)
+
+		fun getPrivateNativeLibDir(context: Context, pkgName: String): File =
+			File(getPrivateExtensionDir(context), "lib/$pkgName")
 
 		fun isPrivateExtensionInstalled(context: Context, pkgName: String): Boolean =
 			File(getPrivateExtensionDir(context), "$pkgName.$PRIVATE_EXTENSION_EXT").isFile
@@ -193,6 +209,11 @@ class MihonExtensionLoader @Inject constructor(
 				}
 				target.setReadOnly()
 				backup.delete()
+				runCatching {
+					extractPrivateNativeLibraries(target, getPrivateNativeLibDir(context, pkgInfo.packageName))
+				}.onFailure {
+					Log.w(TAG, "Failed to extract native libraries for ${pkgInfo.packageName}", it)
+				}
 				Log.i(TAG, "Private extension installed: ${pkgInfo.packageName}")
 				true
 			} catch (e: Exception) {
@@ -210,6 +231,55 @@ class MihonExtensionLoader @Inject constructor(
 
 		fun uninstallPrivateExtension(context: Context, pkgName: String) {
 			File(getPrivateExtensionDir(context), "$pkgName.$PRIVATE_EXTENSION_EXT").delete()
+			runCatching { getPrivateNativeLibDir(context, pkgName).deleteRecursively() }
+		}
+
+		private fun extractPrivateNativeLibraries(apkFile: File, nativeLibDir: File) {
+			val preferredAbis = runCatching {
+				val bitMatched = if (Process.is64Bit()) {
+					Build.SUPPORTED_64_BIT_ABIS
+				} else {
+					Build.SUPPORTED_32_BIT_ABIS
+				}
+				if (bitMatched.isNotEmpty()) bitMatched else Build.SUPPORTED_ABIS
+			}.getOrDefault(Build.SUPPORTED_ABIS)
+
+			nativeLibDir.deleteRecursively()
+			nativeLibDir.mkdirs()
+			if (!apkFile.isFile) return
+
+			ZipFile(apkFile).use { zip ->
+				val entriesByAbi = HashMap<String, MutableList<java.util.zip.ZipEntry>>()
+				val entries = zip.entries()
+				while (entries.hasMoreElements()) {
+					val entry = entries.nextElement()
+					if (entry.isDirectory) continue
+					val name = entry.name
+					if (!name.startsWith("lib/") || !name.endsWith(".so")) continue
+					val parts = name.split('/')
+					if (parts.size != 3) continue
+					val abi = parts[1]
+					val soName = parts[2]
+					if (soName.isEmpty() || ".." in soName) continue
+					entriesByAbi.getOrPut(abi) { ArrayList() }.add(entry)
+				}
+				if (entriesByAbi.isEmpty()) return
+				val chosenAbi = preferredAbis.firstOrNull { it in entriesByAbi } ?: return
+				val chosenEntries = entriesByAbi[chosenAbi].orEmpty()
+				val canonicalBase = nativeLibDir.canonicalPath + File.separator
+				for (entry in chosenEntries) {
+					val soName = entry.name.substringAfterLast('/')
+					val outFile = File(nativeLibDir, soName)
+					if (!outFile.canonicalPath.startsWith(canonicalBase)) continue
+					zip.getInputStream(entry).use { input ->
+						outFile.outputStream().buffered().use { output ->
+							input.copyTo(output)
+						}
+					}
+					outFile.setReadable(true, false)
+					outFile.setExecutable(true, false)
+				}
+			}
 		}
 
 		private fun copyAndSetReadOnly(source: File, target: File) {
@@ -332,89 +402,158 @@ class MihonExtensionLoader @Inject constructor(
 	suspend fun loadExtensions(context: Context, privateMode: Boolean = false): List<MihonLoadResult> = withContext(Dispatchers.IO) {
 		injektBridge.get().initialize()
 		val previous = if (AppLogger.isRecording) loadedExtensions.mapValues { it.value.result } else emptyMap()
-		val results = if (privateMode) {
-			loadPrivateExtensions(context)
-		} else {
-			getInstalledExtensionPackages(context.packageManager)
-				.map { pkgInfo -> async(loadDispatcher) { loadExtension(context, pkgInfo, isShared = true) } }
-				.awaitAll()
+		val osPackages = getInstalledExtensionPackages(context.packageManager)
+		val results = coroutineScope {
+			if (privateMode) {
+				val privateResults = loadPrivateExtensions(context)
+				val privatePkgNames = HashSet<String>(privateResults.size * 2).apply {
+					getPrivateExtensionDir(context).listFiles()
+						?.filter { it.isFile && it.extension == PRIVATE_EXTENSION_EXT }
+						?.forEach { add(it.nameWithoutExtension) }
+					for (res in privateResults) {
+						when (res) {
+							is MihonLoadResult.Success -> add(res.pkgName)
+							is MihonLoadResult.Error -> add(res.pkgName)
+							is MihonLoadResult.Untrusted -> add(res.pkgName)
+						}
+					}
+				}
+				val nonShadowedOs = osPackages
+					.filterNot { it.packageName in privatePkgNames }
+					.map { pkgInfo -> async(loadDispatcher) { loadExtension(context, pkgInfo, isShared = true) } }
+					.awaitAll()
+				privateResults + nonShadowedOs
+			} else {
+				val osResults = osPackages
+					.map { pkgInfo -> async(loadDispatcher) { loadExtension(context, pkgInfo, isShared = true) } }
+					.awaitAll()
+				if (hasPrivateExtensions(context)) {
+					val osPkgNames = osPackages.mapTo(HashSet(osPackages.size)) { it.packageName }
+					val fallbackPrivate = loadPrivateExtensions(context, excludedPkgNames = osPkgNames)
+					osResults + fallbackPrivate
+				} else {
+					osResults
+				}
+			}
 		}
 		// Forget uninstalled (or now failing) extensions so their class loaders can be collected.
 		val loaded = results.mapNotNullTo(HashSet()) { (it as? MihonLoadResult.Success)?.pkgName }
 		loadedExtensions.keys.retainAll(loaded)
 		breadcrumb(TAG) {
 			val reused = results.count { it is MihonLoadResult.Success && previous[it.pkgName] === it }
-			"Extensions loaded (${if (privateMode) "private" else "installed"}): ${loaded.size} ok " +
+			"Extensions loaded (${if (privateMode) "private+os" else "os+private"}): ${loaded.size} ok " +
 				"($reused reused, ${loaded.size - reused} new), ${results.size - loaded.size} failed"
 		}
 		results
 	}
 
-	private suspend fun loadPrivateExtensions(context: Context): List<MihonLoadResult> = coroutineScope {
+	private suspend fun loadPrivateExtensions(
+		context: Context,
+		excludedPkgNames: Set<String> = emptySet(),
+	): List<MihonLoadResult> = coroutineScope {
 		val pkgManager = context.packageManager
 		val privateDir = getPrivateExtensionDir(context)
 		val privateFiles = privateDir.listFiles()
-			?.filter { it.isFile && it.extension == PRIVATE_EXTENSION_EXT }
+			?.filter {
+				it.isFile &&
+					it.extension == PRIVATE_EXTENSION_EXT &&
+					it.nameWithoutExtension !in excludedPkgNames
+			}
 			?: emptyList()
 		if (privateFiles.isEmpty()) return@coroutineScope emptyList()
-		privateFiles.map { file ->
+		privateFiles.mapNotNull { file ->
 			async(loadDispatcher) {
 				if (file.canWrite()) file.setReadOnly()
 				val pkgInfo = pkgManager.getPackageArchiveInfo(file.absolutePath, packageFlags)
 				if (pkgInfo == null || !isPackageAnExtension(pkgInfo)) {
 					return@async buildLoggedError(file.nameWithoutExtension, "Failed to read private extension APK")
 				}
-				pkgInfo.applicationInfo?.fixBasePaths(file.absolutePath)
+				if (pkgInfo.packageName in excludedPkgNames) {
+					return@async null
+				}
+				pkgInfo.applicationInfo?.fixBasePaths(context, file.absolutePath, pkgInfo.packageName)
 				loadExtension(context, pkgInfo, isShared = false)
 			}
-		}.awaitAll()
+		}.awaitAll().filterNotNull()
 	}
 
 	/**
-	 * Load a single Mihon extension by package name.
+	 * Load a single Mihon extension by package name, supporting both OS-installed packages
+	 * and app-isolated `.ext` archives.
 	 */
 	suspend fun loadExtension(context: Context, packageName: String): MihonLoadResult? = withContext(Dispatchers.IO) {
 		injektBridge.get().initialize()
 		val pkgManager = context.packageManager
-		val pkgInfo = try {
-			@Suppress("DEPRECATION")
-			pkgManager.getPackageInfo(
-				packageName,
-				PackageManager.GET_META_DATA or
-					PackageManager.GET_CONFIGURATIONS or
-					PackageManager.GET_SIGNATURES or
-					if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else 0,
-			)
-		} catch (e: PackageManager.NameNotFoundException) {
-			null
-		} ?: return@withContext null
+		val privateFile = File(getPrivateExtensionDir(context), "$packageName.$PRIVATE_EXTENSION_EXT")
+		val preferPrivate = privateFile.isFile && runCatching {
+			AppSettings(context.applicationContext).isPrivateInstallEnabled
+		}.getOrDefault(false)
 
-		if (!isPackageAnExtension(pkgInfo)) {
-			return@withContext null
+		if (preferPrivate) {
+			loadSinglePrivateFile(context, pkgManager, privateFile)?.let { return@withContext it }
 		}
-		loadExtension(context, pkgInfo)
+
+		val osPkgInfo = try {
+			@Suppress("DEPRECATION")
+			pkgManager.getPackageInfo(packageName, packageFlags)
+		} catch (_: PackageManager.NameNotFoundException) {
+			null
+		}
+		if (osPkgInfo != null && isPackageAnExtension(osPkgInfo)) {
+			return@withContext loadExtension(context, osPkgInfo, isShared = true)
+		}
+
+		if (privateFile.isFile && !preferPrivate) {
+			return@withContext loadSinglePrivateFile(context, pkgManager, privateFile)
+		}
+		null
+	}
+
+	private fun loadSinglePrivateFile(
+		context: Context,
+		pkgManager: PackageManager,
+		privateFile: File,
+	): MihonLoadResult? {
+		if (!privateFile.isFile) return null
+		if (privateFile.canWrite()) privateFile.setReadOnly()
+		val pkgInfo = pkgManager.getPackageArchiveInfo(privateFile.absolutePath, packageFlags) ?: return null
+		if (!isPackageAnExtension(pkgInfo)) return null
+		pkgInfo.applicationInfo?.fixBasePaths(context, privateFile.absolutePath, pkgInfo.packageName)
+		return loadExtension(context, pkgInfo, isShared = false)
 	}
 
 	/**
-	 * Get list of installed Mihon extensions (metadata only, without loading).
+	 * Get list of installed Mihon extensions (metadata only, without loading), merging
+	 * private `.ext` files and OS-installed extension packages without losing either on mode toggle.
 	 */
 	fun getInstalledExtensions(context: Context, privateMode: Boolean = false): List<MihonExtensionInfo> {
 		val pkgManager = context.packageManager
-		return if (privateMode) {
+		val osInfos = getInstalledExtensionPackages(pkgManager)
+			.mapNotNull { pkgInfo -> extractExtensionInfo(pkgInfo, pkgManager, isShared = true) }
+
+		val shouldScanPrivate = privateMode || hasPrivateExtensions(context)
+		val privateInfos = if (shouldScanPrivate) {
 			val privateDir = getPrivateExtensionDir(context)
 			privateDir.listFiles()
 				?.filter { it.isFile && it.extension == PRIVATE_EXTENSION_EXT }
 				?.mapNotNull { file ->
 					if (file.canWrite()) file.setReadOnly()
 					val pkgInfo = pkgManager.getPackageArchiveInfo(file.absolutePath, packageFlags) ?: return@mapNotNull null
-					pkgInfo.applicationInfo?.fixBasePaths(file.absolutePath)
+					pkgInfo.applicationInfo?.fixBasePaths(context, file.absolutePath, pkgInfo.packageName)
 					if (!isPackageAnExtension(pkgInfo)) return@mapNotNull null
 					extractExtensionInfo(pkgInfo, pkgManager, isShared = false)
 				}
 				.orEmpty()
 		} else {
-			getInstalledExtensionPackages(pkgManager)
-				.mapNotNull { pkgInfo -> extractExtensionInfo(pkgInfo, pkgManager, isShared = true) }
+			emptyList()
+		}
+
+		return if (privateMode) {
+			val privatePkgSet = privateInfos.mapTo(HashSet(privateInfos.size)) { it.pkgName }
+			privateInfos + osInfos.filterNot { it.pkgName in privatePkgSet }
+		} else {
+			val osPkgSet = osInfos.mapTo(HashSet(osInfos.size)) { it.pkgName }
+			osInfos + privateInfos.filterNot { it.pkgName in osPkgSet }
 		}
 	}
 
@@ -637,8 +776,13 @@ class MihonExtensionLoader @Inject constructor(
 		}
 	}
 
-	private fun ApplicationInfo.fixBasePaths(apkPath: String) {
+	private fun ApplicationInfo.fixBasePaths(context: Context, apkPath: String, pkgName: String) {
 		if (sourceDir == null) sourceDir = apkPath
 		if (publicSourceDir == null) publicSourceDir = apkPath
+		val libDir = getPrivateNativeLibDir(context, pkgName)
+		if (!libDir.exists()) {
+			runCatching { extractPrivateNativeLibraries(File(apkPath), libDir) }
+		}
+		nativeLibraryDir = libDir.absolutePath
 	}
 }

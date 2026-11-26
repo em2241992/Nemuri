@@ -179,8 +179,17 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 	val isBarBlurEnabled: Boolean
 		get() = prefs.getBoolean(KEY_BAR_BLUR, true)
 
-	val isLegacyNavigationBar: Boolean
+	var isLegacyNavigationBar: Boolean
 		get() = prefs.getBoolean(KEY_NAV_LEGACY, false)
+		set(value) = prefs.edit { putBoolean(KEY_NAV_LEGACY, value) }
+
+	var selectionMenuStyle: SelectionMenuStyle
+		get() = SelectionMenuStyle.fromKey(prefs.getString(KEY_SELECTION_MENU_STYLE, null))
+		set(value) = prefs.edit { putString(KEY_SELECTION_MENU_STYLE, value.key) }
+
+	var readerScrubberEdge: ReaderScrubberEdge
+		get() = ReaderScrubberEdge.fromKey(prefs.getString(KEY_READER_SCRUBBER_EDGE, null))
+		set(value) = prefs.edit { putString(KEY_READER_SCRUBBER_EDGE, value.key) }
 
 	val isMainFabEnabled: Boolean
 		get() = prefs.getBoolean(KEY_MAIN_FAB, true)
@@ -319,6 +328,31 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 	var isDuplicateProgressMigrated: Boolean
 		get() = prefs.getBoolean(KEY_MIGRATE_DUPLICATE_PROGRESS, true)
 		set(value) = prefs.edit { putBoolean(KEY_MIGRATE_DUPLICATE_PROGRESS, value) }
+
+	var duplicateWinnerStrategy: DuplicateWinnerStrategy
+		get() = DuplicateWinnerStrategy.fromKey(prefs.getString(KEY_DUPLICATE_WINNER_STRATEGY, null))
+		set(value) = prefs.edit { putString(KEY_DUPLICATE_WINNER_STRATEGY, value.key) }
+
+	var ignoredDuplicatePairs: Set<String>
+		get() = prefs.getStringSet(KEY_IGNORED_DUPLICATE_PAIRS, emptySet()).orEmpty()
+			.mapToSet { it.replace('_', ':') }
+		set(value) = prefs.edit { putStringSet(KEY_IGNORED_DUPLICATE_PAIRS, value.mapToSet { it.replace('_', ':') }) }
+
+	fun ignoreDuplicatePair(idA: Long, idB: Long) {
+		if (idA == 0L || idB == 0L || idA == idB) return
+		val key = "${minOf(idA, idB)}:${maxOf(idA, idB)}"
+		ignoredDuplicatePairs = ignoredDuplicatePairs + key
+	}
+
+	fun isDuplicatePairIgnored(idA: Long, idB: Long): Boolean {
+		if (idA == 0L || idB == 0L || idA == idB) return false
+		val key = "${minOf(idA, idB)}:${maxOf(idA, idB)}"
+		return key in ignoredDuplicatePairs
+	}
+
+	fun clearIgnoredDuplicatePairs() {
+		prefs.edit { remove(KEY_IGNORED_DUPLICATE_PAIRS) }
+	}
 
 	var isGridSpacingIncreased: Boolean
 		get() = prefs.getBoolean(KEY_GRID_SPACING_INCREASED, false)
@@ -937,8 +971,13 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		set(value) = prefs.edit { putBoolean(KEY_SOURCES_GRID, value) }
 
 	/** Extensions in a row of Explore's grid on a phone (3, 4 or 5); wider screens fit proportionally more. */
-	val sourcesGridColumns: Int
-		get() = prefs.getInt(KEY_SOURCES_GRID_COLUMNS, 4)
+	var sourcesGridColumns: Int
+		get() = prefs.getInt(KEY_SOURCES_GRID_COLUMNS, 4).coerceIn(3, 5)
+		set(value) = prefs.edit { putInt(KEY_SOURCES_GRID_COLUMNS, value.coerceIn(3, 5)) }
+
+	var isSourceBrowseGridMode: Boolean
+		get() = prefs.getBoolean(KEY_SOURCE_BROWSE_GRID, true)
+		set(value) = prefs.edit { putBoolean(KEY_SOURCE_BROWSE_GRID, value) }
 
 	/**
 	 * The active language chosen per logical source (a package + source-name pair) for
@@ -1239,6 +1278,10 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 	val defaultWebtoonZoomOut: Float
 		get() = prefs.getInt(KEY_WEBTOON_ZOOM_OUT, 0).coerceIn(0, 50) / 100f
 
+	var defaultWebtoonZoomOutPercent: Int
+		get() = prefs.getInt(KEY_WEBTOON_ZOOM_OUT, 0).coerceIn(0, 50)
+		set(value) = prefs.edit { putInt(KEY_WEBTOON_ZOOM_OUT, value.coerceIn(0, 50)) }
+
 	@get:FloatRange(from = 0.0, to = 1.0)
 	var readerAutoscrollSpeed: Float
 		// 0 is unreachable from the slider and used to mean "never configured", which left the
@@ -1520,6 +1563,17 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 	var isFeedHubMode: Boolean
 		get() = prefs.getBoolean(KEY_FEED_HUB_MODE, true)
 		set(value) = prefs.edit { putBoolean(KEY_FEED_HUB_MODE, value) }
+
+	var feedMode: FeedScreenMode
+		get() {
+			val raw = prefs.getString(KEY_FEED_MODE, null)
+			if (raw != null) return FeedScreenMode.fromKey(raw)
+			return if (isFeedHubMode) FeedScreenMode.HUB else FeedScreenMode.UPDATES
+		}
+		set(value) = prefs.edit {
+			putString(KEY_FEED_MODE, value.key)
+			putBoolean(KEY_FEED_HUB_MODE, value == FeedScreenMode.HUB)
+		}
 
 	var exploreHomeSource: String?
 		get() = prefs.getString(KEY_EXPLORE_HOME_SOURCE, null)?.takeIf { it.isNotBlank() }
@@ -1812,6 +1866,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_NAV_COMPACT_HEIGHT = "ui_nav_compact_height"
 		const val KEY_NAV_LABEL_VISIBILITY = "ui_nav_label_visibility"
 		const val KEY_SWIPE_ACTIONS_ENABLED = "ui_swipe_actions_enabled"
+		const val KEY_SELECTION_MENU_STYLE = "ui_selection_menu_style"
+		const val KEY_READER_SCRUBBER_EDGE = "reader_scrubber_edge"
+		const val KEY_DUPLICATE_WINNER_STRATEGY = "duplicate_winner_strategy"
+		const val KEY_IGNORED_DUPLICATE_PAIRS = "duplicate_ignored_pairs"
+		const val KEY_FEED_MODE = "feed_screen_mode"
+		const val KEY_SOURCE_BROWSE_GRID = "source_browse_grid"
 		const val KEY_PROTECT_APP = "protect_app"
 		const val KEY_PROTECT_APP_TIMEOUT = "protect_app_timeout"
 		const val KEY_APP_PASSWORD = "app_password"

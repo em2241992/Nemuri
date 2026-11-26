@@ -35,6 +35,7 @@ data class NemuriShellUiState(
 	val isAmoled: Boolean,
 	val colorScheme: ColorScheme,
 	val isIncognito: Boolean,
+	val isOnboardingCompleted: Boolean = true,
 	val unreadFeedCount: Int = 0,
 	val hasExtensionUpdates: Boolean = false,
 	val recentReads: List<Manga> = emptyList(),
@@ -53,6 +54,7 @@ private data class ThemeAndBehaviorPrefs(
 	val isAmoled: Boolean,
 	val colorScheme: ColorScheme,
 	val isIncognito: Boolean,
+	val isOnboardingCompleted: Boolean,
 )
 
 private data class ExtensionTelemetry(
@@ -95,7 +97,9 @@ class NemuriShellViewModel @Inject constructor(
 				key == AppSettings.KEY_THEME ||
 				key == AppSettings.KEY_THEME_AMOLED ||
 				key == AppSettings.KEY_COLOR_THEME ||
-				key == AppSettings.KEY_INCOGNITO_MODE
+				key == AppSettings.KEY_INCOGNITO_MODE ||
+				key == AppSettings.KEY_ONBOARDING_COMPLETED ||
+				key == AppSettings.KEY_ONBOARDING_INSTALL_ID
 		}
 		.onStart { emit(null) }
 		.map {
@@ -104,6 +108,7 @@ class NemuriShellViewModel @Inject constructor(
 				isAmoled = settings.isAmoledTheme,
 				colorScheme = settings.colorScheme,
 				isIncognito = settings.isIncognitoModeEnabled,
+				isOnboardingCompleted = settings.isOnboardingCompleted,
 			)
 		}
 
@@ -149,6 +154,7 @@ class NemuriShellViewModel @Inject constructor(
 			isAmoled = prefs.isAmoled,
 			colorScheme = prefs.colorScheme,
 			isIncognito = prefs.isIncognito,
+			isOnboardingCompleted = prefs.isOnboardingCompleted,
 			unreadFeedCount = content.unreadFeedCount,
 			hasExtensionUpdates = content.hasExtensionUpdates,
 			recentReads = content.recentReads,
@@ -171,8 +177,17 @@ class NemuriShellViewModel @Inject constructor(
 				isAmoled = settings.isAmoledTheme,
 				colorScheme = settings.colorScheme,
 				isIncognito = settings.isIncognitoModeEnabled,
+				isOnboardingCompleted = settings.isOnboardingCompleted,
 			),
 		)
+
+	fun completeOnboarding() {
+		settings.isOnboardingCompleted = true
+	}
+
+	fun resetOnboarding() {
+		settings.isOnboardingCompleted = false
+	}
 
 	fun toggleIncognito() {
 		val next = !settings.isIncognitoModeEnabled

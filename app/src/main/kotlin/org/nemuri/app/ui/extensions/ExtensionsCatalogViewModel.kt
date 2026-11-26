@@ -159,7 +159,9 @@ data class ExtensionsCatalogUiState(
 	val isPrivateMode: Boolean = false,
 	val isShizukuEnabled: Boolean = false,
 	val isShizukuInstalled: Boolean = false,
+	val isShizukuBinderAlive: Boolean = false,
 	val isShizukuReady: Boolean = false,
+	val isAutoUpdateEnabled: Boolean = false,
 	val pendingSystemInstall: PendingSystemInstall? = null,
 	val pendingSystemUninstall: String? = null,
 )
@@ -191,6 +193,8 @@ private data class BaseExtensionsSnapshot(
 private data class PrefSnapshot(
 	val privateMode: Boolean,
 	val shizukuEnabled: Boolean,
+	val autoUpdateEnabled: Boolean,
+	val shizukuStateVersion: Int,
 	val hiddenPackages: Set<String>,
 	val hiddenLnPlugins: Set<String>,
 	val contentFilter: ContentWarning,
@@ -237,16 +241,20 @@ class ExtensionsCatalogViewModel @Inject constructor(
 				key == null ||
 					key == AppSettings.KEY_PRIVATE_INSTALLER ||
 					key == AppSettings.KEY_SHIZUKU_INSTALLER ||
+					key == AppSettings.KEY_AUTO_UPDATE_EXTENSIONS ||
 					key == AppSettings.KEY_MIHON_HIDDEN_PACKAGES ||
 					key == AppSettings.KEY_LN_HIDDEN_PLUGINS ||
 					key == AppSettings.KEY_CONTENT_FILTER
 			}
 			.onStart { emit(null) },
 		reloadTrigger,
-	) { _, _ ->
+		shizukuInstaller.stateVersion,
+	) { _, _, shizukuVer ->
 		PrefSnapshot(
 			privateMode = settings.isPrivateInstallEnabled,
 			shizukuEnabled = settings.isShizukuInstallerEnabled,
+			autoUpdateEnabled = settings.isAutoUpdateExtensionsEnabled,
+			shizukuStateVersion = shizukuVer,
 			hiddenPackages = settings.mihonHiddenPackages,
 			hiddenLnPlugins = settings.lnHiddenPlugins,
 			contentFilter = settings.contentFilter,
@@ -302,7 +310,9 @@ class ExtensionsCatalogViewModel @Inject constructor(
 				isPrivateMode = settings.isPrivateInstallEnabled,
 				isShizukuEnabled = settings.isShizukuInstallerEnabled,
 				isShizukuInstalled = shizukuInstaller.isInstalled,
+				isShizukuBinderAlive = shizukuInstaller.isBinderAlive,
 				isShizukuReady = shizukuInstaller.isReady,
+				isAutoUpdateEnabled = settings.isAutoUpdateExtensionsEnabled,
 			),
 		)
 
@@ -413,11 +423,16 @@ class ExtensionsCatalogViewModel @Inject constructor(
 				val isNovel = info.pkgName.contains("novelextension.") ||
 					catalogueSources.any { it.isNovelSource }
 				val effectiveLang = normalizeExternalExtensionLangCode(loaded?.lang?.takeIf { it.isNotBlank() } ?: info.lang)
-				val ownerStore = storeManager.owner(mode, info)
+				val ownerStore = storeManager.owner(if (info.isShared) ExtensionInstallMode.SYSTEM else ExtensionInstallMode.SANDBOX, info)
 				val baseKey = "apk:${info.pkgName}"
 				val keyCount = usedInstalledKeys[baseKey] ?: 0
 				usedInstalledKeys[baseKey] = keyCount + 1
 				val listKey = if (keyCount == 0) baseKey else "$baseKey#$keyCount"
+				val resolvedIcon: Any = if (info.isShared) {
+					extensionPackageFaviconUri(info.pkgName)
+				} else {
+					loadPrivateArchiveIcon(info.apkPath) ?: extensionPackageFaviconUri(info.pkgName)
+				}
 				add(
 					InstalledExtensionItem(
 						listKey = listKey,
@@ -432,7 +447,7 @@ class ExtensionsCatalogViewModel @Inject constructor(
 						isShared = info.isShared,
 						isHidden = info.pkgName in prefs.hiddenPackages,
 						storeLabel = ownerStore?.let { storeLabels[it.id] ?: it.displayName },
-						iconModel = extensionPackageFaviconUri(info.pkgName),
+						iconModel = resolvedIcon,
 						updateCandidate = mihonUpdatesByPkg[info.pkgName],
 						sourceCount = catalogueSources.size.coerceAtLeast(1),
 					),
@@ -561,7 +576,9 @@ class ExtensionsCatalogViewModel @Inject constructor(
 			isPrivateMode = base.isPrivateMode,
 			isShizukuEnabled = settings.isShizukuInstallerEnabled,
 			isShizukuInstalled = shizukuInstaller.isInstalled,
+			isShizukuBinderAlive = shizukuInstaller.isBinderAlive,
 			isShizukuReady = shizukuInstaller.isReady,
+			isAutoUpdateEnabled = settings.isAutoUpdateExtensionsEnabled,
 			pendingSystemInstall = actions.pendingSystemInstall,
 			pendingSystemUninstall = pendingUninstall,
 		)
@@ -717,9 +734,19 @@ class ExtensionsCatalogViewModel @Inject constructor(
 						toastManager.show("APK package mismatch for ${item.displayName}")
 						return
 					}
-					ShizukuExtensionInstaller.InstallResult.Unavailable,
+					ShizukuExtensionInstaller.InstallResult.Unavailable -> {
+						val detail = if (!shizukuInstaller.isBinderAlive) {
+							"Shizuku service is not running"
+						} else {
+							"Shizuku permission not granted"
+						}
+						toastManager.show("$detail — opening system installer")
+					}
 					is ShizukuExtensionInstaller.InstallResult.Failure -> {
-						// Fall through cleanly to system package installer UI.
+						val reason = res.message?.takeIf { it.isNotBlank() }
+							?: res.status?.let { "code $it" }
+							?: "error"
+						toastManager.show("Shizuku install failed ($reason) — opening system installer")
 					}
 				}
 			}
@@ -826,15 +853,90 @@ class ExtensionsCatalogViewModel @Inject constructor(
 		reloadTrigger.value++
 		viewModelScope.launch(Dispatchers.IO) {
 			sourcesRepository.reloadMihonSources()
+			if (enabled && settings.isAutoUpdateExtensionsEnabled) {
+				runCatching { updateScheduler.schedule() }
+			}
 		}
-		toastManager.show(if (enabled) "Private sandbox mode enabled" else "System installer mode enabled")
+		toastManager.show(
+			if (enabled) {
+				"App-isolated mode enabled (existing OS extensions remain active)"
+			} else {
+				"System installer mode enabled"
+			},
+		)
 	}
 
 	fun setShizukuEnabled(enabled: Boolean) {
-		settings.isShizukuInstallerEnabled = enabled
+		if (!enabled) {
+			settings.isShizukuInstallerEnabled = false
+			reloadTrigger.value++
+			toastManager.show("Shizuku installer disabled")
+			return
+		}
+		if (!shizukuInstaller.isInstalled) {
+			toastManager.show("Shizuku app is not installed on this device")
+			return
+		}
+		settings.isShizukuInstallerEnabled = true
 		reloadTrigger.value++
-		toastManager.show(if (enabled) "Shizuku silent installer enabled" else "Shizuku installer disabled")
+		viewModelScope.launch(Dispatchers.IO) {
+			val granted = shizukuInstaller.requestPermissionIfNeeded()
+			reloadTrigger.value++
+			when {
+				granted -> toastManager.show("Shizuku silent installer connected and authorized")
+				!shizukuInstaller.isBinderAlive ->
+					toastManager.show("Shizuku enabled — start the Shizuku service to install silently")
+				else ->
+					toastManager.show("Shizuku permission not granted — authorize Nemuri in Shizuku")
+			}
+		}
 	}
+
+	fun requestShizukuPermission() {
+		viewModelScope.launch(Dispatchers.IO) {
+			if (!shizukuInstaller.isInstalled) {
+				toastManager.show("Shizuku app is not installed")
+				return@launch
+			}
+			val granted = shizukuInstaller.requestPermissionIfNeeded()
+			reloadTrigger.value++
+			when {
+				granted -> toastManager.show("Shizuku permission granted")
+				!shizukuInstaller.isBinderAlive -> toastManager.show("Start the Shizuku service first, then retry")
+				else -> toastManager.show("Shizuku permission was denied")
+			}
+		}
+	}
+
+	fun setAutoUpdateEnabled(enabled: Boolean) {
+		settings.isAutoUpdateExtensionsEnabled = enabled
+		reloadTrigger.value++
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching {
+				if (enabled || settings.isExtensionUpdateNotificationsEnabled) {
+					updateScheduler.schedule()
+				} else {
+					updateScheduler.unschedule()
+				}
+			}
+		}
+		toastManager.show(
+			if (enabled) {
+				"Automatic extension updates enabled"
+			} else {
+				"Automatic extension updates disabled"
+			},
+		)
+	}
+
+	private fun loadPrivateArchiveIcon(apkPath: String): android.graphics.drawable.Drawable? = runCatching {
+		val pm = context.packageManager
+		val pkgInfo = pm.getPackageArchiveInfo(apkPath, 0) ?: return@runCatching null
+		val appInfo = pkgInfo.applicationInfo ?: return@runCatching null
+		appInfo.sourceDir = apkPath
+		appInfo.publicSourceDir = apkPath
+		appInfo.loadIcon(pm)
+	}.getOrNull()
 
 	private fun markInProgress(id: String, active: Boolean) {
 		inProgressIds.update { if (active) it + id else it - id }

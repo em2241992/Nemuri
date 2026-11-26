@@ -65,7 +65,9 @@ abstract class FavouritesDao : MangaQueryBuilder.ConditionCallback {
 
 	@Query(
 		"SELECT manga.manga_id AS manga_id, manga.title AS title, manga.alt_title AS alt_title, " +
-			"manga.url AS url, manga.source AS source, manga.source_title AS source_title " +
+			"manga.url AS url, manga.source AS source, manga.source_title AS source_title, " +
+			"manga.rating AS rating, manga.author AS author, " +
+			"(SELECT GROUP_CONCAT(tags.title, '|') FROM manga_tags INNER JOIN tags ON tags.tag_id = manga_tags.tag_id WHERE manga_tags.manga_id = manga.manga_id) AS tag_titles " +
 			"FROM favourites INNER JOIN manga ON manga.manga_id = favourites.manga_id " +
 			"WHERE favourites.deleted_at = 0 " +
 			"GROUP BY favourites.manga_id " +
@@ -80,6 +82,9 @@ abstract class FavouritesDao : MangaQueryBuilder.ConditionCallback {
 		@ColumnInfo(name = "url") val url: String,
 		@ColumnInfo(name = "source") val source: String,
 		@ColumnInfo(name = "source_title") val sourceTitle: String?,
+		@ColumnInfo(name = "rating") val rating: Float = -1f,
+		@ColumnInfo(name = "author") val author: String? = null,
+		@ColumnInfo(name = "tag_titles") val tagTitles: String? = null,
 	)
 
 	@Transaction

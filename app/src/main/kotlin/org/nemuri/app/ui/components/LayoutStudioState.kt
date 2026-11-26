@@ -23,6 +23,7 @@ import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
+import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
 
 @Immutable
 data class LayoutStudioPrefs(
@@ -40,6 +41,8 @@ data class LayoutStudioPrefs(
 	val navLabelVisibility: NavLabelVisibility = NavLabelVisibility.SELECTED_ONLY,
 	val isSwipeActionsEnabled: Boolean = true,
 	val uiScalePercent: Int = 100,
+	val selectionMenuStyle: SelectionMenuStyle = SelectionMenuStyle.VISUAL_DIAGRAM,
+	val isClassicBottomBar: Boolean = false,
 ) {
 	fun columnsForOrientation(isLandscape: Boolean): Int {
 		return if (isLandscape) gridColumnsLandscape else gridColumnsPortrait
@@ -83,6 +86,8 @@ fun AppSettings.toLayoutStudioPrefs(): LayoutStudioPrefs {
 		navLabelVisibility = navLabelVisibility,
 		isSwipeActionsEnabled = isSwipeActionsEnabled,
 		uiScalePercent = uiScalePercent,
+		selectionMenuStyle = selectionMenuStyle,
+		isClassicBottomBar = isLegacyNavigationBar,
 	)
 }
 
@@ -104,8 +109,13 @@ fun rememberRootTabBottomPadding(
 	extraBottom: Dp = 16.dp,
 ): Dp {
 	val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+	val studio = LocalLayoutStudioPrefs.current
 	val dockHeight = if (hasBottomDock) {
-		if (LocalLayoutStudioPrefs.current.isNavBarCompact) 48.dp + 18.dp else 56.dp + 20.dp
+		when {
+			studio.isClassicBottomBar -> if (studio.isNavBarCompact) 58.dp else 66.dp
+			studio.isNavBarCompact -> 48.dp + 18.dp
+			else -> 56.dp + 20.dp
+		}
 	} else {
 		0.dp
 	}

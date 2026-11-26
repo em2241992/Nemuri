@@ -267,7 +267,7 @@ fun BackupSettingsScreen(
 }
 
 @Composable
-private fun NemuriRestoreSectionsDialog(
+internal fun NemuriRestoreSectionsDialog(
 	onConfirm: (Set<BackupSection>) -> Unit,
 	onDismiss: () -> Unit,
 ) {
@@ -339,7 +339,7 @@ private fun NemuriRestoreSectionsDialog(
 }
 
 @Composable
-private fun MihonImportOptionsDialog(
+internal fun MihonImportOptionsDialog(
 	preview: MihonBackupPreview,
 	onConfirm: (MihonBackupManager.Options) -> Unit,
 	onDismiss: () -> Unit,

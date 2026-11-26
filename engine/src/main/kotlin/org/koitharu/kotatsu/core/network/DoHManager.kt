@@ -9,23 +9,36 @@ import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.util.ext.printStackTraceDebug
 import java.net.InetAddress
 import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
 
 class DoHManager(
 	cache: Cache,
 	private val settings: AppSettings,
 ) : Dns {
 
-	private val bootstrapClient = OkHttpClient.Builder().cache(cache).build()
+	private val bootstrapClient = OkHttpClient.Builder()
+		.cache(cache)
+		.connectTimeout(10, TimeUnit.SECONDS)
+		.readTimeout(10, TimeUnit.SECONDS)
+		.build()
 
 	private var cachedDelegate: Dns? = null
 	private var cachedProvider: DoHProvider? = null
 
 	override fun lookup(hostname: String): List<InetAddress> {
+		val trimmed = hostname.trim()
+		if (trimmed.isEmpty()) {
+			return Dns.SYSTEM.lookup(hostname)
+		}
+		val delegate = getDelegate()
+		if (delegate === Dns.SYSTEM) {
+			return Dns.SYSTEM.lookup(trimmed)
+		}
 		return try {
-			getDelegate().lookup(hostname)
-		} catch (e: UnknownHostException) {
-			// fallback
-			Dns.SYSTEM.lookup(hostname)
+			delegate.lookup(trimmed).ifEmpty { Dns.SYSTEM.lookup(trimmed) }
+		} catch (e: Exception) {
+			e.printStackTraceDebug()
+			Dns.SYSTEM.lookup(trimmed)
 		}
 	}
 

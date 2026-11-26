@@ -1,6 +1,7 @@
 package org.nemuri.app.ui.explore
 
-import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,47 +14,52 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,11 +73,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.SubcomposeAsyncImage
@@ -79,19 +91,15 @@ import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.parser.favicon.faviconUri
 import org.koitharu.kotatsu.explore.data.SourcesSortOrder
 import org.koitharu.kotatsu.parsers.model.Manga
-import org.nemuri.app.browser.CloudFlareActivity
-import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.navigation.MangaTransferCache
-import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
-import org.nemuri.app.ui.components.MangaCoverImage
+import org.nemuri.app.ui.components.HeaderSquareAction
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriModalSheet
-import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.components.NonWrappingBadgeText
-import org.nemuri.app.ui.components.cornerSafeBadgeInset
 import org.nemuri.app.ui.components.rememberRootTabBottomPadding
+import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
-import org.nemuri.app.ui.theme.nemuriSharedCover
+import org.nemuri.app.ui.theme.yorhaTacticalBrackets
 
 @Composable
 fun ExploreScreen(
@@ -107,369 +115,110 @@ fun ExploreScreen(
 ) {
 	val context = LocalContext.current
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-	val layoutPrefs = LocalLayoutStudioPrefs.current
 	val bottomPadding = rememberRootTabBottomPadding()
+	val isWideScreen = LocalConfiguration.current.screenWidthDp >= 700
+	val gridColumns = if (isWideScreen) {
+		(uiState.sourcesGridColumns + 2).coerceIn(5, 8)
+	} else {
+		uiState.sourcesGridColumns.coerceIn(3, 5)
+	}
 
 	var showSortAndLanguageSheet by remember { mutableStateOf(false) }
-	var showHomeSourcePicker by remember { mutableStateOf(false) }
 	var actionTargetTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
 	var languagePickerTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
 
-	val cfLauncher = rememberLauncherForActivityResult(CloudFlareActivity.Contract()) { solved ->
-		if (solved) viewModel.refreshHomeHub()
-	}
-	val browserLauncher = rememberLauncherForActivityResult(NemuriBrowserActivity.Contract()) { solved ->
-		if (solved) viewModel.refreshHomeHub()
-	}
-
 	Column(modifier = Modifier.fillMaxSize()) {
-		NemuriTopSearchHeader(
+		// Top Search Header with dedicated Grid <-> List toggle, Tune, and Settings
+		ExploreTopBar(
 			query = uiState.sourceQuery,
 			onQueryChange = viewModel::setSourceQuery,
-			placeholder = "Filter sources or search all…",
-			onSearchSubmit = {
-				onOpenGlobalSearch(uiState.sourceQuery.trim())
-			},
+			isGridMode = uiState.isSourcesGridMode,
+			onSearchSubmit = { onOpenGlobalSearch(uiState.sourceQuery.trim()) },
+			onToggleGridMode = viewModel::toggleSourcesGridMode,
 			onTuneClick = { showSortAndLanguageSheet = true },
 			onSettingsClick = onOpenSettings,
 		)
 
-		LazyVerticalGrid(
-			columns = GridCells.Adaptive(minSize = 280.dp),
-			modifier = Modifier.fillMaxSize(),
-			contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
-			horizontalArrangement = Arrangement.spacedBy(10.dp),
-			verticalArrangement = Arrangement.spacedBy(10.dp),
+		// Segmented Tabs: Manga | Novels | Manage
+		ExploreSegmentedTabs(
+			selectedKind = uiState.selectedKind,
+			isNovelFirst = uiState.isNovelTabFirst,
+			mangaCount = uiState.mangaSourceCount,
+			novelCount = uiState.novelSourceCount,
+			hasExtensionUpdates = uiState.hasExtensionUpdates,
+			onSelectKind = viewModel::selectCatalogKind,
+			onOpenManage = onOpenExtensions,
+			modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+		)
+
+		// Compact Utility Strip (Global Search, Random, Local, Bookmarks, Downloads)
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.horizontalScroll(rememberScrollState())
+				.padding(horizontal = 14.dp, vertical = 4.dp),
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+			verticalAlignment = Alignment.CenterVertically,
 		) {
-			item(span = { GridItemSpan(maxLineSpan) }) {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					Row(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(10.dp),
-					) {
-						ExploreQuickPill(
-							icon = Icons.Default.Extension,
-							label = "Extensions",
-							showDot = uiState.hasExtensionUpdates,
-							onClick = onOpenExtensions,
-							modifier = Modifier.weight(1f),
-						)
-						ExploreQuickPill(
-							icon = Icons.Default.Folder,
-							label = "Local files",
-							onClick = onOpenLocalFiles,
-							modifier = Modifier.weight(1f),
-						)
+			ExploreUtilityChip(
+				icon = Icons.Default.Search,
+				label = "Global Search",
+				highlighted = true,
+				onClick = { onOpenGlobalSearch(uiState.sourceQuery.trim()) },
+			)
+			ExploreUtilityChip(
+				icon = Icons.Default.Shuffle,
+				label = if (uiState.isFindingRandom) "Rolling…" else "Random",
+				isLoading = uiState.isFindingRandom,
+				onClick = {
+					viewModel.findRandomManga { manga ->
+						MangaTransferCache.put(manga)
+						onOpenDetails(manga, "explore-random-${manga.id}")
 					}
-					Row(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(10.dp),
-					) {
-						ExploreQuickPill(
-							icon = Icons.Default.Bookmark,
-							label = "Bookmarks",
-							onClick = onOpenBookmarks,
-							modifier = Modifier.weight(1f),
-						)
-						ExploreQuickPill(
-							icon = Icons.Default.Download,
-							label = "Downloads",
-							onClick = onOpenDownloads,
-							modifier = Modifier.weight(1f),
-						)
-					}
-					Row(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(10.dp),
-					) {
-						Surface(
-							color = NemuriTheme.colors.tealContainer,
-							shape = RoundedCornerShape(14.dp),
-							modifier = Modifier
-								.weight(1f)
-								.height(44.dp)
-								.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-								.clip(RoundedCornerShape(14.dp))
-								.clickable(enabled = !uiState.isFindingRandom) {
-									viewModel.findRandomManga { manga ->
-										MangaTransferCache.put(manga)
-										onOpenDetails(manga, "explore-random-${manga.id}")
-									}
-								},
-						) {
-							Row(
-								modifier = Modifier.padding(horizontal = 12.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.Center,
-							) {
-								if (uiState.isFindingRandom) {
-									CircularProgressIndicator(
-										color = NemuriTheme.colors.cyan,
-										strokeWidth = 2.dp,
-										modifier = Modifier.size(16.dp),
-									)
-								} else {
-									Icon(
-										imageVector = Icons.Default.Shuffle,
-										contentDescription = null,
-										tint = NemuriTheme.colors.cyan,
-										modifier = Modifier.size(18.dp),
-									)
-								}
-								Spacer(modifier = Modifier.width(8.dp))
-								Text(
-									text = if (uiState.isFindingRandom) "Rolling…" else "Random Discovery",
-									style = MaterialTheme.typography.labelLarge,
-									color = NemuriTheme.colors.cyan,
-									maxLines = 1,
-									overflow = TextOverflow.Ellipsis,
-								)
-							}
-						}
+				},
+			)
+			ExploreUtilityChip(
+				icon = Icons.Default.Folder,
+				label = "Local",
+				onClick = onOpenLocalFiles,
+			)
+			ExploreUtilityChip(
+				icon = Icons.Default.Bookmark,
+				label = "Bookmarks",
+				onClick = onOpenBookmarks,
+			)
+			ExploreUtilityChip(
+				icon = Icons.Default.Download,
+				label = "Downloads",
+				onClick = onOpenDownloads,
+			)
+		}
 
-						Surface(
-							color = NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(14.dp),
-							modifier = Modifier
-								.weight(1f)
-								.height(44.dp)
-								.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
-								.clip(RoundedCornerShape(14.dp))
-								.clickable { onOpenGlobalSearch(uiState.sourceQuery.trim()) },
-						) {
-							Row(
-								modifier = Modifier.padding(horizontal = 12.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.Center,
-							) {
-								Icon(
-									imageVector = Icons.Default.Search,
-									contentDescription = null,
-									tint = NemuriTheme.colors.textSecondary,
-									modifier = Modifier.size(18.dp),
-								)
-								Spacer(modifier = Modifier.width(8.dp))
-								Text(
-									text = "Global Search",
-									style = MaterialTheme.typography.labelLarge,
-									color = NemuriTheme.colors.textPrimary,
-									maxLines = 1,
-									overflow = TextOverflow.Ellipsis,
-								)
-							}
-						}
-					}
-				}
-			}
+		// Sources Grid (4-col squircle) or List
+		val columnsSpec = if (uiState.isSourcesGridMode) {
+			GridCells.Fixed(gridColumns)
+		} else {
+			GridCells.Adaptive(minSize = 280.dp)
+		}
 
-			if (uiState.homeSource != null) {
-				val home = uiState.homeSource!!
-				item(span = { GridItemSpan(maxLineSpan) }) {
-					HomeSourceHubHeader(
-						homeSourceTitle = home.title,
-						isLoading = uiState.isHomeHubLoading,
-						visibilityFilter = uiState.visibilityFilter,
-						onPickHomeSource = { showHomeSourcePicker = true },
-						onRefresh = viewModel::refreshHomeHub,
-						onSelectVisibility = viewModel::setVisibilityFilter,
-					)
-				}
-
-				if (uiState.isHomeHubLoading && uiState.homeCarousels.isEmpty()) {
-					item(span = { GridItemSpan(maxLineSpan) }) {
-						Row(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(vertical = 18.dp),
-							horizontalArrangement = Arrangement.Center,
-							verticalAlignment = Alignment.CenterVertically,
-						) {
-							CircularProgressIndicator(
-								color = NemuriTheme.colors.cyan,
-								strokeWidth = 2.dp,
-								modifier = Modifier.size(18.dp),
-							)
-							Spacer(modifier = Modifier.width(8.dp))
-							Text(
-								text = "Loading ${home.title} feeds…",
-								style = MaterialTheme.typography.bodySmall,
-								color = NemuriTheme.colors.textMuted,
-							)
-						}
-					}
-				} else if (!uiState.homeHubError.isNullOrBlank() && uiState.homeCarousels.isEmpty()) {
-					item(span = { GridItemSpan(maxLineSpan) }) {
-						Surface(
-							color = NemuriTheme.colors.card,
-							shape = RoundedCornerShape(12.dp),
-							modifier = Modifier
-								.fillMaxWidth()
-								.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
-						) {
-							Column(
-								modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-								verticalArrangement = Arrangement.spacedBy(8.dp),
-							) {
-								Text(
-									text = uiState.homeHubError.orEmpty(),
-									style = MaterialTheme.typography.bodySmall,
-									color = NemuriTheme.colors.textMuted,
-								)
-								Row(
-									modifier = Modifier.fillMaxWidth(),
-									horizontalArrangement = Arrangement.spacedBy(8.dp),
-									verticalAlignment = Alignment.CenterVertically,
-								) {
-									val cf = uiState.homeHubCloudFlare
-									val interactive = uiState.homeHubInteractive
-									val browserUrl = uiState.homeHubBrowserUrl ?: home.homeUrl
-									if (cf != null || interactive != null || !browserUrl.isNullOrBlank()) {
-										Surface(
-											color = NemuriTheme.colors.tealContainer,
-											shape = RoundedCornerShape(8.dp),
-											modifier = Modifier
-												.clip(RoundedCornerShape(8.dp))
-												.clickable {
-													when {
-														cf != null -> cfLauncher.launch(cf)
-														interactive != null -> browserLauncher.launch(interactive)
-														!browserUrl.isNullOrBlank() -> runCatching {
-															context.startActivity(
-																AppRouter.browserIntent(context, browserUrl, home.sourceInfo.mangaSource, home.title),
-															)
-														}
-													}
-												},
-										) {
-											Text(
-												text = "Solve in WebView",
-												style = MaterialTheme.typography.labelMedium,
-												color = NemuriTheme.colors.cyan,
-												modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-											)
-										}
-									}
-									Text(
-										text = "Retry",
-										style = MaterialTheme.typography.labelMedium,
-										color = NemuriTheme.colors.cyan,
-										modifier = Modifier
-											.clip(RoundedCornerShape(8.dp))
-											.clickable { viewModel.refreshHomeHub() }
-											.padding(horizontal = 8.dp, vertical = 5.dp),
-									)
-									Text(
-										text = "Switch Source",
-										style = MaterialTheme.typography.labelMedium,
-										color = NemuriTheme.colors.textSecondary,
-										modifier = Modifier
-											.clip(RoundedCornerShape(8.dp))
-											.clickable { showHomeSourcePicker = true }
-											.padding(horizontal = 8.dp, vertical = 5.dp),
-									)
-								}
-							}
-						}
-					}
-				} else {
-					uiState.homeCarousels.forEach { carousel ->
-						item(key = "hub_sec_${carousel.id}", span = { GridItemSpan(maxLineSpan) }) {
-							Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-								Row(
-									modifier = Modifier.fillMaxWidth(),
-									verticalAlignment = Alignment.CenterVertically,
-									horizontalArrangement = Arrangement.SpaceBetween,
-								) {
-									Text(
-										text = carousel.title,
-										style = MaterialTheme.typography.titleSmall,
-										color = NemuriTheme.colors.textPrimary,
-									)
-									Text(
-										text = "See All →",
-										style = MaterialTheme.typography.labelMedium,
-										color = NemuriTheme.colors.cyan,
-										modifier = Modifier
-											.clip(RoundedCornerShape(8.dp))
-											.clickable {
-												viewModel.trackSourceOpen(home.sourceInfo.mangaSource)
-												onOpenSourceBrowse(home.sourceName)
-											}
-											.padding(horizontal = 6.dp, vertical = 2.dp),
-									)
-								}
-								if (carousel.items.isEmpty()) {
-									Text(
-										text = "No titles match the ${uiState.visibilityFilter.label} filter in this section.",
-										style = MaterialTheme.typography.bodySmall,
-										color = NemuriTheme.colors.textDim,
-									)
-								} else {
-									LazyRow(
-										horizontalArrangement = Arrangement.spacedBy(10.dp),
-									) {
-										items(carousel.items, key = { "${carousel.id}:${it.id}" }) { manga ->
-											val inLib = manga.id in uiState.libraryMangaIds || manga.url in uiState.libraryMangaUrls
-											val coverKey = "explore-${carousel.id}-${manga.id}"
-											HomeCarouselCard(
-												manga = manga,
-												inLibrary = inLib,
-												cornerRadiusDp = layoutPrefs.cardCornerRadiusDp,
-												aspectRatio = layoutPrefs.coverAspectRatio.ratio,
-												sharedCoverKey = coverKey,
-												onClick = {
-													MangaTransferCache.put(manga)
-													onOpenDetails(manga, coverKey)
-												},
-											)
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			item(span = { GridItemSpan(maxLineSpan) }) {
-				Row(
-					modifier = Modifier
-						.fillMaxWidth()
-						.horizontalScroll(rememberScrollState())
-						.padding(top = 4.dp, bottom = 2.dp),
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-				) {
-					ExploreSourceFilter.entries.forEach { filter ->
-						val selected = uiState.activeFilter == filter
-						Surface(
-							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(999.dp),
-							modifier = Modifier
-								.border(
-									1.dp,
-									if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-									RoundedCornerShape(999.dp),
-								)
-								.clip(RoundedCornerShape(999.dp))
-								.clickable { viewModel.setFilter(filter) },
-						) {
-							Text(
-								text = filter.label,
-								style = MaterialTheme.typography.labelMedium,
-								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-								modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-							)
-						}
-					}
-				}
-			}
-
+		LazyVerticalGrid(
+			columns = columnsSpec,
+			modifier = Modifier.fillMaxSize(),
+			contentPadding = PaddingValues(
+				start = 14.dp,
+				end = 14.dp,
+				top = 6.dp,
+				bottom = bottomPadding,
+			),
+			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			verticalArrangement = Arrangement.spacedBy(if (uiState.isSourcesGridMode) 14.dp else 10.dp),
+		) {
 			if (uiState.isLoadingSources && uiState.sources.isEmpty()) {
 				item(span = { GridItemSpan(maxLineSpan) }) {
 					Row(
 						modifier = Modifier
 							.fillMaxWidth()
-							.padding(vertical = 28.dp),
+							.padding(vertical = 32.dp),
 						horizontalArrangement = Arrangement.Center,
 						verticalAlignment = Alignment.CenterVertically,
 					) {
@@ -488,65 +237,97 @@ fun ExploreScreen(
 				}
 			} else if (uiState.sources.isEmpty()) {
 				item(span = { GridItemSpan(maxLineSpan) }) {
-					val emptyTitle = if (uiState.allEnabledCount == 0) {
-						"No extensions installed yet"
-					} else {
-						"No matching sources"
+					val isKindEmpty = uiState.allEnabledCount > 0 && uiState.sourceQuery.isBlank()
+					val emptyTitle = when {
+						uiState.allEnabledCount == 0 -> "No extensions installed yet"
+						isKindEmpty && uiState.selectedKind == ExploreCatalogKind.NOVELS -> "No novel plugins installed"
+						isKindEmpty -> "No manga extensions enabled"
+						else -> "No matching sources"
 					}
-					val emptySubtitle = if (uiState.allEnabledCount == 0) {
-						"Install Mihon manga APKs or LNReader novel plugins in Extensions to browse catalogs."
-					} else {
-						"Clear your search or filter to view your ${uiState.allEnabledCount} enabled source(s)."
+					val emptySubtitle = when {
+						uiState.allEnabledCount == 0 ->
+							"Open Manage to install Mihon manga APKs or LNReader light novel plugins."
+						isKindEmpty && uiState.selectedKind == ExploreCatalogKind.NOVELS ->
+							"Tap Manage to add LNReader JavaScript novel plugins."
+						isKindEmpty ->
+							"Tap Manage to install Mihon manga extensions or unhide disabled sources."
+						else ->
+							"Clear your search or language filter to view your enabled sources."
 					}
 					NemuriEmptyState(
-						icon = Icons.Default.Explore,
+						icon = if (uiState.selectedKind == ExploreCatalogKind.NOVELS) {
+							Icons.AutoMirrored.Filled.MenuBook
+						} else {
+							Icons.Default.Explore
+						},
 						title = emptyTitle,
 						subtitle = emptySubtitle,
-						actionLabel = if (uiState.allEnabledCount == 0) "Open Extensions" else null,
-						onAction = if (uiState.allEnabledCount == 0) onOpenExtensions else null,
+						actionLabel = if (uiState.allEnabledCount == 0 || isKindEmpty) "Manage Extensions" else null,
+						onAction = if (uiState.allEnabledCount == 0 || isKindEmpty) onOpenExtensions else null,
 					)
 				}
 			} else {
 				val pinned = uiState.sources.filter { it.isPinned }
 				val unpinned = uiState.sources.filterNot { it.isPinned }
 
-				if (pinned.isNotEmpty() && uiState.activeFilter != ExploreSourceFilter.PINNED) {
-					item(span = { GridItemSpan(maxLineSpan) }) {
+				if (pinned.isNotEmpty()) {
+					item(key = "hdr_pinned", span = { GridItemSpan(maxLineSpan) }) {
 						SectionHeading("PINNED (${pinned.size})")
 					}
-					items(pinned, key = { "pinned:${it.sourceName}" }) { tile ->
-						ExploreSourceCard(
-							tile = tile,
-							onClick = {
-								viewModel.trackSourceOpen(tile.sourceInfo.mangaSource)
-								onOpenSourceBrowse(tile.sourceName)
-							},
-							onLongClick = { actionTargetTile = tile },
-							onTogglePin = { viewModel.togglePin(tile) },
-						)
+					items(pinned, key = { "pin:${it.sourceName}" }) { tile ->
+						if (uiState.isSourcesGridMode) {
+							ExploreSourceSquircleGridCell(
+								tile = tile,
+								onClick = {
+									viewModel.trackSourceOpen(tile.sourceInfo.mangaSource)
+									onOpenSourceBrowse(tile.sourceName)
+								},
+								onLongClick = { actionTargetTile = tile },
+							)
+						} else {
+							ExploreSourceListCard(
+								tile = tile,
+								onClick = {
+									viewModel.trackSourceOpen(tile.sourceInfo.mangaSource)
+									onOpenSourceBrowse(tile.sourceName)
+								},
+								onLongClick = { actionTargetTile = tile },
+								onTogglePin = { viewModel.togglePin(tile) },
+							)
+						}
 					}
 				}
 
-				val listToRender = if (uiState.activeFilter == ExploreSourceFilter.PINNED) pinned else unpinned
-				if (listToRender.isNotEmpty()) {
-					item(span = { GridItemSpan(maxLineSpan) }) {
-						val heading = if (uiState.activeFilter == ExploreSourceFilter.PINNED) {
-							"PINNED SOURCES (${listToRender.size})"
+				if (unpinned.isNotEmpty()) {
+					item(key = "hdr_all", span = { GridItemSpan(maxLineSpan) }) {
+						val label = if (uiState.selectedKind == ExploreCatalogKind.NOVELS) {
+							"NOVEL SOURCES (${unpinned.size})"
 						} else {
-							"ALL SOURCES (${listToRender.size})"
+							"MANGA SOURCES (${unpinned.size})"
 						}
-						SectionHeading(heading)
+						SectionHeading(label)
 					}
-					items(listToRender, key = { "src:${it.sourceName}" }) { tile ->
-						ExploreSourceCard(
-							tile = tile,
-							onClick = {
-								viewModel.trackSourceOpen(tile.sourceInfo.mangaSource)
-								onOpenSourceBrowse(tile.sourceName)
-							},
-							onLongClick = { actionTargetTile = tile },
-							onTogglePin = { viewModel.togglePin(tile) },
-						)
+					items(unpinned, key = { "src:${it.sourceName}" }) { tile ->
+						if (uiState.isSourcesGridMode) {
+							ExploreSourceSquircleGridCell(
+								tile = tile,
+								onClick = {
+									viewModel.trackSourceOpen(tile.sourceInfo.mangaSource)
+									onOpenSourceBrowse(tile.sourceName)
+								},
+								onLongClick = { actionTargetTile = tile },
+							)
+						} else {
+							ExploreSourceListCard(
+								tile = tile,
+								onClick = {
+									viewModel.trackSourceOpen(tile.sourceInfo.mangaSource)
+									onOpenSourceBrowse(tile.sourceName)
+								},
+								onLongClick = { actionTargetTile = tile },
+								onTogglePin = { viewModel.togglePin(tile) },
+							)
+						}
 					}
 				}
 			}
@@ -555,18 +336,58 @@ fun ExploreScreen(
 
 	if (showSortAndLanguageSheet) {
 		NemuriModalSheet(
-			title = "Explore Sources",
-			subtitle = "Ordering & enabled source languages",
+			title = "Explore Layout & Languages",
+			subtitle = "Grid density, ordering & enabled source languages",
 			onDismiss = { showSortAndLanguageSheet = false },
 		) {
 			LazyColumn(
 				modifier = Modifier
 					.fillMaxWidth()
-					.heightIn(max = 440.dp),
+					.heightIn(max = 460.dp),
 				verticalArrangement = Arrangement.spacedBy(8.dp),
 				contentPadding = PaddingValues(bottom = 12.dp),
 			) {
+				if (uiState.isSourcesGridMode) {
+					item {
+						Text(
+							text = "GRID COLUMNS",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.cyan,
+						)
+						Spacer(modifier = Modifier.height(6.dp))
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							listOf(3, 4, 5).forEach { cols ->
+								val selected = uiState.sourcesGridColumns == cols
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(12.dp),
+									border = BorderStroke(
+										1.dp,
+										if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.weight(1f)
+										.clip(RoundedCornerShape(12.dp))
+										.clickable { viewModel.setSourcesGridColumns(cols) },
+								) {
+									Text(
+										text = "$cols Columns",
+										style = MaterialTheme.typography.labelLarge,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+										textAlign = TextAlign.Center,
+										modifier = Modifier.padding(vertical = 10.dp),
+									)
+								}
+							}
+						}
+					}
+				}
+
 				item {
+					Spacer(modifier = Modifier.height(4.dp))
 					Text(
 						text = "SORT ORDER",
 						style = MaterialTheme.typography.labelSmall,
@@ -680,6 +501,27 @@ fun ExploreScreen(
 						actionTargetTile = null
 					},
 				)
+				SheetActionRow(
+					icon = Icons.Default.Home,
+					label = if (sheetTile.isHomeSource) {
+						"Pinned as Home Source for Feed Hub ✓"
+					} else {
+						"Set as Home Source for Feed Hub"
+					},
+					onClick = {
+						viewModel.setHomeSourceForHub(sheetTile)
+						actionTargetTile = null
+					},
+				)
+				SheetActionRow(
+					icon = Icons.Default.LocalFireDepartment,
+					label = "Open Popular Catalog",
+					onClick = {
+						viewModel.prepareOpenPopular(sheetTile)
+						actionTargetTile = null
+						onOpenSourceBrowse(sheetTile.sourceName)
+					},
+				)
 				if (languageVariants.size > 1) {
 					val activeLabel = languageVariants.firstOrNull { it.isActive }?.displayName
 						?: "${languageVariants.size} available"
@@ -714,7 +556,7 @@ fun ExploreScreen(
 				}
 				SheetActionRow(
 					icon = Icons.Default.VisibilityOff,
-					label = "Hide Source from Explore",
+					label = "Disable / Hide Source",
 					isDestructive = true,
 					onClick = {
 						viewModel.hideSource(sheetTile)
@@ -788,305 +630,300 @@ fun ExploreScreen(
 			}
 		}
 	}
+}
 
-	if (showHomeSourcePicker) {
-		var pickerQuery by remember { mutableStateOf("") }
-		val filteredPicker = uiState.allEnabledSources.filter {
-			pickerQuery.isBlank() || it.title.contains(pickerQuery.trim(), ignoreCase = true)
-		}
-		NemuriModalSheet(
-			title = "Select Home Source",
-			subtitle = "Pick 1 source to power your Explore Hub carousels",
-			onDismiss = { showHomeSourcePicker = false },
+@Composable
+private fun ExploreTopBar(
+	query: String,
+	onQueryChange: (String) -> Unit,
+	isGridMode: Boolean,
+	onSearchSubmit: () -> Unit,
+	onToggleGridMode: () -> Unit,
+	onTuneClick: () -> Unit,
+	onSettingsClick: () -> Unit,
+) {
+	Surface(
+		color = NemuriTheme.colors.background,
+		modifier = Modifier.fillMaxWidth(),
+	) {
+		val searchField = rememberSyncedTextField(query, onQueryChange)
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.statusBarsPadding()
+				.padding(horizontal = 12.dp, vertical = 8.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(6.dp),
 		) {
-			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-				androidx.compose.material3.OutlinedTextField(
-					value = pickerQuery,
-					onValueChange = { pickerQuery = it },
-					placeholder = { Text("Search enabled sources…") },
-					singleLine = true,
-					modifier = Modifier.fillMaxWidth(),
-				)
-				LazyColumn(
-					modifier = Modifier
-						.fillMaxWidth()
-						.height(320.dp),
-					verticalArrangement = Arrangement.spacedBy(6.dp),
+			Surface(
+				color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.78f),
+				shape = RoundedCornerShape(24.dp),
+				modifier = Modifier
+					.weight(1f)
+					.height(44.dp)
+					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(24.dp)),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 8.dp),
+					verticalAlignment = Alignment.CenterVertically,
 				) {
-					items(filteredPicker, key = { "pick:${it.sourceName}" }) { tile ->
-						val isSelected = tile.sourceName == uiState.homeSource?.sourceName
-						Surface(
-							color = if (isSelected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
+					Box(
+						modifier = Modifier
+							.size(34.dp)
+							.clip(RoundedCornerShape(17.dp))
+							.clickable(onClick = onSearchSubmit),
+						contentAlignment = Alignment.Center,
+					) {
+						Icon(
+							imageVector = Icons.Default.Search,
+							contentDescription = "Search",
+							tint = NemuriTheme.colors.textMuted,
+							modifier = Modifier.size(20.dp),
+						)
+					}
+
+					Box(
+						modifier = Modifier
+							.weight(1f)
+							.padding(horizontal = 6.dp),
+						contentAlignment = Alignment.CenterStart,
+					) {
+						if (searchField.fieldValue.text.isEmpty()) {
+							Text(
+								text = "Filter sources or search all…",
+								style = MaterialTheme.typography.bodyMedium,
+								color = NemuriTheme.colors.textDim,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis,
+							)
+						}
+						BasicTextField(
+							value = searchField.fieldValue,
+							onValueChange = searchField::onValueChange,
+							singleLine = true,
+							textStyle = MaterialTheme.typography.bodyMedium.copy(
+								color = NemuriTheme.colors.textPrimary,
+							),
+							cursorBrush = SolidColor(NemuriTheme.colors.cyan),
+							keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+							keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
+							modifier = Modifier.fillMaxWidth(),
+						)
+					}
+
+					if (searchField.fieldValue.text.isNotEmpty()) {
+						Box(
 							modifier = Modifier
-								.fillMaxWidth()
-								.border(
-									1.dp,
-									if (isSelected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-									RoundedCornerShape(12.dp),
-								)
-								.clip(RoundedCornerShape(12.dp))
-								.clickable {
-									viewModel.setHomeSource(tile.sourceName)
-									showHomeSourcePicker = false
-								},
+								.size(32.dp)
+								.clip(RoundedCornerShape(16.dp))
+								.clickable { searchField.clear() },
+							contentAlignment = Alignment.Center,
 						) {
-							Row(
-								modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.SpaceBetween,
-							) {
-								Column(modifier = Modifier.weight(1f)) {
-									Text(
-										text = tile.title,
-										style = MaterialTheme.typography.titleSmall,
-										color = if (isSelected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
-										maxLines = 1,
-										overflow = TextOverflow.Ellipsis,
-									)
-									if (!tile.summary.isNullOrBlank()) {
-										Text(
-											text = tile.summary,
-											style = MaterialTheme.typography.labelSmall,
-											color = NemuriTheme.colors.textMuted,
-											maxLines = 1,
-											overflow = TextOverflow.Ellipsis,
-										)
-									}
-								}
-								if (isSelected) {
-									Icon(
-										imageVector = Icons.Default.Check,
-										contentDescription = null,
-										tint = NemuriTheme.colors.cyan,
-										modifier = Modifier.size(18.dp),
-									)
-								}
-							}
+							Icon(
+								imageVector = Icons.Default.Close,
+								contentDescription = "Clear search",
+								tint = NemuriTheme.colors.textMuted,
+								modifier = Modifier.size(18.dp),
+							)
 						}
 					}
 				}
 			}
-		}
-	}
-}
 
-@Composable
-private fun HomeSourceHubHeader(
-	homeSourceTitle: String,
-	isLoading: Boolean,
-	visibilityFilter: LibraryVisibilityFilter,
-	onPickHomeSource: () -> Unit,
-	onRefresh: () -> Unit,
-	onSelectVisibility: (LibraryVisibilityFilter) -> Unit,
-) {
-	Column(
-		modifier = Modifier.fillMaxWidth(),
-		verticalArrangement = Arrangement.spacedBy(8.dp),
-	) {
-		Row(
-			modifier = Modifier.fillMaxWidth(),
-			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(8.dp),
-		) {
-			Surface(
-				color = NemuriTheme.colors.tealContainer,
-				shape = RoundedCornerShape(999.dp),
-				modifier = Modifier
-					.weight(1f, fill = false)
-					.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
-					.clip(RoundedCornerShape(999.dp))
-					.clickable(onClick = onPickHomeSource),
-			) {
-				Row(
-					modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-					verticalAlignment = Alignment.CenterVertically,
-					horizontalArrangement = Arrangement.spacedBy(6.dp),
-				) {
-					Icon(
-						imageVector = Icons.Default.Home,
-						contentDescription = null,
-						tint = NemuriTheme.colors.cyan,
-						modifier = Modifier.size(15.dp),
-					)
-					Text(
-						text = "Home: $homeSourceTitle",
-						style = MaterialTheme.typography.labelLarge,
-						color = NemuriTheme.colors.cyan,
-						maxLines = 1,
-						overflow = TextOverflow.Ellipsis,
-					)
-					Icon(
-						imageVector = Icons.Default.ArrowDropDown,
-						contentDescription = "Change Home Source",
-						tint = NemuriTheme.colors.cyan,
-						modifier = Modifier.size(18.dp),
-					)
-				}
-			}
-			IconButton(
-				onClick = onRefresh,
-				enabled = !isLoading,
-				modifier = Modifier.size(32.dp),
-			) {
-				if (isLoading) {
-					CircularProgressIndicator(
-						color = NemuriTheme.colors.cyan,
-						strokeWidth = 2.dp,
-						modifier = Modifier.size(16.dp),
-					)
-				} else {
-					Icon(
-						imageVector = Icons.Default.Refresh,
-						contentDescription = "Refresh Home Source",
-						tint = NemuriTheme.colors.textSecondary,
-						modifier = Modifier.size(18.dp),
-					)
-				}
-			}
-		}
-
-		Row(
-			modifier = Modifier
-				.fillMaxWidth()
-				.horizontalScroll(rememberScrollState()),
-			horizontalArrangement = Arrangement.spacedBy(6.dp),
-		) {
-			LibraryVisibilityFilter.entries.forEach { vis ->
-				val selected = visibilityFilter == vis
-				Surface(
-					color = if (selected) NemuriTheme.colors.surfaceElevated else NemuriTheme.colors.card,
-					shape = RoundedCornerShape(999.dp),
-					modifier = Modifier
-						.border(
-							1.dp,
-							if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-							RoundedCornerShape(999.dp),
-						)
-						.clip(RoundedCornerShape(999.dp))
-						.clickable { onSelectVisibility(vis) },
-				) {
-					Text(
-						text = vis.label,
-						style = MaterialTheme.typography.labelSmall,
-						color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
-						modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-					)
-				}
-			}
-		}
-	}
-}
-
-@Composable
-private fun HomeCarouselCard(
-	manga: Manga,
-	inLibrary: Boolean,
-	cornerRadiusDp: Int,
-	aspectRatio: Float,
-	sharedCoverKey: String,
-	onClick: () -> Unit,
-) {
-	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
-	val coverShape = RoundedCornerShape(safeCorner.dp)
-	Column(
-		modifier = Modifier
-			.width(110.dp)
-			.clickable(onClick = onClick),
-		verticalArrangement = Arrangement.spacedBy(6.dp),
-	) {
-		Box(
-			modifier = Modifier
-				.fillMaxWidth()
-				.aspectRatio(aspectRatio)
-				.clip(coverShape)
-				.border(
-					1.dp,
-					if (inLibrary) NemuriTheme.colors.healthy.copy(alpha = 0.65f) else NemuriTheme.colors.border,
-					coverShape,
-				),
-		) {
-			MangaCoverImage(
-				manga = manga,
-				coverUrl = manga.coverUrl,
-				modifier = Modifier
-					.fillMaxSize()
-					.nemuriSharedCover(sharedCoverKey, safeCorner.dp),
+			HeaderSquareAction(
+				icon = if (isGridMode) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
+				contentDescription = if (isGridMode) "Switch to list view" else "Switch to grid view",
+				tint = NemuriTheme.colors.cyan,
+				onClick = onToggleGridMode,
 			)
-			if (inLibrary) {
-				Surface(
-					color = NemuriTheme.colors.healthy.copy(alpha = 0.92f),
-					shape = RoundedCornerShape(6.dp),
-					modifier = Modifier
-						.align(Alignment.TopEnd)
-						.padding(cornerSafeBadgeInset(safeCorner)),
-				) {
-					NonWrappingBadgeText(
-						text = "SAVED",
-						color = NemuriTheme.colors.onCyan,
-						fontSizeSp = 8.5f,
-						modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-					)
-				}
-			}
+
+			HeaderSquareAction(
+				icon = Icons.Default.Tune,
+				contentDescription = "Sort & language options",
+				onClick = onTuneClick,
+			)
+
+			HeaderSquareAction(
+				icon = Icons.Default.Settings,
+				contentDescription = "Settings",
+				onClick = onSettingsClick,
+			)
 		}
-		Text(
-			text = manga.title,
-			style = MaterialTheme.typography.labelMedium,
-			color = NemuriTheme.colors.textPrimary,
-			minLines = 2,
-			maxLines = 2,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.padding(horizontal = 2.dp),
-		)
 	}
 }
 
 @Composable
-private fun ExploreQuickPill(
+private fun ExploreSegmentedTabs(
+	selectedKind: ExploreCatalogKind,
+	isNovelFirst: Boolean,
+	mangaCount: Int,
+	novelCount: Int,
+	hasExtensionUpdates: Boolean,
+	onSelectKind: (ExploreCatalogKind) -> Unit,
+	onOpenManage: () -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	val orderedKinds = if (isNovelFirst) {
+		listOf(ExploreCatalogKind.NOVELS, ExploreCatalogKind.MANGA)
+	} else {
+		listOf(ExploreCatalogKind.MANGA, ExploreCatalogKind.NOVELS)
+	}
+
+	Surface(
+		color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
+		shape = RoundedCornerShape(16.dp),
+		border = BorderStroke(1.dp, NemuriTheme.colors.border),
+		modifier = modifier
+			.fillMaxWidth()
+			.yorhaTacticalBrackets(),
+	) {
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(4.dp),
+			horizontalArrangement = Arrangement.spacedBy(4.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			orderedKinds.forEach { kind ->
+				val selected = selectedKind == kind
+				val count = if (kind == ExploreCatalogKind.MANGA) mangaCount else novelCount
+				val bg by animateColorAsState(
+					targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+					label = "exploreKindTabBg_${kind.name}",
+				)
+				val fg by animateColorAsState(
+					targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else NemuriTheme.colors.textSecondary,
+					label = "exploreKindTabFg_${kind.name}",
+				)
+				Surface(
+					onClick = { onSelectKind(kind) },
+					color = bg,
+					shape = RoundedCornerShape(12.dp),
+					border = if (selected) {
+						BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f))
+					} else {
+						null
+					},
+					modifier = Modifier
+						.weight(1f)
+						.height(38.dp),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 8.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.Center,
+					) {
+						Text(
+							text = if (count > 0) "${kind.label} ($count)" else kind.label,
+							style = MaterialTheme.typography.labelLarge,
+							fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+							color = fg,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+					}
+				}
+			}
+
+			// 3rd Segmented Tab: Manage (opens Extensions Catalog + shows update badge)
+			Box(modifier = Modifier.weight(1f)) {
+				Surface(
+					onClick = onOpenManage,
+					color = androidx.compose.ui.graphics.Color.Transparent,
+					shape = RoundedCornerShape(12.dp),
+					modifier = Modifier
+						.fillMaxWidth()
+						.height(38.dp),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 8.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.Center,
+					) {
+						Icon(
+							imageVector = Icons.Default.Extension,
+							contentDescription = null,
+							tint = if (hasExtensionUpdates) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(15.dp),
+						)
+						Spacer(modifier = Modifier.width(5.dp))
+						Text(
+							text = "Manage",
+							style = MaterialTheme.typography.labelLarge,
+							fontWeight = FontWeight.Medium,
+							color = if (hasExtensionUpdates) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+							maxLines = 1,
+						)
+					}
+				}
+
+				if (hasExtensionUpdates) {
+					Surface(
+						color = NemuriTheme.colors.cyan,
+						shape = RoundedCornerShape(999.dp),
+						modifier = Modifier
+							.align(Alignment.TopEnd)
+							.offset(x = (-4).dp, y = (-2).dp)
+							.border(1.5.dp, NemuriTheme.colors.surfaceElevated, RoundedCornerShape(999.dp)),
+					) {
+						Text(
+							text = "UPD",
+							style = MaterialTheme.typography.labelSmall,
+							fontSize = 8.5.sp,
+							fontWeight = FontWeight.ExtraBold,
+							color = NemuriTheme.colors.onCyan,
+							modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun ExploreUtilityChip(
 	icon: ImageVector,
 	label: String,
 	onClick: () -> Unit,
-	showDot: Boolean = false,
-	modifier: Modifier = Modifier,
+	highlighted: Boolean = false,
+	isLoading: Boolean = false,
 ) {
 	Surface(
-		color = NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(24.dp),
-		modifier = modifier
-			.height(52.dp)
-			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(24.dp))
-			.clip(RoundedCornerShape(24.dp))
-			.clickable(onClick = onClick),
+		onClick = onClick,
+		enabled = !isLoading,
+		color = if (highlighted) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
+		shape = RoundedCornerShape(999.dp),
+		border = BorderStroke(
+			1.dp,
+			if (highlighted) NemuriTheme.colors.cyan.copy(alpha = 0.55f) else NemuriTheme.colors.border,
+		),
 	) {
 		Row(
-			modifier = Modifier.padding(horizontal = 16.dp),
+			modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
 			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			horizontalArrangement = Arrangement.spacedBy(6.dp),
 		) {
-			BadgedBox(
-				badge = {
-					if (showDot) {
-						Badge(
-							containerColor = NemuriTheme.colors.cyan,
-							modifier = Modifier.size(7.dp),
-						)
-					}
-				},
-			) {
+			if (isLoading) {
+				CircularProgressIndicator(
+					color = NemuriTheme.colors.cyan,
+					strokeWidth = 2.dp,
+					modifier = Modifier.size(13.dp),
+				)
+			} else {
 				Icon(
 					imageVector = icon,
 					contentDescription = null,
 					tint = NemuriTheme.colors.cyan,
-					modifier = Modifier.size(20.dp),
+					modifier = Modifier.size(15.dp),
 				)
 			}
 			Text(
 				text = label,
-				style = MaterialTheme.typography.titleSmall,
-				color = NemuriTheme.colors.textPrimary,
+				style = MaterialTheme.typography.labelMedium,
+				color = if (highlighted) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
 				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
+				softWrap = false,
 			)
 		}
 	}
@@ -1094,7 +931,121 @@ private fun ExploreQuickPill(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ExploreSourceCard(
+private fun ExploreSourceSquircleGridCell(
+	tile: ExploreSourceTile,
+	onClick: () -> Unit,
+	onLongClick: () -> Unit,
+) {
+	val squircleShape = RoundedCornerShape(18.dp)
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clip(RoundedCornerShape(14.dp))
+			.combinedClickable(
+				onClick = onClick,
+				onLongClick = onLongClick,
+			)
+			.padding(horizontal = 2.dp, vertical = 4.dp),
+		horizontalAlignment = Alignment.CenterHorizontally,
+		verticalArrangement = Arrangement.spacedBy(6.dp),
+	) {
+		Box(contentAlignment = Alignment.Center) {
+			Surface(
+				color = NemuriTheme.colors.card,
+				shape = squircleShape,
+				modifier = Modifier
+					.size(56.dp)
+					.border(
+						width = if (tile.isPinned || tile.isHomeSource) 1.5.dp else 1.dp,
+						color = when {
+							tile.isHomeSource -> NemuriTheme.colors.cyan
+							tile.isPinned -> NemuriTheme.colors.cyan.copy(alpha = 0.55f)
+							else -> NemuriTheme.colors.border
+						},
+						shape = squircleShape,
+					),
+			) {
+				SubcomposeAsyncImage(
+					model = tile.sourceInfo.mangaSource.faviconUri(),
+					contentDescription = tile.title,
+					contentScale = ContentScale.Crop,
+					error = {
+						Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+							Icon(
+								imageVector = if (tile.isNovel) Icons.AutoMirrored.Filled.MenuBook else Icons.Default.Explore,
+								contentDescription = null,
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(22.dp),
+							)
+						}
+					},
+					modifier = Modifier
+						.fillMaxSize()
+						.padding(4.dp)
+						.clip(RoundedCornerShape(14.dp)),
+				)
+			}
+
+			// Top-right corner indicator for Home Source or Pin
+			if (tile.isHomeSource || tile.isPinned) {
+				Surface(
+					color = NemuriTheme.colors.cyan,
+					shape = CircleShape,
+					modifier = Modifier
+						.align(Alignment.TopEnd)
+						.offset(x = 3.dp, y = (-3).dp)
+						.size(17.dp)
+						.border(1.5.dp, NemuriTheme.colors.background, CircleShape),
+				) {
+					Box(contentAlignment = Alignment.Center) {
+						Icon(
+							imageVector = if (tile.isHomeSource) Icons.Default.Home else Icons.Default.PushPin,
+							contentDescription = null,
+							tint = NemuriTheme.colors.onCyan,
+							modifier = Modifier.size(10.dp),
+						)
+					}
+				}
+			}
+
+			if (tile.isNsfw) {
+				Surface(
+					color = NemuriTheme.colors.danger,
+					shape = RoundedCornerShape(4.dp),
+					modifier = Modifier
+						.align(Alignment.BottomEnd)
+						.offset(x = 2.dp, y = 2.dp)
+						.border(1.dp, NemuriTheme.colors.background, RoundedCornerShape(4.dp)),
+				) {
+					NonWrappingBadgeText(
+						text = "18+",
+						color = androidx.compose.ui.graphics.Color.White,
+						fontSizeSp = 7.5f,
+						modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.5.dp),
+					)
+				}
+			}
+		}
+
+		Text(
+			text = tile.title,
+			style = MaterialTheme.typography.labelMedium,
+			fontSize = 11.5.sp,
+			lineHeight = 14.sp,
+			fontWeight = FontWeight.Medium,
+			color = NemuriTheme.colors.textPrimary,
+			textAlign = TextAlign.Center,
+			minLines = 2,
+			maxLines = 2,
+			overflow = TextOverflow.Ellipsis,
+			modifier = Modifier.fillMaxWidth(),
+		)
+	}
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ExploreSourceListCard(
 	tile: ExploreSourceTile,
 	onClick: () -> Unit,
 	onLongClick: () -> Unit,
@@ -1107,7 +1058,11 @@ private fun ExploreSourceCard(
 			.fillMaxWidth()
 			.border(
 				1.dp,
-				if (tile.isPinned) NemuriTheme.colors.cyan.copy(alpha = 0.42f) else NemuriTheme.colors.border,
+				when {
+					tile.isHomeSource -> NemuriTheme.colors.cyan
+					tile.isPinned -> NemuriTheme.colors.cyan.copy(alpha = 0.42f)
+					else -> NemuriTheme.colors.border
+				},
 				RoundedCornerShape(16.dp),
 			)
 			.clip(RoundedCornerShape(16.dp))
@@ -1117,7 +1072,7 @@ private fun ExploreSourceCard(
 			),
 	) {
 		Row(
-			modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+			modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(12.dp),
 		) {
@@ -1125,7 +1080,7 @@ private fun ExploreSourceCard(
 				color = NemuriTheme.colors.surfaceElevated,
 				shape = RoundedCornerShape(12.dp),
 				modifier = Modifier
-					.size(40.dp)
+					.size(42.dp)
 					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
 			) {
 				SubcomposeAsyncImage(
@@ -1135,7 +1090,7 @@ private fun ExploreSourceCard(
 					error = {
 						Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
 							Icon(
-								imageVector = if (tile.isNovel) Icons.Default.MenuBook else Icons.Default.Explore,
+								imageVector = if (tile.isNovel) Icons.AutoMirrored.Filled.MenuBook else Icons.Default.Explore,
 								contentDescription = null,
 								tint = NemuriTheme.colors.cyan,
 								modifier = Modifier.size(18.dp),
@@ -1148,13 +1103,32 @@ private fun ExploreSourceCard(
 				)
 			}
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-				Text(
-					text = tile.title,
-					style = MaterialTheme.typography.titleSmall,
-					color = NemuriTheme.colors.textPrimary,
-					maxLines = 2,
-					overflow = TextOverflow.Ellipsis,
-				)
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
+				) {
+					Text(
+						text = tile.title,
+						style = MaterialTheme.typography.titleSmall,
+						color = NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+						modifier = Modifier.weight(1f, fill = false),
+					)
+					if (tile.isHomeSource) {
+						Surface(
+							color = NemuriTheme.colors.tealContainer,
+							shape = RoundedCornerShape(5.dp),
+						) {
+							NonWrappingBadgeText(
+								text = "HUB",
+								color = NemuriTheme.colors.cyan,
+								fontSizeSp = 8.5f,
+								modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+							)
+						}
+					}
+				}
 				val meta = tile.summary ?: if (tile.isNovel) "Novel" else "Manga"
 				Text(
 					text = meta,
@@ -1214,8 +1188,12 @@ private fun SectionHeading(text: String) {
 	Text(
 		text = text,
 		style = MaterialTheme.typography.labelSmall,
+		fontWeight = FontWeight.Bold,
 		color = NemuriTheme.colors.cyan,
-		modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+		modifier = Modifier
+			.padding(top = 4.dp, bottom = 2.dp)
+			.yorhaTacticalBrackets()
+			.padding(horizontal = 4.dp, vertical = 2.dp),
 	)
 }
 

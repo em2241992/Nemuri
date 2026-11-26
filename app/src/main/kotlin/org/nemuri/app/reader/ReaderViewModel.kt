@@ -38,6 +38,7 @@ import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
 import org.koitharu.kotatsu.core.exceptions.InteractiveActionRequiredException
 import org.koitharu.kotatsu.core.model.getLocalizedTitle
 import org.koitharu.kotatsu.core.model.getPreferredBranch
+import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.model.isNsfw
 import org.koitharu.kotatsu.core.model.parcelable.ParcelableManga
@@ -48,7 +49,9 @@ import org.koitharu.kotatsu.core.parser.MangaDataRepository
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
+import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.core.util.ext.isZipUri
 import org.koitharu.kotatsu.details.data.MangaDetails
@@ -111,6 +114,7 @@ data class ReaderUiState(
 	val manga: Manga? = null,
 	val details: MangaDetails? = null,
 	val title: String = "",
+	val sourceTitle: String = "",
 	val chapterTitle: String = "",
 	val currentChapterId: Long = 0L,
 	val chapters: List<ReaderChapterItem> = emptyList(),
@@ -145,6 +149,14 @@ data class ReaderUiState(
 	val isSeamlessStitchEnabled: Boolean = true,
 	val tapZoneMode: ReaderTapZoneMode = ReaderTapZoneMode.DEFAULT,
 	val isDoubleTapSmartZoom: Boolean = true,
+	val scrubberEdge: ReaderScrubberEdge = ReaderScrubberEdge.RIGHT,
+	val selectionMenuStyle: SelectionMenuStyle = SelectionMenuStyle.VISUAL_DIAGRAM,
+	val defaultWebtoonZoomOutPercent: Int = 0,
+	val isWebtoonGapsEnabled: Boolean = false,
+	val isDoubleOnLandscape: Boolean = true,
+	val isDoubleOnFoldable: Boolean = true,
+	val doublePagesSensitivity: Float = 0.5f,
+	val boundsRevision: Int = 0,
 	val showPageNumbers: Boolean = false,
 	val chapterStartPageNumber: Int = 1,
 	val chapterEndPageNumber: Int = 1,
@@ -209,6 +221,13 @@ class ReaderViewModel @Inject constructor(
 			isSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
 			tapZoneMode = ReaderTapZoneMode.fromKey(settings.readerTapZoneMode),
 			isDoubleTapSmartZoom = settings.isReaderDoubleTapFill,
+			scrubberEdge = settings.readerScrubberEdge,
+			selectionMenuStyle = settings.selectionMenuStyle,
+			defaultWebtoonZoomOutPercent = settings.defaultWebtoonZoomOutPercent,
+			isWebtoonGapsEnabled = settings.isWebtoonGapsEnabled,
+			isDoubleOnLandscape = settings.isReaderDoubleOnLandscape,
+			isDoubleOnFoldable = settings.isReaderDoubleOnFoldable,
+			doublePagesSensitivity = settings.readerDoublePagesSensitivity,
 			showPageNumbers = settings.isPagesNumbersEnabled,
 			epubTheme = settings.epubTheme,
 			epubFontSize = settings.epubFontSize,
@@ -231,6 +250,8 @@ class ReaderViewModel @Inject constructor(
 	private var latestChapterPageIndex: Int = 0
 	private var latestChapterEndPageIndex: Int = 0
 	private var latestScrollOffset: Int = 0
+	@Volatile
+	private var isProgressDirty: Boolean = false
 	private val rawPagesByChapter = java.util.concurrent.ConcurrentHashMap<Long, List<MangaPage>>()
 	private val pageBoundsCache = java.util.concurrent.ConcurrentHashMap<Long, Size>()
 
@@ -336,6 +357,60 @@ class ReaderViewModel @Inject constructor(
 		settings.isReaderDoubleTapFill = enabled
 		_uiState.update { it.copy(isDoubleTapSmartZoom = enabled) }
 	}
+
+	fun setScrubberEdge(edge: ReaderScrubberEdge) {
+		settings.readerScrubberEdge = edge
+		_uiState.update { it.copy(scrubberEdge = edge) }
+	}
+
+	fun setSelectionMenuStyle(style: SelectionMenuStyle) {
+		settings.selectionMenuStyle = style
+		_uiState.update { it.copy(selectionMenuStyle = style) }
+	}
+
+	fun setDefaultWebtoonZoomOutPercent(percent: Int) {
+		val clamped = percent.coerceIn(0, 50)
+		settings.defaultWebtoonZoomOutPercent = clamped
+		_uiState.update { it.copy(defaultWebtoonZoomOutPercent = clamped) }
+	}
+
+	fun setWebtoonGapsEnabled(enabled: Boolean) {
+		settings.isWebtoonGapsEnabled = enabled
+		_uiState.update { it.copy(isWebtoonGapsEnabled = enabled) }
+	}
+
+	fun setDoubleOnLandscape(enabled: Boolean) {
+		settings.isReaderDoubleOnLandscape = enabled
+		_uiState.update { it.copy(isDoubleOnLandscape = enabled) }
+	}
+
+	fun setDoubleOnFoldable(enabled: Boolean) {
+		settings.isReaderDoubleOnFoldable = enabled
+		_uiState.update { it.copy(isDoubleOnFoldable = enabled) }
+	}
+
+	fun setDoublePagesSensitivity(sensitivity: Float) {
+		val clamped = sensitivity.coerceIn(0f, 1f)
+		settings.readerDoublePagesSensitivity = clamped
+		_uiState.update { it.copy(doublePagesSensitivity = clamped) }
+	}
+
+	fun setKeepScreenOn(enabled: Boolean) {
+		settings.setReaderKeepScreenOn(enabled)
+		_uiState.update { it.copy(keepScreenOn = enabled) }
+	}
+
+	fun setShowPageNumbers(enabled: Boolean) {
+		settings.setPagesNumbersEnabled(enabled)
+		_uiState.update { it.copy(showPageNumbers = enabled) }
+	}
+
+	fun setVolumeButtonsEnabled(enabled: Boolean) {
+		settings.setReaderVolumeButtonsEnabled(enabled)
+		_uiState.update { it.copy(volumeButtonsEnabled = enabled) }
+	}
+
+	fun getCachedPageSize(pageId: Long): Size? = pageBoundsCache[pageId]
 
 	fun onMangaPageSelected(globalIndex: Int) {
 		val pages = _uiState.value.pages
@@ -619,7 +694,7 @@ class ReaderViewModel @Inject constructor(
 	fun onPauseReading() {
 		autosaveJob?.cancel()
 		val mangaId = activeDetails?.id
-		viewModelScope.launch(Dispatchers.IO + NonCancellable) {
+		CoroutineScope(SupervisorJob() + Dispatchers.IO + NonCancellable).launch {
 			persistProgressNow()
 			if (mangaId != null) {
 				statsCollector.flushSessionNow(mangaId)
@@ -635,9 +710,14 @@ class ReaderViewModel @Inject constructor(
 	}
 
 	override fun onCleared() {
+		autosaveJob?.cancel()
 		neuralPreloadJob?.cancel()
 		activeDetails?.id?.let { statsCollector.onPauseOrClose(it) }
-		CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+		val shouldFlushProgress = isProgressDirty
+		CoroutineScope(SupervisorJob() + Dispatchers.IO + NonCancellable).launch {
+			if (shouldFlushProgress) {
+				persistProgressNow()
+			}
 			pageUpscaleEngine.releaseSession()
 		}
 		super.onCleared()
@@ -771,8 +851,11 @@ class ReaderViewModel @Inject constructor(
 		if (bounds != null && !bounds.isEmpty) {
 			val size = Size(bounds.width(), bounds.height())
 			val prevSize = pageBoundsCache.put(page.id, size)
-			if (prevSize == null && settings.isReaderSeamlessStitchEnabled) {
-				maybeStitchDiscoveredSliver(page.chapterId, size)
+			if (prevSize == null) {
+				_uiState.update { it.copy(boundsRevision = it.boundsRevision + 1) }
+				if (settings.isReaderSeamlessStitchEnabled) {
+					maybeStitchDiscoveredSliver(page.chapterId, size)
+				}
 			}
 		}
 		return uri to bounds
@@ -870,9 +953,12 @@ class ReaderViewModel @Inject constructor(
 
 	private suspend fun persistProgressNow() {
 		val state = _uiState.value
-		val manga = activeDetails?.sourceManga ?: state.manga ?: return
+		val manga = activeDetails?.toManga() ?: state.manga ?: return
 		val chapterId = state.currentChapterId
-		if (chapterId == 0L || effectiveIncognito || isPeek) return
+		if (chapterId == 0L || effectiveIncognito || isPeek) {
+			isProgressDirty = false
+			return
+		}
 		val fraction = if (state.isTextMode) {
 			val total = state.novelBlocks.size.coerceAtLeast(1)
 			(state.novelCurrentBlockIndex + 1f) / total
@@ -890,6 +976,7 @@ class ReaderViewModel @Inject constructor(
 				percent = percent,
 				force = false,
 			)
+			isProgressDirty = false
 		}
 	}
 
@@ -957,6 +1044,7 @@ class ReaderViewModel @Inject constructor(
 								manga = manga,
 								details = loaded,
 								title = manga.title,
+								sourceTitle = manga.source.getTitle(context),
 								isIncognito = effectiveIncognito,
 								isLoading = false,
 								errorMessage = "No chapters available to read.",
@@ -1019,6 +1107,7 @@ class ReaderViewModel @Inject constructor(
 					manga = manga,
 					details = details,
 					title = manga.title,
+					sourceTitle = manga.source.getTitle(context),
 					chapterTitle = chapterDisplayName(chapter),
 					currentChapterId = chapter.id,
 					chapters = activeBranchChapters.map { c ->
@@ -1060,6 +1149,10 @@ class ReaderViewModel @Inject constructor(
 						)
 					}
 					observeCurrentBookmark()
+					if (!effectiveIncognito && !isPeek) {
+						isProgressDirty = true
+						persistProgressNow()
+					}
 				} else {
 					val resolvedMode = mangaDataRepository.getReaderMode(manga.id)
 						?: detectReaderModeUseCase(manga, initialState)
@@ -1108,6 +1201,10 @@ class ReaderViewModel @Inject constructor(
 						}
 					}
 					observeCurrentBookmark()
+					if (!effectiveIncognito && !isPeek) {
+						isProgressDirty = true
+						persistProgressNow()
+					}
 				}
 			} catch (e: CloudFlareProtectedException) {
 				_uiState.update {
@@ -1163,8 +1260,9 @@ class ReaderViewModel @Inject constructor(
 		inChapterFraction: Float,
 	) {
 		if (effectiveIncognito || isPeek) return
-		val manga = activeDetails?.sourceManga ?: _uiState.value.manga ?: return
+		val manga = activeDetails?.toManga() ?: _uiState.value.manga ?: return
 		val percent = computeOverallPercent(chapterId, inChapterFraction)
+		isProgressDirty = true
 		autosaveJob?.cancel()
 		autosaveJob = viewModelScope.launch(Dispatchers.IO) {
 			delay(900L)
@@ -1177,6 +1275,7 @@ class ReaderViewModel @Inject constructor(
 					percent = percent,
 					force = false,
 				)
+				isProgressDirty = false
 			}
 		}
 	}

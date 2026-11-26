@@ -11,9 +11,47 @@
 -keep class org.jsoup.internal.StringUtil
 
 # ============================================================
-# Shizuku user service
+# Native JNI (libjxldec.so, AVIF, QuickJS, Zstd) & Image Decoders
 # ============================================================
--keep class org.koitharu.kotatsu.extensions.install.shizuku.** { *; }
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+-keep class org.koitharu.kotatsu.core.image.JxlDecoder { *; }
+-keep class org.aomedia.avif.android.** { *; }
+-dontwarn org.aomedia.avif.android.**
+-keep class com.davemorrissey.labs.subscaleview.** { *; }
+-keep class * implements com.davemorrissey.labs.subscaleview.decoder.ImageDecoder {
+    public <init>(...);
+    *;
+}
+-keep class * implements com.davemorrissey.labs.subscaleview.decoder.ImageRegionDecoder {
+    public <init>(...);
+    *;
+}
+
+# ============================================================
+# Shizuku user service, AIDL & silent installer receivers
+# ============================================================
+-keep class org.koitharu.kotatsu.extensions.install.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keep interface rikka.shizuku.** { *; }
+-keep class moe.shizuku.** { *; }
+-keep interface moe.shizuku.** { *; }
+-dontwarn rikka.shizuku.**
+-dontwarn moe.shizuku.**
+
+# ============================================================
+# LNReader / Novel Plugin Host & WebView @JavascriptInterface
+# ============================================================
+-keepattributes JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class org.koitharu.kotatsu.lnreader.** { *; }
+-keep interface org.koitharu.kotatsu.lnreader.** { *; }
+-keep class ireader.** { *; }
+-keep interface ireader.** { *; }
+-dontwarn ireader.**
 
 # ============================================================
 # Mihon Extension Support
@@ -157,3 +195,35 @@
     public <init>(...);
     public protected *;
 }
+
+# ============================================================
+# Room Entities/DAOs, Backup JSON/Proto Models, Enums & Parsers
+# ============================================================
+-keep @androidx.room.Entity class * { *; }
+-keep @androidx.room.Dao interface * { *; }
+-keep @androidx.room.Dao class * { *; }
+-keep class * extends androidx.room.RoomDatabase { *; }
+-keep class org.koitharu.kotatsu.**.*_Impl { *; }
+
+-keep @kotlinx.serialization.Serializable class org.koitharu.kotatsu.** { *; }
+-keepclassmembers class * {
+    @kotlinx.serialization.SerialName <fields>;
+    @kotlinx.serialization.protobuf.ProtoNumber <fields>;
+}
+-keep class org.koitharu.kotatsu.backup.** { *; }
+-keep class org.koitharu.kotatsu.sync.** { *; }
+-keep class org.koitharu.kotatsu.parsers.** { *; }
+-keep interface org.koitharu.kotatsu.parsers.** { *; }
+
+-keep enum org.koitharu.kotatsu.** { *; }
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+    public static final <fields>;
+}
+
+# Discord RPC (KizzyRPC) & Junrar (.cbr)
+-keep class com.my.kizzyrpc.** { *; }
+-dontwarn com.my.kizzyrpc.**
+-dontwarn com.github.junrar.**
+-dontwarn org.apache.commons.logging.**

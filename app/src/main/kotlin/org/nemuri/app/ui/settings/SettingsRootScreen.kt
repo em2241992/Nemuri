@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Download
@@ -22,7 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -37,6 +37,7 @@ fun SettingsRootScreen(
 	viewModel: SettingsViewModel,
 	onNavigateSection: (SettingsSection) -> Unit,
 	onBack: () -> Unit,
+	onRerunSetupWizard: () -> Unit = { viewModel.rerunSetupWizard() },
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -45,7 +46,7 @@ fun SettingsRootScreen(
 		AppCompatDelegate.MODE_NIGHT_YES -> "Dark"
 		else -> "System"
 	}
-	val schemeName = stringResource(state.colorScheme.titleResId)
+	val schemeName = colorSchemeDisplayLabel(state.colorScheme)
 	val appearanceSubtitle = buildString {
 		append(themeLabel)
 		if (state.isAmoled) append(" + AMOLED")
@@ -165,9 +166,16 @@ fun SettingsRootScreen(
 					title = SettingsSection.PRIVACY.title,
 					subtitle = buildString {
 						if (state.isIncognitoEnabled) append("Incognito ON • ")
-						append("DoH: ${state.dnsOverHttps.name}")
+						append("DoH: ${dohProviderLabel(state.dnsOverHttps)}")
 					},
 					onClick = { onNavigateSection(SettingsSection.PRIVACY) },
+				)
+				SettingsRowDivider()
+				SettingsActionRow(
+					icon = Icons.Default.AutoAwesome,
+					title = "Re-run Setup Wizard",
+					subtitle = "Launch the Nemuri welcome & configuration tour again",
+					onClick = onRerunSetupWizard,
 				)
 				SettingsRowDivider()
 				SettingsNavRow(

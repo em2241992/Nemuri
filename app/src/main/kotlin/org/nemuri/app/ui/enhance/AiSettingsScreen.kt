@@ -70,6 +70,7 @@ import org.koitharu.kotatsu.ai.domain.AiMode
 import org.koitharu.kotatsu.ai.domain.LocalLlmAccelerator
 import org.koitharu.kotatsu.ai.domain.NanoAvailability
 import org.koitharu.kotatsu.ai.domain.RecapDepth
+import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.settings.SettingsGroupCard
 import org.nemuri.app.ui.settings.SettingsRowDivider
 import org.nemuri.app.ui.settings.SettingsScaffold
@@ -110,6 +111,44 @@ fun AiSettingsScreen(
 		}
 	}
 
+	val activeAiDelegateLabel = remember(
+		state.aiMode,
+		state.nanoAvailability,
+		state.localAccelerator,
+		state.localCatalog,
+		state.isLocalModelLoadedInRam,
+		state.hasGeminiKey,
+		state.geminiModel,
+		state.remoteUrl,
+		state.remoteModel,
+	) {
+		when (state.aiMode) {
+			AiMode.OFF -> "Idle: AI Disabled"
+			AiMode.GEMINI_NANO -> if (state.nanoAvailability == NanoAvailability.AVAILABLE) {
+				"Active: Gemini Nano (AICore NPU)"
+			} else {
+				"Idle: Gemini Nano (${state.nanoAvailability.label})"
+			}
+			AiMode.LOCAL_MODEL -> {
+				val ramSuffix = if (state.isLocalModelLoadedInRam) " • In RAM" else ""
+				"Active: LiteRT (${state.localAccelerator.name}$ramSuffix)"
+			}
+			AiMode.GEMINI_API -> "Active: Cloud Gemini (${state.geminiModel})"
+			AiMode.REMOTE_OPENAI -> {
+				val lower = state.remoteUrl.lowercase()
+				val endpointKind = if (":11434" in lower || "ollama" in lower) "LAN Ollama" else "Remote OpenAI"
+				"Active: $endpointKind (${state.remoteModel})"
+			}
+			AiMode.AUTO -> when {
+				state.nanoAvailability == NanoAvailability.AVAILABLE -> "Active: Gemini Nano (AICore NPU)"
+				state.hasGeminiKey -> "Active: Cloud Gemini (${state.geminiModel})"
+				state.localCatalog.any { it.isSelected && it.isDownloaded } ->
+					"Active: LiteRT (${state.localAccelerator.name})"
+				else -> "Active: Auto AI Router"
+			}
+		}
+	}
+
 	SettingsScaffold(
 		title = "AI Engine & Recaps",
 		subtitle = "Pluggable on-device, LAN Ollama, or Cloud API",
@@ -120,6 +159,12 @@ fun AiSettingsScreen(
 			contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 36.dp),
 			verticalArrangement = Arrangement.spacedBy(14.dp),
 		) {
+			item {
+				HardwareTelemetryStrip(
+					activeDelegateOverride = activeAiDelegateLabel,
+				)
+			}
+
 			item {
 				SettingsGroupCard("Routing Mode") {
 					Column(

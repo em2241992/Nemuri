@@ -7,66 +7,42 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
-import org.koitharu.kotatsu.core.exceptions.InteractiveActionRequiredException
 import org.koitharu.kotatsu.core.model.MangaSourceInfo
 import org.koitharu.kotatsu.core.model.getSummary
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.homeUrl
 import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.model.isNsfw
-import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
-import org.koitharu.kotatsu.core.prefs.observeAsFlow
+import org.koitharu.kotatsu.core.prefs.SourceSettings
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
-import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
-import org.nemuri.app.browser.WebViewChallengeAction
-import org.nemuri.app.browser.toWebViewChallengeAction
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.explore.data.SourceLanguage
 import org.koitharu.kotatsu.explore.data.SourceLanguageVariant
 import org.koitharu.kotatsu.explore.data.SourcesSortOrder
 import org.koitharu.kotatsu.explore.domain.ExploreRepository
 import org.koitharu.kotatsu.extensions.runtime.normalizeExternalExtensionLangCode
-import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
-import org.koitharu.kotatsu.list.domain.ListSortOrder
+import org.koitharu.kotatsu.mihon.model.MihonMangaSource
 import org.koitharu.kotatsu.parsers.model.Manga
-import org.koitharu.kotatsu.parsers.model.MangaListFilter
 import org.koitharu.kotatsu.parsers.model.MangaSource
 import org.koitharu.kotatsu.parsers.model.SortOrder
-import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
 import org.koitharu.kotatsu.settings.sources.catalog.ExtensionStoreManager
-import org.koitharu.kotatsu.suggestions.domain.SuggestionRepository
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
 import javax.inject.Inject
-import javax.inject.Provider
 
-enum class ExploreSourceFilter(val label: String) {
-	ALL("All"),
-	PINNED("Pinned"),
+enum class ExploreCatalogKind(val label: String) {
 	MANGA("Manga"),
 	NOVELS("Novels"),
-}
-
-enum class LibraryVisibilityFilter(val label: String) {
-	ALL("All Titles"),
-	NOT_IN_LIBRARY("Not in Library"),
-	IN_LIBRARY("In Library"),
 }
 
 @Immutable
@@ -79,49 +55,27 @@ data class ExploreSourceTile(
 	val isNovel: Boolean,
 	val isNsfw: Boolean,
 	val isPinned: Boolean,
-)
-
-@Immutable
-data class HomeHubCarousel(
-	val id: String,
-	val title: String,
-	val items: List<Manga>,
-	val sortOrder: SortOrder? = null,
+	val isHomeSource: Boolean,
 )
 
 @Immutable
 data class ExploreUiState(
 	val sources: List<ExploreSourceTile> = emptyList(),
 	val allEnabledSources: List<ExploreSourceTile> = emptyList(),
+	val mangaSourceCount: Int = 0,
+	val novelSourceCount: Int = 0,
 	val allEnabledCount: Int = 0,
-	val activeFilter: ExploreSourceFilter = ExploreSourceFilter.ALL,
+	val selectedKind: ExploreCatalogKind = ExploreCatalogKind.MANGA,
+	val isNovelTabFirst: Boolean = false,
+	val isSourcesGridMode: Boolean = true,
+	val sourcesGridColumns: Int = 4,
 	val sourceQuery: String = "",
 	val sortOrder: SourcesSortOrder = SourcesSortOrder.ALPHABETIC,
 	val languages: List<SourceLanguage> = emptyList(),
 	val isLoadingSources: Boolean = false,
 	val hasExtensionUpdates: Boolean = false,
 	val isFindingRandom: Boolean = false,
-	// Neko-style single Home Source Hub
-	val homeSource: ExploreSourceTile? = null,
-	val isHomeHubLoading: Boolean = false,
-	val homeHubError: String? = null,
-	val homeHubCloudFlare: CloudFlareProtectedException? = null,
-	val homeHubInteractive: InteractiveActionRequiredException? = null,
-	val homeHubBrowserUrl: String? = null,
-	val homeCarousels: List<HomeHubCarousel> = emptyList(),
-	val visibilityFilter: LibraryVisibilityFilter = LibraryVisibilityFilter.ALL,
-	val libraryMangaIds: Set<Long> = emptySet(),
-	val libraryMangaUrls: Set<String> = emptySet(),
-)
-
-private data class HomeHubRawState(
-	val sourceName: String? = null,
-	val isLoading: Boolean = false,
-	val error: String? = null,
-	val cloudFlare: CloudFlareProtectedException? = null,
-	val interactive: InteractiveActionRequiredException? = null,
-	val browserUrl: String? = null,
-	val carousels: List<HomeHubCarousel> = emptyList(),
+	val homeSourceName: String? = null,
 )
 
 @HiltViewModel
@@ -129,349 +83,156 @@ class ExploreViewModel @Inject constructor(
 	@ApplicationContext private val context: Context,
 	private val sourcesRepository: MangaSourcesRepository,
 	private val exploreRepository: ExploreRepository,
-	private val mangaRepositoryFactoryProvider: Provider<MangaRepository.Factory>,
-	private val favouritesRepository: FavouritesRepository,
-	private val suggestionRepository: SuggestionRepository,
 	private val extensionStoreManager: ExtensionStoreManager,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
 
-	private val activeFilter = MutableStateFlow(ExploreSourceFilter.ALL)
-	private val sourceQuery = MutableStateFlow("")
-	private val isFindingRandom = MutableStateFlow(false)
+	private val selectedKindFlow = MutableStateFlow(
+		if (settings.isNovelTabFirst) ExploreCatalogKind.NOVELS else ExploreCatalogKind.MANGA,
+	)
+	private val sourceQueryFlow = MutableStateFlow("")
+	private val isFindingRandomFlow = MutableStateFlow(false)
 	private val languageRefreshTrigger = MutableStateFlow(0)
-	private val visibilityFilterFlow = MutableStateFlow(LibraryVisibilityFilter.ALL)
-	private val homeHubRawFlow = MutableStateFlow(HomeHubRawState())
 
-	@Volatile
-	private var loadedHomeSourceName: String? = null
-	private var homeHubJob: Job? = null
-
-	private val sourcesMetadataFlow = combine(
-		sourcesRepository.observeEnabledSources(),
-		sourcesRepository.observeMihonLoadingState(),
-		extensionStoreManager.hasUpdates,
-		settings.observeAsFlow(AppSettings.KEY_SOURCES_ORDER) { sourcesSortOrder },
-		combine(
-			settings.observeChanges()
-				.filter {
-					it == null ||
-						it == AppSettings.KEY_HIDDEN_SOURCE_LANGUAGES ||
-						it == AppSettings.KEY_MIHON_HIDDEN_PACKAGES ||
-						it == AppSettings.KEY_LN_HIDDEN_PLUGINS ||
-						it == AppSettings.KEY_EXPLORE_HOME_SOURCE
-				}
-				.onStart { emit(null) },
-			languageRefreshTrigger,
-		) { _, _ -> sourcesRepository.getSourceLanguages() },
-	) { enabledSources, isLoading, hasUpdates, sortOrder, languages ->
-		SourcesMetadataSnapshot(
-			enabledSources = enabledSources,
-			isLoading = isLoading,
-			hasUpdates = hasUpdates,
-			sortOrder = sortOrder,
-			languages = languages,
+	private val prefsAndLanguagesFlow = combine(
+		settings.observeChanges()
+			.filter { key ->
+				key == null ||
+					key == AppSettings.KEY_SOURCES_ORDER ||
+					key == AppSettings.KEY_SOURCES_GRID ||
+					key == AppSettings.KEY_SOURCES_GRID_COLUMNS ||
+					key == AppSettings.KEY_EXPLORE_NOVEL_TAB_FIRST ||
+					key == AppSettings.KEY_EXPLORE_HOME_SOURCE ||
+					key == AppSettings.KEY_HIDDEN_SOURCE_LANGUAGES ||
+					key == AppSettings.KEY_MIHON_HIDDEN_PACKAGES ||
+					key == AppSettings.KEY_LN_HIDDEN_PLUGINS
+			}
+			.onStart { emit(null) },
+		languageRefreshTrigger,
+	) { _, _ ->
+		ExplorePrefsSnapshot(
+			sortOrder = settings.sourcesSortOrder,
+			isSourcesGridMode = settings.isSourcesGridMode,
+			sourcesGridColumns = settings.sourcesGridColumns,
+			isNovelTabFirst = settings.isNovelTabFirst,
 			preferredHomeSourceName = settings.exploreHomeSource,
+			languages = sourcesRepository.getSourceLanguages(),
 		)
 	}
 
-	private val libraryMembershipFlow = favouritesRepository.observeAll(ListSortOrder.NEWEST, emptySet(), 2000)
-
-	init {
-		viewModelScope.launch(Dispatchers.IO) {
-			sourcesMetadataFlow
-				.map { meta ->
-					val enabled = meta.enabledSources
-					val preferred = enabled.firstOrNull { it.name == meta.preferredHomeSourceName }
-						?: enabled.firstOrNull { it.isPinned && !it.isNovelSource }
-						?: enabled.firstOrNull { !it.isNovelSource }
-						?: enabled.firstOrNull()
-					preferred?.toExploreSourceTile()
-				}
-				.distinctUntilChanged { a, b -> a?.sourceName == b?.sourceName }
-				.collect { resolvedHome ->
-					if (resolvedHome == null) {
-						loadedHomeSourceName = null
-						homeHubJob?.cancel()
-						homeHubRawFlow.value = HomeHubRawState()
-					} else if (resolvedHome.sourceName != loadedHomeSourceName) {
-						triggerHomeHubLoad(resolvedHome)
-					}
-				}
-		}
+	private val runtimeSourcesFlow = combine(
+		sourcesRepository.observeEnabledSources(),
+		sourcesRepository.observeMihonLoadingState(),
+		extensionStoreManager.hasUpdates,
+	) { enabled, isLoading, hasUpdates ->
+		Triple(enabled, isLoading, hasUpdates)
 	}
 
-	private fun MangaSourceInfo.toExploreSourceTile() = ExploreSourceTile(
-		sourceInfo = this,
-		sourceName = name,
-		title = getTitle(context),
-		summary = getSummary(context),
-		homeUrl = homeUrl,
-		isNovel = isNovelSource,
-		isNsfw = isNsfw(),
-		isPinned = isPinned,
-	)
-
 	val uiState: StateFlow<ExploreUiState> = combine(
-		sourcesMetadataFlow,
-		combine(
-			activeFilter,
-			sourceQuery,
-			isFindingRandom,
-			visibilityFilterFlow,
-		) { f, q, r, v -> QuadControls(f, q, r, v) },
-		homeHubRawFlow,
-		libraryMembershipFlow,
-		suggestionRepository.observeRandomList(12),
-	) { meta, controls, hubRaw, favManga, storedSuggestions ->
-		val trimmed = controls.query.trim()
-		val allTiles = meta.enabledSources.map { it.toExploreSourceTile() }
+		runtimeSourcesFlow,
+		prefsAndLanguagesFlow,
+		selectedKindFlow,
+		sourceQueryFlow,
+		isFindingRandomFlow,
+	) { (enabledSources, isLoading, hasUpdates), prefs, selectedKind, query, findingRandom ->
+		val trimmed = query.trim()
+		val resolvedHomeName = prefs.preferredHomeSourceName
+			?: enabledSources.firstOrNull { it.isPinned && !it.isNovelSource }?.name
+			?: enabledSources.firstOrNull { !it.isNovelSource }?.name
+			?: enabledSources.firstOrNull()?.name
 
-		val filteredTiles = allTiles
-			.filter { tile ->
-				when (controls.filter) {
-					ExploreSourceFilter.ALL -> true
-					ExploreSourceFilter.PINNED -> tile.isPinned
-					ExploreSourceFilter.MANGA -> !tile.isNovel
-					ExploreSourceFilter.NOVELS -> tile.isNovel
-				}
-			}
-			.filter { tile ->
-				trimmed.isEmpty() ||
-					tile.title.contains(trimmed, ignoreCase = true) ||
-					tile.summary?.contains(trimmed, ignoreCase = true) == true
-			}
+		val allTiles = enabledSources.map { info ->
+			ExploreSourceTile(
+				sourceInfo = info,
+				sourceName = info.name,
+				title = info.getTitle(context),
+				summary = info.getSummary(context),
+				homeUrl = info.homeUrl,
+				isNovel = info.isNovelSource,
+				isNsfw = info.isNsfw(),
+				isPinned = info.isPinned,
+				isHomeSource = info.name == resolvedHomeName,
+			)
+		}
 
-		val resolvedHome = allTiles.firstOrNull { it.sourceName == meta.preferredHomeSourceName }
-			?: allTiles.firstOrNull { it.isPinned && !it.isNovel }
-			?: allTiles.firstOrNull { !it.isNovel }
-			?: allTiles.firstOrNull()
+		val mangaCount = allTiles.count { !it.isNovel }
+		val novelCount = allTiles.count { it.isNovel }
 
-		val matchingHub = hubRaw.takeIf { resolvedHome != null && it.sourceName == resolvedHome.sourceName }
+		// Auto-fallback to the non-empty kind only if user hasn't searched and current tab has 0 while the other has >0
+		val filteredByKind = allTiles.filter { tile ->
+			when (selectedKind) {
+				ExploreCatalogKind.MANGA -> !tile.isNovel
+				ExploreCatalogKind.NOVELS -> tile.isNovel
+			}
+		}
 
-		val libIds = favManga.mapTo(HashSet(favManga.size)) { it.id }
-		val libUrls = favManga.mapTo(HashSet(favManga.size)) { it.url }
-
-		fun Manga.inLibrary(): Boolean = id in libIds || url in libUrls
-
-		val rawCarousels = buildList {
-			if (matchingHub != null) {
-				addAll(matchingHub.carousels)
-			}
-			val distinctSuggestions = storedSuggestions.distinctBy { it.id }
-			if (distinctSuggestions.isNotEmpty() && none { it.id == "suggested" }) {
-				add(HomeHubCarousel(id = "suggested", title = "Suggested For You", items = distinctSuggestions))
-			}
-		}.mapNotNull { carousel ->
-			val filteredItems = when (controls.visibility) {
-				LibraryVisibilityFilter.ALL -> carousel.items
-				LibraryVisibilityFilter.NOT_IN_LIBRARY -> carousel.items.filterNot { it.inLibrary() }
-				LibraryVisibilityFilter.IN_LIBRARY -> carousel.items.filter { it.inLibrary() }
-			}
-			if (filteredItems.isEmpty() && carousel.items.isNotEmpty() && controls.visibility != LibraryVisibilityFilter.ALL) {
-				carousel.copy(items = emptyList())
-			} else if (filteredItems.isEmpty()) {
-				null
-			} else {
-				carousel.copy(items = filteredItems)
-			}
+		val filteredTiles = filteredByKind.filter { tile ->
+			trimmed.isEmpty() ||
+				tile.title.contains(trimmed, ignoreCase = true) ||
+				tile.summary?.contains(trimmed, ignoreCase = true) == true
 		}
 
 		ExploreUiState(
 			sources = filteredTiles,
 			allEnabledSources = allTiles,
-			allEnabledCount = meta.enabledSources.size,
-			activeFilter = controls.filter,
-			sourceQuery = controls.query,
-			sortOrder = meta.sortOrder,
-			languages = meta.languages,
-			isLoadingSources = meta.isLoading,
-			hasExtensionUpdates = meta.hasUpdates,
-			isFindingRandom = controls.findingRandom,
-			homeSource = resolvedHome,
-			isHomeHubLoading = matchingHub?.isLoading == true,
-			homeHubError = matchingHub?.error,
-			homeHubCloudFlare = matchingHub?.cloudFlare,
-			homeHubInteractive = matchingHub?.interactive,
-			homeHubBrowserUrl = matchingHub?.browserUrl,
-			homeCarousels = rawCarousels,
-			visibilityFilter = controls.visibility,
-			libraryMangaIds = libIds,
-			libraryMangaUrls = libUrls,
+			mangaSourceCount = mangaCount,
+			novelSourceCount = novelCount,
+			allEnabledCount = allTiles.size,
+			selectedKind = selectedKind,
+			isNovelTabFirst = prefs.isNovelTabFirst,
+			isSourcesGridMode = prefs.isSourcesGridMode,
+			sourcesGridColumns = prefs.sourcesGridColumns,
+			sourceQuery = query,
+			sortOrder = prefs.sortOrder,
+			languages = prefs.languages,
+			isLoadingSources = isLoading,
+			hasExtensionUpdates = hasUpdates,
+			isFindingRandom = findingRandom,
+			homeSourceName = resolvedHomeName,
 		)
 	}
 		.flowOn(Dispatchers.IO)
 		.stateIn(
 			scope = viewModelScope,
 			started = SharingStarted.WhileSubscribed(5_000L),
-			initialValue = ExploreUiState(),
+			initialValue = ExploreUiState(
+				isSourcesGridMode = settings.isSourcesGridMode,
+				sourcesGridColumns = settings.sourcesGridColumns,
+			),
 		)
 
-	fun setHomeSource(sourceName: String) {
-		settings.exploreHomeSource = sourceName
-		loadedHomeSourceName = null
-		val tile = uiState.value.allEnabledSources.firstOrNull { it.sourceName == sourceName }
-		if (tile != null) {
-			triggerHomeHubLoad(tile)
-		}
+	fun selectCatalogKind(kind: ExploreCatalogKind) {
+		selectedKindFlow.value = kind
 	}
 
-	fun refreshHomeHub() {
-		val current = uiState.value.homeSource ?: return
-		loadedHomeSourceName = null
-		triggerHomeHubLoad(current)
+	fun toggleSourcesGridMode() {
+		settings.isSourcesGridMode = !settings.isSourcesGridMode
 	}
 
-	fun setVisibilityFilter(filter: LibraryVisibilityFilter) {
-		visibilityFilterFlow.value = filter
-	}
-
-	private fun triggerHomeHubLoad(tile: ExploreSourceTile) {
-		loadedHomeSourceName = tile.sourceName
-		homeHubJob?.cancel()
-		homeHubJob = viewModelScope.launch(Dispatchers.IO) {
-			homeHubRawFlow.value = HomeHubRawState(sourceName = tile.sourceName, isLoading = true)
-			var capturedError: Throwable? = null
-			val result = runCatchingCancellable {
-				val repo = mangaRepositoryFactoryProvider.get().create(tile.sourceInfo.mangaSource)
-				val sortOrders = repo.sortOrders
-				coroutineScope {
-					val popularJob = if (SortOrder.POPULARITY in sortOrders) {
-						async {
-							runCatchingCancellable {
-								repo.getList(0, SortOrder.POPULARITY, MangaListFilter()).distinctBy { it.id }.take(15)
-							}
-						}
-					} else null
-
-					val updatedJob = if (SortOrder.UPDATED in sortOrders) {
-						async {
-							runCatchingCancellable {
-								repo.getList(0, SortOrder.UPDATED, MangaListFilter()).distinctBy { it.id }.take(15)
-							}
-						}
-					} else null
-
-					val secondaryOrder = when {
-						SortOrder.RATING in sortOrders -> SortOrder.RATING
-						SortOrder.NEWEST in sortOrders -> SortOrder.NEWEST
-						else -> null
-					}
-					val secondaryJob = secondaryOrder?.let { ord ->
-						async {
-							runCatchingCancellable {
-								repo.getList(0, ord, MangaListFilter()).distinctBy { it.id }.take(15)
-							}
-						}
-					}
-
-					val genreJob = async {
-						loadGenreRecommendation(repo)
-					}
-
-					val popRes = popularJob?.await()
-					val updRes = updatedJob?.await()
-					val secRes = secondaryJob?.await()
-					capturedError = popRes?.exceptionOrNull()
-						?: updRes?.exceptionOrNull()
-						?: secRes?.exceptionOrNull()
-
-					val list = ArrayList<HomeHubCarousel>(4)
-					popRes?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { items ->
-						list += HomeHubCarousel("popular", "Popular on ${tile.title}", items, SortOrder.POPULARITY)
-					}
-					updRes?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { items ->
-						list += HomeHubCarousel("updated", "Latest Updates", items, SortOrder.UPDATED)
-					}
-					secRes?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { items ->
-						val label = if (secondaryOrder == SortOrder.RATING) "Top Rated" else "Newly Added"
-						list += HomeHubCarousel("secondary", label, items, secondaryOrder)
-					}
-					genreJob.await()?.let { (tagTitle, items) ->
-						if (items.isNotEmpty()) {
-							list += HomeHubCarousel(
-								id = "suggested",
-								title = "Suggested ($tagTitle)",
-								items = items,
-								sortOrder = SortOrder.POPULARITY,
-							)
-						}
-					}
-					list
-				}
-			}
-			if (loadedHomeSourceName != tile.sourceName) return@launch
-			result.onSuccess { carousels ->
-				val err = if (carousels.isEmpty()) capturedError else null
-				val challenge = err?.toWebViewChallengeAction(
-					fallbackUrl = tile.homeUrl,
-					fallbackSource = tile.sourceInfo.mangaSource,
-					title = tile.title,
-				)
-				homeHubRawFlow.value = HomeHubRawState(
-					sourceName = tile.sourceName,
-					isLoading = false,
-					error = when {
-						carousels.isNotEmpty() -> null
-						err != null -> err.getDisplayMessage(context.resources)
-						else -> "No feeds returned by ${tile.title}"
-					},
-					cloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
-					interactive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
-					browserUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
-					carousels = carousels,
-				)
-			}.onFailure { err ->
-				val challenge = err.toWebViewChallengeAction(
-					fallbackUrl = tile.homeUrl,
-					fallbackSource = tile.sourceInfo.mangaSource,
-					title = tile.title,
-				)
-				homeHubRawFlow.value = HomeHubRawState(
-					sourceName = tile.sourceName,
-					isLoading = false,
-					error = err.getDisplayMessage(context.resources),
-					cloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
-					interactive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
-					browserUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
-				)
-			}
-		}
-	}
-
-	private suspend fun loadGenreRecommendation(repo: MangaRepository): Pair<String, List<Manga>>? {
-		val topGenreTitle = runCatchingCancellable {
-			favouritesRepository.getAllManga()
-				.asSequence()
-				.flatMap { it.tags.asSequence() }
-				.groupingBy { it.title }
-				.eachCount()
-				.maxByOrNull { it.value }
-				?.key
-		}.getOrNull() ?: return null
-
-		val options = runCatchingCancellable { repo.getFilterOptions() }.getOrNull() ?: return null
-		val matchingTag = options.availableTags.firstOrNull {
-			it.title.equals(topGenreTitle, ignoreCase = true)
-		} ?: return null
-
-		val order = when {
-			SortOrder.POPULARITY in repo.sortOrders -> SortOrder.POPULARITY
-			else -> repo.defaultSortOrder
-		}
-		val items = runCatchingCancellable {
-			repo.getList(0, order, MangaListFilter(tags = setOf(matchingTag))).distinctBy { it.id }.take(12)
-		}.getOrDefault(emptyList())
-		return if (items.isNotEmpty()) matchingTag.title to items else null
-	}
-
-	fun setFilter(filter: ExploreSourceFilter) {
-		activeFilter.value = filter
+	fun setSourcesGridColumns(columns: Int) {
+		settings.sourcesGridColumns = columns.coerceIn(3, 5)
 	}
 
 	fun setSourceQuery(query: String) {
-		sourceQuery.value = query
+		sourceQueryFlow.value = query
+	}
+
+	fun setHomeSourceForHub(tile: ExploreSourceTile) {
+		settings.exploreHomeSource = tile.sourceName
+		toastManager.show("Set ${tile.title} as Feed Hub source")
+	}
+
+	fun prepareOpenPopular(tile: ExploreSourceTile) {
+		viewModelScope.launch(Dispatchers.IO) {
+			sourcesRepository.trackUsage(tile.sourceInfo.mangaSource)
+			val mihon = tile.sourceInfo.mangaSource as? MihonMangaSource
+			if (mihon != null) {
+				runCatching {
+					SourceSettings(context, mihon).defaultSortOrder = SortOrder.POPULARITY
+				}
+			}
+		}
 	}
 
 	fun trackSourceOpen(source: MangaSource) {
@@ -497,7 +258,7 @@ class ExploreViewModel @Inject constructor(
 			val handle = sourcesRepository.setSourcesHidden(listOf(tile.sourceInfo.mangaSource), true)
 			languageRefreshTrigger.value++
 			toastManager.show(
-				message = "Hidden ${tile.title}",
+				message = "Disabled ${tile.title} in Explore",
 				actionLabel = "Undo",
 				onAction = {
 					handle.reverseAsync()
@@ -541,21 +302,14 @@ class ExploreViewModel @Inject constructor(
 		}
 	}
 
-	fun reloadSources() {
-		viewModelScope.launch(Dispatchers.IO) {
-			sourcesRepository.reloadMihonSources()
-			languageRefreshTrigger.value++
-		}
-	}
-
 	fun findRandomManga(onFound: (Manga) -> Unit) {
-		if (isFindingRandom.value) return
+		if (isFindingRandomFlow.value) return
 		viewModelScope.launch(Dispatchers.IO) {
-			isFindingRandom.value = true
+			isFindingRandomFlow.value = true
 			val result = runCatching {
 				exploreRepository.findRandomManga(tagsLimit = 5)
 			}
-			isFindingRandom.value = false
+			isFindingRandomFlow.value = false
 			result.fold(
 				onSuccess = { manga ->
 					MangaTransferCache.put(manga)
@@ -570,19 +324,12 @@ class ExploreViewModel @Inject constructor(
 		}
 	}
 
-	private data class SourcesMetadataSnapshot(
-		val enabledSources: List<MangaSourceInfo>,
-		val isLoading: Boolean,
-		val hasUpdates: Boolean,
+	private data class ExplorePrefsSnapshot(
 		val sortOrder: SourcesSortOrder,
-		val languages: List<SourceLanguage>,
+		val isSourcesGridMode: Boolean,
+		val sourcesGridColumns: Int,
+		val isNovelTabFirst: Boolean,
 		val preferredHomeSourceName: String?,
-	)
-
-	private data class QuadControls(
-		val filter: ExploreSourceFilter,
-		val query: String,
-		val findingRandom: Boolean,
-		val visibility: LibraryVisibilityFilter,
+		val languages: List<SourceLanguage>,
 	)
 }

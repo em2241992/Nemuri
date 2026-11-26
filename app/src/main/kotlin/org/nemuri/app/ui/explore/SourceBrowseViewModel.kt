@@ -14,8 +14,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
@@ -26,6 +28,7 @@ import org.koitharu.kotatsu.core.model.UnknownMangaSource
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.homeUrl
 import org.koitharu.kotatsu.core.parser.MangaRepository
+import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.explore.data.ResolvedSource
@@ -128,6 +131,7 @@ data class SourceBrowseUiState(
 	val homeUrl: String? = null,
 	val resolvedSource: MangaSource = UnknownMangaSource,
 	val query: String = "",
+	val isGridMode: Boolean = true,
 	val availableSortOrders: List<SortOrder> = emptyList(),
 	val selectedSortOrder: SortOrder = SortOrder.POPULARITY,
 	val isSearchSupported: Boolean = false,
@@ -153,10 +157,13 @@ class SourceBrowseViewModel @Inject constructor(
 	private val mangaRepositoryFactory: MangaRepository.Factory,
 	private val sourcesRepository: MangaSourcesRepository,
 	private val favouritesRepository: FavouritesRepository,
+	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
 
-	private val _uiState = MutableStateFlow(SourceBrowseUiState())
+	private val _uiState = MutableStateFlow(
+		SourceBrowseUiState(isGridMode = settings.isSourceBrowseGridMode),
+	)
 	val uiState: StateFlow<SourceBrowseUiState> = _uiState.asStateFlow()
 
 	private var boundKey: String? = null
@@ -180,6 +187,22 @@ class SourceBrowseViewModel @Inject constructor(
 					_uiState.update { it.copy(favouriteIds = ids) }
 				}
 		}
+
+		viewModelScope.launch {
+			settings.observeChanges()
+				.filter { it == null || it == AppSettings.KEY_SOURCE_BROWSE_GRID }
+				.onStart { emit(null) }
+				.map { settings.isSourceBrowseGridMode }
+				.collect { gridMode ->
+					_uiState.update { it.copy(isGridMode = gridMode) }
+				}
+		}
+	}
+
+	fun toggleGridMode() {
+		val next = !settings.isSourceBrowseGridMode
+		settings.isSourceBrowseGridMode = next
+		_uiState.update { it.copy(isGridMode = next) }
 	}
 
 	fun bind(sourceName: String, initialQuery: String?) {
@@ -192,10 +215,12 @@ class SourceBrowseViewModel @Inject constructor(
 		seenIds.clear()
 
 		viewModelScope.launch(Dispatchers.IO) {
-			_uiState.update {
+			_uiState.update { current ->
 				SourceBrowseUiState(
 					sourceTitle = sourceName,
 					query = initialQuery.orEmpty(),
+					isGridMode = settings.isSourceBrowseGridMode,
+					favouriteIds = current.favouriteIds,
 					isInitialLoading = true,
 				)
 			}
@@ -285,6 +310,7 @@ class SourceBrowseViewModel @Inject constructor(
 				homeUrl = activeSource.homeUrl,
 				resolvedSource = activeSource,
 				query = startQuery,
+				isGridMode = settings.isSourceBrowseGridMode,
 				availableSortOrders = sortOrders,
 				selectedSortOrder = initialSort,
 				isSearchSupported = caps.isSearchSupported,

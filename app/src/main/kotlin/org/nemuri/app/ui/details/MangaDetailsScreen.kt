@@ -2,7 +2,13 @@ package org.nemuri.app.ui.details
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -58,9 +64,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.VerticalAlignBottom
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -81,6 +89,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,8 +112,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.koitharu.kotatsu.core.model.getTitle
+import org.koitharu.kotatsu.core.model.isLocal
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
+import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
+import org.koitharu.kotatsu.core.prefs.TriStateOption
+import org.koitharu.kotatsu.favourites.domain.TitleSignatureParser
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
 import java.text.DateFormat
@@ -115,6 +128,7 @@ import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.browser.isLikelyChallengeErrorMessage
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.reader.ReaderActivity
 import org.nemuri.app.ui.components.MangaCompactGridCard
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriErrorState
@@ -166,6 +180,36 @@ fun MangaDetailsScreen(
 	var showCreateCategoryDialog by rememberSaveable { mutableStateOf(false) }
 	var newCategoryName by rememberSaveable { mutableStateOf("") }
 	var chapterMenuTarget by remember { mutableStateOf<ChapterRowItem?>(null) }
+	var pendingNsfwLaunch by remember { mutableStateOf<PendingNsfwLaunch?>(null) }
+
+	fun launchReaderSession(targetManga: Manga, chapterId: Long?, incognito: Boolean) {
+		MangaTransferCache.put(targetManga)
+		if (incognito) {
+			context.startActivity(
+				ReaderActivity.newIntent(
+					context = context,
+					manga = targetManga,
+					chapterId = chapterId,
+					branch = uiState.selectedBranch,
+					incognito = true,
+				),
+			)
+		} else {
+			onStartReader(targetManga, chapterId, uiState.selectedBranch)
+		}
+	}
+
+	fun requestOpenReader(targetManga: Manga, chapterId: Long?) {
+		when {
+			uiState.isIncognitoActive -> launchReaderSession(targetManga, chapterId, incognito = true)
+			uiState.isAdultTitle -> when (uiState.incognitoForNsfw) {
+				TriStateOption.ENABLED -> launchReaderSession(targetManga, chapterId, incognito = true)
+				TriStateOption.DISABLED -> launchReaderSession(targetManga, chapterId, incognito = false)
+				TriStateOption.ASK -> pendingNsfwLaunch = PendingNsfwLaunch(chapterId)
+			}
+			else -> launchReaderSession(targetManga, chapterId, incognito = false)
+		}
+	}
 
 	val isSelectionMode = uiState.selectedChapterIds.isNotEmpty()
 	BackHandler(enabled = isSelectionMode) {
@@ -258,20 +302,53 @@ fun MangaDetailsScreen(
 				val chapterListState = rememberLazyListState()
 				val chapterIds = remember(uiState.chapters) { uiState.chapters.map { it.chapter.id } }
 				val detailsBottomPadding = rememberPushScreenBottomPadding(if (isSelectionMode) 98.dp else 28.dp)
-				LazyColumn(
-					state = chapterListState,
-					modifier = Modifier
-						.fillMaxSize()
-						.listDragRangeSelect(
-							listState = chapterListState,
-							orderedIds = chapterIds,
-							selectedIds = uiState.selectedChapterIds,
-							enabled = true,
-							keyMapper = { it as? Long },
-							onSelectionChange = viewModel::selectChapterRange,
-						),
-					contentPadding = PaddingValues(bottom = detailsBottomPadding),
+
+				val hasInlineBanner = uiState.pendingCloudFlare != null ||
+					uiState.pendingInteractive != null ||
+					uiState.errorMessage != null
+				val hasSynopsisOrTags = uiState.descriptionText.isNotBlank() || manga.tags.isNotEmpty()
+				val hasAiRecap = uiState.isRecapCardEnabled && uiState.history != null
+				val hasBranches = uiState.branches.size > 1
+				val chaptersHeaderIndex = 2 +
+					(if (hasInlineBanner) 1 else 0) +
+					(if (hasSynopsisOrTags) 1 else 0) +
+					(if (hasAiRecap) 1 else 0) +
+					(if (hasBranches) 1 else 0)
+
+				val showChaptersQuickJump by remember(
+					chapterListState,
+					chaptersHeaderIndex,
+					uiState.chapters.size,
+					isSelectionMode,
 				) {
+					derivedStateOf {
+						if (uiState.chapters.isEmpty() || isSelectionMode) {
+							false
+						} else {
+							val firstIdx = chapterListState.firstVisibleItemIndex
+							val headerReached = firstIdx >= chaptersHeaderIndex ||
+								(!chapterListState.canScrollForward &&
+									chapterListState.layoutInfo.visibleItemsInfo.any { it.key == "details_chapters_header" })
+							!headerReached
+						}
+					}
+				}
+
+				Box(modifier = Modifier.fillMaxSize()) {
+					LazyColumn(
+						state = chapterListState,
+						modifier = Modifier
+							.fillMaxSize()
+							.listDragRangeSelect(
+								listState = chapterListState,
+								orderedIds = chapterIds,
+								selectedIds = uiState.selectedChapterIds,
+								enabled = true,
+								keyMapper = { it as? Long },
+								onSelectionChange = viewModel::selectChapterRange,
+							),
+						contentPadding = PaddingValues(bottom = detailsBottomPadding),
+					) {
 					// Top Hero Backdrop + Poster Header
 					item(key = "details_hero") {
 						Box(modifier = Modifier.fillMaxWidth()) {
@@ -319,6 +396,35 @@ fun MangaDetailsScreen(
 										)
 									}
 									Spacer(modifier = Modifier.weight(1f))
+									IconButton(onClick = viewModel::toggleHeaderIncognito) {
+										Surface(
+											color = if (uiState.isIncognitoActive) {
+												NemuriTheme.colors.cyan.copy(alpha = 0.22f)
+											} else {
+												Color.Transparent
+											},
+											shape = CircleShape,
+											border = if (uiState.isIncognitoActive) {
+												BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.7f))
+											} else {
+												null
+											},
+											modifier = Modifier.size(34.dp),
+										) {
+											Box(contentAlignment = Alignment.Center) {
+												Icon(
+													imageVector = Icons.Default.VisibilityOff,
+													contentDescription = "Toggle Incognito",
+													tint = if (uiState.isIncognitoActive) {
+														NemuriTheme.colors.cyan
+													} else {
+														NemuriTheme.colors.textSecondary
+													},
+													modifier = Modifier.size(19.dp),
+												)
+											}
+										}
+									}
 									if (uiState.isRefreshing) {
 										CircularProgressIndicator(
 											color = NemuriTheme.colors.cyan,
@@ -514,8 +620,7 @@ fun MangaDetailsScreen(
 							) {
 								Button(
 									onClick = {
-										MangaTransferCache.put(manga)
-										onStartReader(manga, uiState.primaryChapterId, uiState.selectedBranch)
+										requestOpenReader(manga, uiState.primaryChapterId)
 									},
 									enabled = uiState.primaryChapterId != null,
 									shape = RoundedCornerShape(14.dp),
@@ -667,26 +772,94 @@ fun MangaDetailsScreen(
 								verticalArrangement = Arrangement.spacedBy(10.dp),
 							) {
 								if (uiState.descriptionText.isNotBlank()) {
+									val activeSynopsis = if (uiState.showTranslatedSynopsis && !uiState.translatedSynopsis.isNullOrBlank()) {
+										uiState.translatedSynopsis!!
+									} else {
+										uiState.descriptionText
+									}
 									Column(
 										modifier = Modifier
 											.fillMaxWidth()
-											.animateContentSize(nemuriSpatialSpring())
-											.clip(RoundedCornerShape(12.dp))
-											.clickable { descriptionExpanded = !descriptionExpanded },
+											.animateContentSize(nemuriSpatialSpring()),
+										verticalArrangement = Arrangement.spacedBy(6.dp),
 									) {
 										Text(
-											text = uiState.descriptionText,
+											text = activeSynopsis,
 											style = MaterialTheme.typography.bodyMedium,
 											color = NemuriTheme.colors.textSecondary,
 											maxLines = if (descriptionExpanded) Int.MAX_VALUE else 4,
 											overflow = TextOverflow.Ellipsis,
+											modifier = Modifier
+												.fillMaxWidth()
+												.clip(RoundedCornerShape(10.dp))
+												.clickable { descriptionExpanded = !descriptionExpanded },
 										)
-										Text(
-											text = if (descriptionExpanded) "Show less" else "Read more",
-											style = MaterialTheme.typography.labelSmall,
-											color = NemuriTheme.colors.cyan,
-											modifier = Modifier.padding(top = 4.dp),
-										)
+										Row(
+											modifier = Modifier.fillMaxWidth(),
+											horizontalArrangement = Arrangement.SpaceBetween,
+											verticalAlignment = Alignment.CenterVertically,
+										) {
+											Text(
+												text = if (descriptionExpanded) "Show less" else "Read more",
+												style = MaterialTheme.typography.labelSmall,
+												color = NemuriTheme.colors.cyan,
+												modifier = Modifier
+													.clip(RoundedCornerShape(6.dp))
+													.clickable { descriptionExpanded = !descriptionExpanded }
+													.padding(vertical = 4.dp, horizontal = 2.dp),
+											)
+
+											val isTranslatedView = uiState.showTranslatedSynopsis && !uiState.translatedSynopsis.isNullOrBlank()
+											Surface(
+												color = if (isTranslatedView) {
+													NemuriTheme.colors.tealContainer
+												} else {
+													NemuriTheme.colors.surfaceElevated
+												},
+												shape = RoundedCornerShape(999.dp),
+												border = BorderStroke(
+													width = 1.dp,
+													color = if (isTranslatedView) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+												),
+												modifier = Modifier
+													.clip(RoundedCornerShape(999.dp))
+													.clickable(enabled = !uiState.isTranslatingSynopsis) {
+														viewModel.toggleSynopsisTranslation()
+													},
+											) {
+												Row(
+													modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+													verticalAlignment = Alignment.CenterVertically,
+													horizontalArrangement = Arrangement.spacedBy(5.dp),
+												) {
+													if (uiState.isTranslatingSynopsis) {
+														CircularProgressIndicator(
+															color = NemuriTheme.colors.cyan,
+															strokeWidth = 1.8.dp,
+															modifier = Modifier.size(12.dp),
+														)
+														Text(
+															text = "Translating…",
+															style = MaterialTheme.typography.labelSmall,
+															color = NemuriTheme.colors.cyan,
+														)
+													} else {
+														Icon(
+															imageVector = Icons.Default.Translate,
+															contentDescription = null,
+															tint = NemuriTheme.colors.cyan,
+															modifier = Modifier.size(13.dp),
+														)
+														Text(
+															text = if (isTranslatedView) "文 → A Original" else "G → 文 Translate",
+															style = MaterialTheme.typography.labelSmall,
+															fontWeight = FontWeight.SemiBold,
+															color = if (isTranslatedView) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+														)
+													}
+												}
+											}
+										}
 									}
 								}
 
@@ -902,8 +1075,7 @@ fun MangaDetailsScreen(
 										if (isSelectionMode) {
 											viewModel.toggleChapterSelection(row.chapter.id)
 										} else {
-											MangaTransferCache.put(manga)
-											onStartReader(manga, row.chapter.id, uiState.selectedBranch)
+											requestOpenReader(manga, row.chapter.id)
 										}
 									},
 									onLongClick = {
@@ -951,6 +1123,40 @@ fun MangaDetailsScreen(
 									}
 								}
 							}
+						}
+					}
+					}
+
+					// Floating "X chapters ↓" Quick-Jump Pill
+					AnimatedVisibility(
+						visible = showChaptersQuickJump,
+						enter = fadeIn() + slideInVertically { it / 2 },
+						exit = fadeOut() + slideOutVertically { it / 2 },
+						modifier = Modifier
+							.align(Alignment.BottomEnd)
+							.navigationBarsPadding()
+							.padding(end = 16.dp, bottom = 20.dp),
+					) {
+						Surface(
+							color = NemuriTheme.colors.dock.copy(alpha = 0.94f),
+							shape = RoundedCornerShape(999.dp),
+							border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.65f)),
+							shadowElevation = 10.dp,
+							modifier = Modifier
+								.clip(RoundedCornerShape(999.dp))
+								.clickable {
+									coroutineScope.launch {
+										chapterListState.animateScrollToItem(chaptersHeaderIndex)
+									}
+								},
+						) {
+							Text(
+								text = "${uiState.chapters.size} chapters ↓",
+								style = MaterialTheme.typography.labelMedium,
+								fontWeight = FontWeight.Bold,
+								color = NemuriTheme.colors.cyan,
+								modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+							)
 						}
 					}
 				}
@@ -1308,31 +1514,180 @@ fun MangaDetailsScreen(
 		)
 	}
 
-	uiState.pendingDuplicatePrompt?.let { prompt ->
+	val activeNsfwLaunch = pendingNsfwLaunch
+	if (activeNsfwLaunch != null && uiState.manga != null) {
+		val nsfwManga = uiState.manga!!
 		NemuriModalSheet(
-			title = "Possible Duplicate in Library",
-			subtitle = "Choose whether to replace an existing entry or add anyway",
+			title = "18+ Reading Privacy",
+			subtitle = "Open \"${uiState.title}\" in Incognito mode?",
+			onDismiss = { pendingNsfwLaunch = null },
+		) {
+			Column(
+				modifier = Modifier.padding(vertical = 4.dp),
+				verticalArrangement = Arrangement.spacedBy(10.dp),
+			) {
+				Text(
+					text = "Incognito pauses reading history, streaks, and external tracker sync for this session.",
+					style = MaterialTheme.typography.bodySmall,
+					color = NemuriTheme.colors.textMuted,
+				)
+				Button(
+					onClick = {
+						val chId = activeNsfwLaunch.chapterId
+						pendingNsfwLaunch = null
+						launchReaderSession(nsfwManga, chId, incognito = true)
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = NemuriTheme.colors.cyan,
+						contentColor = NemuriTheme.colors.onCyan,
+					),
+					shape = RoundedCornerShape(12.dp),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(17.dp))
+					Spacer(Modifier.width(8.dp))
+					Text("Read in Incognito", fontWeight = FontWeight.Bold)
+				}
+				Button(
+					onClick = {
+						val chId = activeNsfwLaunch.chapterId
+						pendingNsfwLaunch = null
+						launchReaderSession(nsfwManga, chId, incognito = false)
+					},
+					colors = ButtonDefaults.buttonColors(
+						containerColor = NemuriTheme.colors.surfaceElevated,
+						contentColor = NemuriTheme.colors.textPrimary,
+					),
+					shape = RoundedCornerShape(12.dp),
+					modifier = Modifier
+						.fillMaxWidth()
+						.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
+				) {
+					Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(17.dp))
+					Spacer(Modifier.width(6.dp))
+					Text("Read Normally")
+				}
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+				) {
+					TextButton(
+						onClick = {
+							val chId = activeNsfwLaunch.chapterId
+							viewModel.setIncognitoForNsfw(TriStateOption.ENABLED)
+							pendingNsfwLaunch = null
+							launchReaderSession(nsfwManga, chId, incognito = true)
+						},
+					) {
+						Text("Always enable for 18+", color = NemuriTheme.colors.cyan)
+					}
+					TextButton(
+						onClick = {
+							val chId = activeNsfwLaunch.chapterId
+							viewModel.setIncognitoForNsfw(TriStateOption.DISABLED)
+							pendingNsfwLaunch = null
+							launchReaderSession(nsfwManga, chId, incognito = false)
+						},
+					) {
+						Text("Don't ask again", color = NemuriTheme.colors.textMuted)
+					}
+				}
+			}
+		}
+	}
+
+	uiState.pendingDuplicatePrompt?.let { prompt ->
+		val incomingSig = remember(prompt.incoming.id, prompt.incoming.title, prompt.incoming.tags) {
+			TitleSignatureParser.parse(prompt.incoming.title, prompt.incoming.tags.map { it.title })
+		}
+		val strategy = uiState.duplicateWinnerStrategy
+		NemuriModalSheet(
+			title = "Check & Swap: Duplicate Detected",
+			subtitle = "Compare editions & winner strategy (${strategy.shortLabel})",
 			onDismiss = viewModel::dismissDuplicatePrompt,
 		) {
 			Column(
 				modifier = Modifier
 					.verticalScroll(rememberScrollState())
-					.padding(horizontal = 20.dp, vertical = 8.dp),
+					.padding(vertical = 4.dp),
 				verticalArrangement = Arrangement.spacedBy(10.dp),
 			) {
-				Text(
-					text = "Adding: ${prompt.incoming.title} (${prompt.incoming.source.getTitle(context)}" +
-						(prompt.incomingChaptersCount?.let { " • $it ch" } ?: "") + ")",
-					style = MaterialTheme.typography.labelLarge,
-					color = NemuriTheme.colors.cyan,
-				)
+				Surface(
+					color = NemuriTheme.colors.tealContainer.copy(alpha = 0.45f),
+					shape = RoundedCornerShape(12.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f)),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Column(
+						modifier = Modifier.padding(12.dp),
+						verticalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						Text(
+							text = "INCOMING ENTRY",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.cyan,
+						)
+						Text(
+							text = prompt.incoming.title,
+							style = MaterialTheme.typography.titleSmall,
+							color = NemuriTheme.colors.textPrimary,
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+						)
+						Text(
+							text = "${prompt.incoming.source.getTitle(context)}" +
+								(prompt.incomingChaptersCount?.let { " • $it ch" } ?: ""),
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.textSecondary,
+						)
+						if (incomingSig.editionFlags.isNotEmpty()) {
+							FlowRow(
+								horizontalArrangement = Arrangement.spacedBy(6.dp),
+								verticalArrangement = Arrangement.spacedBy(4.dp),
+							) {
+								incomingSig.editionFlags.forEach { flag ->
+									Surface(
+										color = NemuriTheme.colors.surfaceElevated,
+										shape = RoundedCornerShape(6.dp),
+										border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+									) {
+										Text(
+											text = flag.badgeText,
+											style = MaterialTheme.typography.labelSmall,
+											color = NemuriTheme.colors.cyan,
+											modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+										)
+									}
+								}
+							}
+						}
+					}
+				}
+
 				prompt.duplicates.forEach { dup ->
+					val dupSig = remember(dup.manga.id, dup.manga.title, dup.manga.tags) {
+						TitleSignatureParser.parse(dup.manga.title, dup.manga.tags.map { it.title })
+					}
+					val hasEditionDiff = TitleSignatureParser.hasEditionDifference(incomingSig, dupSig)
+					val incomingCh = prompt.incomingChaptersCount ?: 0
+					val incomingWins = when (strategy) {
+						DuplicateWinnerStrategy.MOST_CHAPTERS -> incomingCh > dup.chaptersCount
+						DuplicateWinnerStrategy.FURTHEST_READ -> dup.progress <= 0f && incomingCh >= dup.chaptersCount
+						DuplicateWinnerStrategy.HEALTHY_SOURCE -> !prompt.incoming.source.isLocal && incomingCh >= dup.chaptersCount
+						DuplicateWinnerStrategy.HIGHEST_RATING -> prompt.incoming.rating > dup.manga.rating
+					}
+					val chDelta = incomingCh - dup.chaptersCount
+
 					Surface(
 						color = NemuriTheme.colors.surfaceElevated,
 						shape = RoundedCornerShape(14.dp),
 						modifier = Modifier
 							.fillMaxWidth()
-							.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp)),
+							.border(
+								1.dp,
+								if (incomingWins) NemuriTheme.colors.cyan.copy(alpha = 0.6f) else NemuriTheme.colors.border,
+								RoundedCornerShape(14.dp),
+							),
 					) {
 						Column(
 							modifier = Modifier.padding(12.dp),
@@ -1349,7 +1704,31 @@ fun MangaDetailsScreen(
 										.size(width = 48.dp, height = 68.dp)
 										.clip(RoundedCornerShape(8.dp)),
 								)
-								Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+								Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+									Row(
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(6.dp),
+									) {
+										Surface(
+											color = if (incomingWins) {
+												NemuriTheme.colors.cyan.copy(alpha = 0.16f)
+											} else {
+												NemuriTheme.colors.healthy.copy(alpha = 0.16f)
+											},
+											shape = RoundedCornerShape(6.dp),
+										) {
+											Text(
+												text = if (incomingWins) {
+													"★ Incoming Wins (${strategy.shortLabel})"
+												} else {
+													"★ Existing Wins (${strategy.shortLabel})"
+												},
+												style = MaterialTheme.typography.labelSmall,
+												color = if (incomingWins) NemuriTheme.colors.cyan else NemuriTheme.colors.healthy,
+												modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+											)
+										}
+									}
 									Text(
 										text = dup.manga.title,
 										style = MaterialTheme.typography.titleSmall,
@@ -1357,11 +1736,51 @@ fun MangaDetailsScreen(
 										maxLines = 2,
 										overflow = TextOverflow.Ellipsis,
 									)
+									val deltaText = when {
+										prompt.incomingChaptersCount == null -> ""
+										chDelta > 0 -> " (Incoming +$chDelta ch)"
+										chDelta < 0 -> " (Existing +${-chDelta} ch)"
+										else -> " (Same ch count)"
+									}
 									Text(
-										text = "${dup.manga.source.getTitle(context)} • ${dup.chaptersCount} ch",
+										text = "${dup.manga.source.getTitle(context)} • ${dup.chaptersCount} ch$deltaText",
 										style = MaterialTheme.typography.bodySmall,
 										color = NemuriTheme.colors.textMuted,
 									)
+									if (dupSig.editionFlags.isNotEmpty() || hasEditionDiff) {
+										FlowRow(
+											horizontalArrangement = Arrangement.spacedBy(6.dp),
+											verticalArrangement = Arrangement.spacedBy(4.dp),
+										) {
+											dupSig.editionFlags.forEach { flag ->
+												Surface(
+													color = NemuriTheme.colors.card,
+													shape = RoundedCornerShape(6.dp),
+													border = BorderStroke(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.5f)),
+												) {
+													Text(
+														text = flag.badgeText,
+														style = MaterialTheme.typography.labelSmall,
+														color = NemuriTheme.colors.amber,
+														modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+													)
+												}
+											}
+											if (hasEditionDiff) {
+												Surface(
+													color = NemuriTheme.colors.amber.copy(alpha = 0.15f),
+													shape = RoundedCornerShape(6.dp),
+												) {
+													Text(
+														text = "Edition Variant",
+														style = MaterialTheme.typography.labelSmall,
+														color = NemuriTheme.colors.amber,
+														modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+													)
+												}
+											}
+										}
+									}
 									if (dup.categories.isNotEmpty()) {
 										Text(
 											text = "Categories: ${dup.categories.joinToString()}",
@@ -1390,12 +1809,15 @@ fun MangaDetailsScreen(
 									shape = RoundedCornerShape(10.dp),
 									modifier = Modifier.fillMaxWidth(),
 								) {
+									Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(17.dp))
+									Spacer(Modifier.width(6.dp))
 									Text(
-										if (prompt.migrateProgressOnReplace) {
-											"Replace This Entry (Carry Progress)"
+										text = if (prompt.migrateProgressOnReplace) {
+											"Swap & Migrate (Carry Progress)"
 										} else {
-											"Replace This Entry"
+											"Swap & Migrate"
 										},
+										fontWeight = FontWeight.Bold,
 									)
 								}
 							}
@@ -1408,20 +1830,22 @@ fun MangaDetailsScreen(
 				) {
 					TextButton(
 						onClick = viewModel::dismissDuplicatePrompt,
-						modifier = Modifier.weight(1f),
+						modifier = Modifier.weight(0.8f),
 					) {
-						Text("Skip", color = NemuriTheme.colors.textMuted)
+						Text("Cancel", color = NemuriTheme.colors.textMuted)
 					}
 					Button(
-						onClick = viewModel::addDespiteDuplicates,
+						onClick = viewModel::keepBothAndIgnoreDuplicates,
 						colors = ButtonDefaults.buttonColors(
 							containerColor = NemuriTheme.colors.surfaceElevated,
 							contentColor = NemuriTheme.colors.textPrimary,
 						),
 						shape = RoundedCornerShape(10.dp),
-						modifier = Modifier.weight(1f),
+						modifier = Modifier
+							.weight(1.4f)
+							.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(10.dp)),
 					) {
-						Text("Add Anyway")
+						Text("Keep Both (Ignore Pair)")
 					}
 				}
 			}
@@ -1498,6 +1922,8 @@ fun MangaDetailsScreen(
 		}
 	}
 }
+
+private data class PendingNsfwLaunch(val chapterId: Long?)
 
 @Composable
 private fun WhereWasIRecapCard(

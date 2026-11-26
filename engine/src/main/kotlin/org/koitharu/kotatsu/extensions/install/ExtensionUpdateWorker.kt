@@ -101,9 +101,10 @@ class ExtensionUpdateWorker @AssistedInject constructor(
 				.minByOrNull { (s, _) -> if (s.store.id == plugin.storeId) 0 else 1 }
 				?: continue
 			try {
+				val resolvedPluginUrl = repoRepository.resolveApkUrl(state.store.indexUrl, entry.apkName)
 				lnPluginManager.install(
 					pluginId = entry.packageName,
-					rawCode = downloadText(entry.apkName),
+					rawCode = downloadText(resolvedPluginUrl),
 					iconUrl = entry.iconUrl.orEmpty(),
 					lang = entry.lang.orEmpty(),
 					storeId = state.store.id,
@@ -134,7 +135,8 @@ class ExtensionUpdateWorker @AssistedInject constructor(
 		}
 
 		return try {
-			val installed = extensionLoader.getInstalledExtensions(applicationContext)
+			val installed = extensionLoader.getInstalledExtensions(applicationContext, privateMode = false)
+				.filter { it.isShared }
 				.associateBy { it.pkgName }
 			if (installed.isEmpty()) return Result.success()
 			storeManager.refresh(forceRefresh = true)
@@ -292,8 +294,14 @@ class ExtensionUpdateWorker @AssistedInject constructor(
 	}
 
 	private suspend fun doPrivateModeWork(): Result {
+		val autoInstall = settings.isAutoUpdateExtensionsEnabled
+		val shouldNotify = settings.isExtensionUpdateNotificationsEnabled
+		if (!autoInstall && !shouldNotify) {
+			return Result.success()
+		}
 		return try {
 			val installed = extensionLoader.getInstalledExtensions(applicationContext, privateMode = true)
+				.filter { !it.isShared }
 				.associateBy { it.pkgName }
 			if (installed.isEmpty()) return Result.success()
 			storeManager.refresh(forceRefresh = true)
@@ -310,13 +318,19 @@ class ExtensionUpdateWorker @AssistedInject constructor(
 			var retryNeeded = allStoreStates.any {
 				it.store.enabled && it.health == StoreHealth.UNAVAILABLE
 			}
+			val pendingUpdates = ArrayList<ExternalExtensionRepoEntry>()
 			repoLoop@ for (state in storeStates) {
-				val owned = installed.values.filter {
-					storeManager.owner(ExtensionInstallMode.SANDBOX, it)?.id == state.store.id
+				val owned = installed.values.filter { info ->
+					val owner = storeManager.owner(ExtensionInstallMode.SANDBOX, info)
+					owner?.id == state.store.id || (owner == null && storeStates.size == 1)
 				}.associateBy { it.pkgName }
 				val updates = state.catalog.filter { entry ->
 					owned[entry.packageName]?.let(entry::isNewerThan) == true
 				}.sortedBy { it.name.lowercase() }
+				if (!autoInstall) {
+					pendingUpdates += updates
+					continue@repoLoop
+				}
 				for (entry in updates) {
 					if (isStopped) break@repoLoop
 					val apk = File(downloadDir, "${entry.packageName}-${entry.versionCode}.apk")
@@ -340,6 +354,16 @@ class ExtensionUpdateWorker @AssistedInject constructor(
 				}
 			}
 			if (installedAny) extensionManager.loadExtensions()
+			if (!autoInstall) {
+				if (pendingUpdates.isNotEmpty() && shouldNotify) {
+					val now = System.currentTimeMillis()
+					if (now - settings.lastExtensionUpdateNotificationTime >= TimeUnit.DAYS.toMillis(1)) {
+						notifyUpdatesAvailable(pendingUpdates.size)
+						settings.lastExtensionUpdateNotificationTime = now
+					}
+				}
+				return Result.success()
+			}
 			when {
 				isStopped -> Result.retry()
 				retryNeeded -> Result.retry()

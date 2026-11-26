@@ -108,6 +108,10 @@
 			android:name="org.koitharu.kotatsu.tracker.work.TrackerNotificationHelper$MarkAsReadReceiver"
 			android:exported="false" />
 
+		<receiver
+			android:name="org.koitharu.kotatsu.extensions.install.ShizukuInstallResultReceiver"
+			android:exported="false" />
+
 	</application>
 
 </manifest>

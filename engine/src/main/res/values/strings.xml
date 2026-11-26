@@ -501,7 +501,11 @@
     <string name="filter_by_language">Filter by language</string>
     <string name="no_extensions_installed">No extensions installed</string>
     <string name="theme_name_expressive">Dynamic M3</string>
+    <string name="theme_name_nemuri_obsidian">Nemuri Obsidian</string>
+    <string name="theme_name_true_amoled">True AMOLED</string>
+    <string name="theme_name_bedtime_amber">Bedtime Warm Amber</string>
     <string name="theme_name_yorha">YoRHa Tactical</string>
+    <string name="theme_name_yorha_visor_v2">YoRHa Visor v2</string>
     <string name="theme_name_kyoto_washi">Kyoto Washi</string>
     <string name="theme_name_suibokuga">Suibokuga</string>
     <string name="app_icon">App icon</string>
