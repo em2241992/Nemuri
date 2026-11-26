@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +63,42 @@ fun cornerSafeHorizontalPadding(cornerRadiusDp: Int): Dp = max(10f, cornerRadius
 fun cornerSafeBottomPadding(cornerRadiusDp: Int): Dp = max(8f, cornerRadiusDp * 0.45f).dp
 
 fun cornerSafeBadgeInset(cornerRadiusDp: Int): Dp = max(6f, cornerRadiusDp * 0.42f).dp
+
+/**
+ * Corner-safe inset reading progress capsule (`height = 3.dp`, `CircleShape` ends,
+ * `bottomPadding = 5.dp`, `horizontalPadding = max(8.dp, cardCornerRadius * 0.50f)`)
+ * over a subtle dark backing track so even 2% or 100% progress stays 100% visible
+ * inside any card corner radius (`0.dp`–`24.dp`).
+ */
+@Composable
+fun CornerSafeCoverProgressBar(
+	progress: Float,
+	cornerRadiusDp: Int,
+	modifier: Modifier = Modifier,
+	fillColor: Color = MaterialTheme.colorScheme.primary,
+	trackColor: Color = Color.Black.copy(alpha = 0.52f),
+) {
+	val clamped = progress.coerceIn(0f, 1f)
+	if (clamped <= 0f) return
+	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val horizontalPad = max(8f, safeCorner * 0.50f).dp
+	Box(
+		modifier = modifier
+			.fillMaxWidth()
+			.padding(start = horizontalPad, end = horizontalPad, bottom = 5.dp)
+			.height(3.dp)
+			.clip(CircleShape)
+			.background(trackColor, CircleShape),
+	) {
+		Box(
+			modifier = Modifier
+				.fillMaxWidth(clamped.coerceAtLeast(0.04f))
+				.fillMaxHeight()
+				.clip(CircleShape)
+				.background(fillColor, CircleShape),
+		)
+	}
+}
 
 @Composable
 fun NonWrappingBadgeText(
@@ -233,7 +270,7 @@ fun MangaCompactGridCard(
 					start = hInset,
 					end = hInset,
 					top = 22.dp,
-					bottom = bInset + if (effectiveProgress > 0f) 4.dp else 0.dp,
+					bottom = bInset + if (effectiveProgress > 0f) 6.dp else 0.dp,
 				),
 		) {
 			Text(
@@ -349,14 +386,10 @@ fun MangaCompactGridCard(
 		}
 
 		if (effectiveProgress > 0f) {
-			LinearProgressIndicator(
-				progress = { effectiveProgress },
-				color = MaterialTheme.colorScheme.primary,
-				trackColor = Color.Black.copy(alpha = 0.4f),
-				modifier = Modifier
-					.fillMaxWidth()
-					.height(3.dp)
-					.align(Alignment.BottomCenter),
+			CornerSafeCoverProgressBar(
+				progress = effectiveProgress,
+				cornerRadiusDp = safeCorner,
+				modifier = Modifier.align(Alignment.BottomCenter),
 			)
 		}
 	}
@@ -530,14 +563,10 @@ fun MangaComfortableGridCard(
 			}
 
 			if (effectiveProgress > 0f) {
-				LinearProgressIndicator(
-					progress = { effectiveProgress },
-					color = MaterialTheme.colorScheme.primary,
-					trackColor = Color.Black.copy(alpha = 0.4f),
-					modifier = Modifier
-						.fillMaxWidth()
-						.height(3.dp)
-						.align(Alignment.BottomCenter),
+				CornerSafeCoverProgressBar(
+					progress = effectiveProgress,
+					cornerRadiusDp = safeCorner,
+					modifier = Modifier.align(Alignment.BottomCenter),
 				)
 			}
 		}

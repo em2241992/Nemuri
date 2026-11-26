@@ -3,9 +3,13 @@ package org.nemuri.app.reader
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RenderEffect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,14 +17,16 @@ import android.os.PowerManager
 import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -59,6 +65,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -79,24 +89,43 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloseFullscreen
+import androidx.compose.material.icons.filled.Compare
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SlowMotionVideo
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -104,6 +133,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -111,8 +141,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -126,6 +158,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -135,6 +168,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -147,16 +181,21 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
+import coil3.size.Precision
+import coil3.size.Size as CoilSize
 import com.davemorrissey.labs.subscaleview.DefaultOnImageEventListener
 import com.davemorrissey.labs.subscaleview.ImageSource
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
+import org.koitharu.kotatsu.bookmarks.domain.highlightText
 import org.koitharu.kotatsu.core.image.AvifCapableImageDecoder
 import org.koitharu.kotatsu.core.image.AvifCapableRegionDecoder
 import org.koitharu.kotatsu.core.model.UnknownMangaSource
@@ -170,6 +209,7 @@ import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.core.util.ext.isPdfUri
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
+import org.koitharu.kotatsu.reader.domain.ReaderColorFilter
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
@@ -188,12 +228,15 @@ import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriToastManager
+import org.nemuri.app.security.AppLockManager
+import org.nemuri.app.security.AppLockShieldOverlay
+import org.nemuri.app.security.ObserveWindowSecurity
 import org.nemuri.app.ui.theme.NemuriTheme
 import javax.inject.Inject
 import kotlin.math.roundToInt
 
 @AndroidEntryPoint
-class ReaderActivity : ComponentActivity() {
+class ReaderActivity : FragmentActivity() {
 
 	@Inject
 	lateinit var toastManager: NemuriToastManager
@@ -208,6 +251,28 @@ class ReaderActivity : ComponentActivity() {
 		setContent {
 			NemuriTheme {
 				val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+				val appLockManager = remember { AppLockManager.from(this@ReaderActivity) }
+				val isAppLocked by appLockManager.isLocked.collectAsStateWithLifecycle()
+				val isMangaNsfw = remember(uiState.manga) {
+					val m = uiState.manga
+					m != null && (m.contentRating == org.koitharu.kotatsu.parsers.model.ContentRating.ADULT ||
+						m.tags.any { it.title.lowercase() in setOf("18+", "adult", "erotica", "pornographic", "smut", "hentai") })
+				}
+
+				ObserveWindowSecurity(
+					isSessionIncognito = uiState.isIncognito,
+					isNsfwContent = isMangaNsfw,
+					isAppLocked = isAppLocked,
+				)
+
+				var manualOrientation by rememberSaveable {
+					mutableStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED)
+				}
+				val isLandscapeNow = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+				LaunchedEffect(manualOrientation) {
+					requestedOrientation = manualOrientation
+				}
 
 				LaunchedEffect(uiState.keepScreenOn) {
 					if (uiState.keepScreenOn) {
@@ -217,13 +282,31 @@ class ReaderActivity : ComponentActivity() {
 					}
 				}
 
-				ReaderRootScreen(
-					uiState = uiState,
-					toastManager = toastManager,
-					viewModel = viewModel,
-					onRegisterVolumeHandler = { volumeKeyCallback = it },
-					onBack = { finish() },
-				)
+				Box(modifier = Modifier.fillMaxSize()) {
+					ReaderRootScreen(
+						uiState = uiState,
+						toastManager = toastManager,
+						viewModel = viewModel,
+						isLandscape = isLandscapeNow,
+						isOrientationLocked = manualOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+						onToggleManualRotate = {
+							manualOrientation = if (isLandscapeNow) {
+								ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+							} else {
+								ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+							}
+						},
+						onResetAutoRotate = {
+							manualOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+						},
+						onRegisterVolumeHandler = { volumeKeyCallback = it },
+						onBack = { finish() },
+					)
+					AppLockShieldOverlay(
+						isLocked = isAppLocked,
+						onUnlocked = appLockManager::unlock,
+					)
+				}
 			}
 		}
 	}
@@ -292,13 +375,20 @@ private fun ReaderRootScreen(
 	uiState: ReaderUiState,
 	toastManager: NemuriToastManager,
 	viewModel: ReaderViewModel,
+	isLandscape: Boolean,
+	isOrientationLocked: Boolean,
+	onToggleManualRotate: () -> Unit,
+	onResetAutoRotate: () -> Unit,
 	onRegisterVolumeHandler: (((Boolean) -> Unit)?) -> Unit,
 	onBack: () -> Unit,
 ) {
 	val context = LocalContext.current
+	val haptic = LocalHapticFeedback.current
 	var showHud by remember { mutableStateOf(false) }
 	var showChaptersSheet by remember { mutableStateOf(false) }
 	var showSettingsSheet by remember { mutableStateOf(false) }
+	var quickActionPage by remember { mutableStateOf<ReaderPage?>(null) }
+	var compareSplitPage by remember { mutableStateOf<ReaderPage?>(null) }
 
 	val cfLauncher = rememberLauncherForActivityResult(CloudFlareActivity.Contract()) { solved ->
 		if (solved) viewModel.retry()
@@ -319,67 +409,107 @@ private fun ReaderRootScreen(
 
 		when {
 			uiState.isLoading -> {
-				NemuriLoadingState(message = "Opening reader…")
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.pointerInput(Unit) {
+							detectTapGestures(onTap = { showHud = !showHud })
+						},
+					contentAlignment = Alignment.Center,
+				) {
+					NemuriLoadingState(message = "Opening reader…")
+				}
 			}
 
 			uiState.pendingCloudFlare != null -> {
 				val cf = uiState.pendingCloudFlare
-				ReaderChallengeScreen(
-					title = "Cloudflare check required",
-					message = uiState.errorMessage ?: "Verify in WebView to load this chapter.",
-					actionLabel = "Solve in WebView",
-					onAction = { cfLauncher.launch(cf) },
-					onRetry = viewModel::retry,
-					onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
-						{ openMigrateFromReader(context, id) }
-					},
-					onBack = onBack,
-				)
-			}
-
-			uiState.pendingInteractive != null -> {
-				val interactive = uiState.pendingInteractive
-				ReaderChallengeScreen(
-					title = "Sign-in required",
-					message = uiState.errorMessage ?: "Complete login or action in WebView, then retry.",
-					actionLabel = "Solve in WebView",
-					onAction = { browserLauncher.launch(interactive) },
-					onRetry = viewModel::retry,
-					onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
-						{ openMigrateFromReader(context, id) }
-					},
-					onBack = onBack,
-				)
-			}
-
-			uiState.errorMessage != null && !uiState.isChapterLoading &&
-				((!uiState.isTextMode && uiState.pages.isEmpty()) || (uiState.isTextMode && uiState.novelBlocks.isEmpty())) -> {
-				val challengeUrl = uiState.pendingChallengeUrl
-				if (!challengeUrl.isNullOrBlank()) {
-					ReaderChallengeScreen(
-						title = "HTTP 403 / Verification required",
-						message = uiState.errorMessage,
-						actionLabel = "Solve in WebView",
-						onAction = {
-							runCatching {
-								context.startActivity(
-									AppRouter.browserIntent(
-										context,
-										challengeUrl,
-										uiState.manga?.source ?: UnknownMangaSource,
-										uiState.title,
-									),
-								)
-							}
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.pointerInput(Unit) {
+							detectTapGestures(onTap = { showHud = !showHud })
 						},
+				) {
+					ReaderChallengeScreen(
+						title = "Cloudflare check required",
+						message = uiState.errorMessage ?: "Verify in WebView to load this chapter.",
+						actionLabel = "Solve in WebView",
+						onAction = { cfLauncher.launch(cf) },
 						onRetry = viewModel::retry,
 						onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
 							{ openMigrateFromReader(context, id) }
 						},
 						onBack = onBack,
 					)
+				}
+			}
+
+			uiState.pendingInteractive != null -> {
+				val interactive = uiState.pendingInteractive
+				Box(
+					modifier = Modifier
+						.fillMaxSize()
+						.pointerInput(Unit) {
+							detectTapGestures(onTap = { showHud = !showHud })
+						},
+				) {
+					ReaderChallengeScreen(
+						title = "Sign-in required",
+						message = uiState.errorMessage ?: "Complete login or action in WebView, then retry.",
+						actionLabel = "Solve in WebView",
+						onAction = { browserLauncher.launch(interactive) },
+						onRetry = viewModel::retry,
+						onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
+							{ openMigrateFromReader(context, id) }
+						},
+						onBack = onBack,
+					)
+				}
+			}
+
+			uiState.errorMessage != null && !uiState.isChapterLoading &&
+				((!uiState.isTextMode && uiState.pages.isEmpty()) || (uiState.isTextMode && uiState.novelBlocks.isEmpty())) -> {
+				val challengeUrl = uiState.pendingChallengeUrl
+				if (!challengeUrl.isNullOrBlank()) {
+					Box(
+						modifier = Modifier
+							.fillMaxSize()
+							.pointerInput(Unit) {
+								detectTapGestures(onTap = { showHud = !showHud })
+							},
+					) {
+						ReaderChallengeScreen(
+							title = "HTTP 403 / Verification required",
+							message = uiState.errorMessage,
+							actionLabel = "Solve in WebView",
+							onAction = {
+								runCatching {
+									context.startActivity(
+										AppRouter.browserIntent(
+											context,
+											challengeUrl,
+											uiState.manga?.source ?: UnknownMangaSource,
+											uiState.title,
+										),
+									)
+								}
+							},
+							onRetry = viewModel::retry,
+							onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
+								{ openMigrateFromReader(context, id) }
+							},
+							onBack = onBack,
+						)
+					}
 				} else {
-					Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+					Box(
+						modifier = Modifier
+							.fillMaxSize()
+							.statusBarsPadding()
+							.pointerInput(Unit) {
+								detectTapGestures(onTap = { showHud = !showHud })
+							},
+					) {
 						IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
 							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = NemuriTheme.colors.textPrimary)
 						}
@@ -406,8 +536,24 @@ private fun ReaderRootScreen(
 					viewModel = viewModel,
 					onRegisterVolumeHandler = onRegisterVolumeHandler,
 					onToggleHud = { showHud = !showHud },
+					onLongPressPage = { page ->
+						haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+						quickActionPage = page
+					},
 				)
 			}
+		}
+
+		// Subtle non-blocking top loading indicator whenever reader or chapter is loading
+		if (uiState.isLoading || uiState.isChapterLoading) {
+			LinearProgressIndicator(
+				color = NemuriTheme.colors.cyan,
+				trackColor = Color.Transparent,
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(2.dp)
+					.align(Alignment.TopCenter),
+			)
 		}
 
 		// Edge-Snap Highlight Overlay while long-press dragging the 4-side scrubber
@@ -415,9 +561,9 @@ private fun ReaderRootScreen(
 			ReaderScrubberEdgeSnapOverlay(targetEdge = previewSnapEdge!!)
 		}
 
-		// Top Chapter / Source Bar
+		// Top Chapter / Source Bar (always obeys showHud immediately, even while loading!)
 		AnimatedVisibility(
-			visible = showHud || uiState.isChapterLoading,
+			visible = showHud,
 			enter = fadeIn() + slideInVertically { -it },
 			exit = fadeOut() + slideOutVertically { -it },
 			modifier = Modifier.align(Alignment.TopCenter),
@@ -603,9 +749,109 @@ private fun ReaderRootScreen(
 			)
 		}
 
-		// Minimal Bottom HUD Pill (Prev Chapter | Next Chapter | Chapters Sheet | Reader & Enhance Sheet)
+		// Floating Auto-Scroll Play / Pause & Adjustable Speed Pill
 		AnimatedVisibility(
-			visible = showHud && !uiState.isLoading,
+			visible = uiState.isAutoScrollEnabled,
+			enter = fadeIn() + slideInVertically { it },
+			exit = fadeOut() + slideOutVertically { it },
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.navigationBarsPadding()
+				.padding(
+					bottom = if (showHud) {
+						if (uiState.scrubberEdge == ReaderScrubberEdge.BOTTOM) 134.dp else 76.dp
+					} else {
+						14.dp
+					},
+				),
+		) {
+			val isContinuousScroll = uiState.isTextMode || uiState.readerMode == ReaderMode.WEBTOON
+			Surface(
+				color = NemuriTheme.colors.dock.copy(alpha = 0.94f),
+				shape = RoundedCornerShape(999.dp),
+				border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f)),
+				shadowElevation = 12.dp,
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(4.dp),
+				) {
+					IconButton(
+						onClick = { viewModel.setAutoScrollPaused(!uiState.isAutoScrollPaused) },
+						modifier = Modifier.size(34.dp),
+					) {
+						Icon(
+							imageVector = if (uiState.isAutoScrollPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+							contentDescription = if (uiState.isAutoScrollPaused) "Resume auto-scroll" else "Pause auto-scroll",
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(18.dp),
+						)
+					}
+					IconButton(
+						onClick = {
+							if (isContinuousScroll) {
+								viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed - 0.1f)
+							} else {
+								viewModel.setAutoScrollPageDelaySec(uiState.autoScrollPageDelaySec + 1)
+							}
+						},
+						modifier = Modifier.size(30.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.ChevronLeft,
+							contentDescription = "Slower",
+							tint = NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(18.dp),
+						)
+					}
+					Text(
+						text = if (isContinuousScroll) {
+							val mult = (uiState.autoScrollSpeed * 2f).coerceAtLeast(0.1f)
+							String.format(java.util.Locale.US, "Auto %.1fx", mult)
+						} else {
+							"Auto ${uiState.autoScrollPageDelaySec}s/p"
+						},
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.Bold,
+						color = if (uiState.isAutoScrollPaused) NemuriTheme.colors.amber else NemuriTheme.colors.cyan,
+						modifier = Modifier.padding(horizontal = 4.dp),
+					)
+					IconButton(
+						onClick = {
+							if (isContinuousScroll) {
+								viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed + 0.1f)
+							} else {
+								viewModel.setAutoScrollPageDelaySec(uiState.autoScrollPageDelaySec - 1)
+							}
+						},
+						modifier = Modifier.size(30.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.ChevronRight,
+							contentDescription = "Faster",
+							tint = NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(18.dp),
+						)
+					}
+					IconButton(
+						onClick = { viewModel.setAutoScrollEnabled(false) },
+						modifier = Modifier.size(30.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.Close,
+							contentDescription = "Stop auto-scroll",
+							tint = NemuriTheme.colors.textMuted,
+							modifier = Modifier.size(16.dp),
+						)
+					}
+				}
+			}
+		}
+
+		// Minimal Bottom HUD Pill (Prev Chapter | Next Chapter | 3-Tab Navigator | Reader & Enhance Sheet)
+		AnimatedVisibility(
+			visible = showHud,
 			enter = fadeIn() + slideInVertically { it },
 			exit = fadeOut() + slideOutVertically { it },
 			modifier = Modifier
@@ -615,6 +861,7 @@ private fun ReaderRootScreen(
 		) {
 			val isEnhanceActive = !uiState.isTextMode && (
 				uiState.shaderConfig.isActive ||
+					!uiState.colorFilter.isEmpty ||
 					(uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel)
 				)
 			Surface(
@@ -767,63 +1014,49 @@ private fun ReaderRootScreen(
 	}
 
 	if (showChaptersSheet) {
-		NemuriModalSheet(
-			title = "Chapters",
-			subtitle = uiState.title,
+		ReaderNavigatorModalSheet(
+			uiState = uiState,
+			viewModel = viewModel,
 			onDismiss = { showChaptersSheet = false },
-		) {
-			LazyColumn(
-				modifier = Modifier
-					.fillMaxWidth()
-					.height(420.dp),
-				contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-				verticalArrangement = Arrangement.spacedBy(6.dp),
-			) {
-				items(uiState.chapters, key = { it.chapter.id }) { item ->
-					Surface(
-						color = if (item.isCurrent) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(10.dp),
-						modifier = Modifier
-							.fillMaxWidth()
-							.border(
-								1.dp,
-								if (item.isCurrent) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-								RoundedCornerShape(10.dp),
-							)
-							.clip(RoundedCornerShape(10.dp))
-							.clickable {
-								viewModel.selectChapter(item.chapter.id)
-								showChaptersSheet = false
-							},
-					) {
-						Row(
-							modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.SpaceBetween,
-						) {
-							Text(
-								text = item.title,
-								style = MaterialTheme.typography.bodyMedium,
-								fontWeight = if (item.isCurrent) FontWeight.Bold else FontWeight.Normal,
-								color = if (item.isCurrent) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
-								maxLines = 2,
-								overflow = TextOverflow.Ellipsis,
-								modifier = Modifier.weight(1f),
-							)
-							if (item.isCurrent) {
-								Icon(Icons.Default.Check, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(16.dp))
-							}
-						}
-					}
-				}
-			}
-		}
+		)
+	}
+
+	val activeQuickPage = quickActionPage
+	if (activeQuickPage != null) {
+		ReaderPageQuickSheet(
+			page = activeQuickPage,
+			uiState = uiState,
+			viewModel = viewModel,
+			onOpenCompareSplit = {
+				quickActionPage = null
+				compareSplitPage = activeQuickPage
+			},
+			onDismiss = { quickActionPage = null },
+		)
+	}
+
+	val activeComparePage = compareSplitPage
+	if (activeComparePage != null) {
+		ShaderSplitPreviewDialog(
+			page = activeComparePage,
+			config = uiState.shaderConfig,
+			isNeuralActive = uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel,
+			neuralModelLabel = uiState.activeNeuralModelLabel,
+			neuralRevision = uiState.neuralRevision,
+			loadOriginalPage = viewModel::loadRawPageImage,
+			loadEnhancedPage = viewModel::loadPageImage,
+			onDismiss = { compareSplitPage = null },
+		)
 	}
 
 	if (showSettingsSheet) {
 		ReaderSettingsModalSheet(
 			uiState = uiState,
 			viewModel = viewModel,
+			isLandscape = isLandscape,
+			isOrientationLocked = isOrientationLocked,
+			onToggleManualRotate = onToggleManualRotate,
+			onResetAutoRotate = onResetAutoRotate,
 			onDismiss = { showSettingsSheet = false },
 		)
 	}
@@ -881,16 +1114,27 @@ private fun MangaReaderViewport(
 	viewModel: ReaderViewModel,
 	onRegisterVolumeHandler: (((Boolean) -> Unit)?) -> Unit,
 	onToggleHud: () -> Unit,
+	onLongPressPage: (ReaderPage) -> Unit,
 ) {
 	val pages = uiState.pages
 	if (pages.isEmpty()) {
-		if (uiState.isChapterLoading) {
-			NemuriLoadingState(message = "Loading pages…")
+		Box(
+			modifier = Modifier
+				.fillMaxSize()
+				.pointerInput(Unit) {
+					detectTapGestures(onTap = { onToggleHud() })
+				},
+			contentAlignment = Alignment.Center,
+		) {
+			if (uiState.isChapterLoading) {
+				NemuriLoadingState(message = "Loading pages…")
+			}
 		}
 		return
 	}
 
 	val context = LocalContext.current
+	val density = LocalDensity.current
 	val coroutineScope = rememberCoroutineScope()
 	val migrateAction: (() -> Unit)? = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
 		{ openMigrateFromReader(context, id) }
@@ -898,11 +1142,26 @@ private fun MangaReaderViewport(
 	val bitmapConfig = if (uiState.is32BitColors) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
 	val currentTapZoneMode by rememberUpdatedState(uiState.tapZoneMode)
 	val currentSmartZoom by rememberUpdatedState(uiState.isDoubleTapSmartZoom)
+	val latestPages by rememberUpdatedState(pages)
 
 	if (uiState.readerMode == ReaderMode.WEBTOON) {
 		val listState = rememberLazyListState()
 		var webtoonZoom by remember { mutableStateOf(1f) }
 		var webtoonPanX by remember { mutableStateOf(0f) }
+
+		LaunchedEffect(uiState.isAutoScrollEnabled, uiState.isAutoScrollPaused, uiState.autoScrollSpeed) {
+			if (!uiState.isAutoScrollEnabled || uiState.isAutoScrollPaused) return@LaunchedEffect
+			var prevNanos = withFrameNanos { it }
+			while (true) {
+				val nowNanos = withFrameNanos { it }
+				val dtSec = ((nowNanos - prevNanos).coerceIn(0L, 64_000_000L)) / 1_000_000_000f
+				prevNanos = nowNanos
+				if (!listState.isScrollInProgress && listState.canScrollForward) {
+					val pxPerSec = with(density) { (52f + uiState.autoScrollSpeed * 380f).dp.toPx() }
+					listState.dispatchRawDelta(pxPerSec * dtSec)
+				}
+			}
+		}
 
 		LaunchedEffect(uiState.pageJumpToken) {
 			if (uiState.currentPageIndex in pages.indices) {
@@ -984,6 +1243,14 @@ private fun MangaReaderViewport(
 								}
 							}
 						},
+						onLongPress = { offset ->
+							val hit = listState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
+								offset.y.toInt() in info.offset..(info.offset + info.size)
+							}
+							val idx = (hit?.index ?: listState.firstVisibleItemIndex)
+								.coerceIn(0, (latestPages.size - 1).coerceAtLeast(0))
+							latestPages.getOrNull(idx)?.let(onLongPressPage)
+						},
 						onTap = { offset ->
 							val nx = if (size.width > 0) offset.x / size.width.toFloat() else 0.5f
 							val ny = if (size.height > 0) offset.y / size.height.toFloat() else 0.5f
@@ -1013,9 +1280,11 @@ private fun MangaReaderViewport(
 						isWebtoon = true,
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
+						colorFilter = uiState.colorFilter,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTapNormalized = ::handleWebtoonTap,
+						onLongPress = { onLongPressPage(page) },
 						fallbackUrl = uiState.manga?.publicUrl,
 						onFindAlternative = migrateAction,
 						modifier = Modifier.fillMaxWidth(),
@@ -1114,6 +1383,27 @@ private fun MangaReaderViewport(
 			}
 		}
 
+		LaunchedEffect(
+			uiState.isAutoScrollEnabled,
+			uiState.isAutoScrollPaused,
+			uiState.autoScrollPageDelaySec,
+			pagerState.currentPage,
+			spreadSlots.size,
+		) {
+			if (!uiState.isAutoScrollEnabled || uiState.isAutoScrollPaused || spreadSlots.isEmpty()) return@LaunchedEffect
+			delay(uiState.autoScrollPageDelaySec.coerceIn(1, 10) * 1000L)
+			if (!pagerState.isScrollInProgress) {
+				val next = pagerState.currentPage + 1
+				if (next <= spreadSlots.lastIndex) {
+					pagerState.animateScrollToPage(next)
+				} else if (uiState.hasNextChapter) {
+					viewModel.goToAdjacentChapter(isNext = true)
+				} else {
+					viewModel.setAutoScrollEnabled(false)
+				}
+			}
+		}
+
 		fun handlePagedTap(normX: Float, normY: Float) {
 			when (resolveTapZoneAction(normX, normY, currentTapZoneMode, isRtl = isRtl, isWebtoon = false)) {
 				TapZoneAction.TOGGLE_HUD -> onToggleHud()
@@ -1152,9 +1442,11 @@ private fun MangaReaderViewport(
 					isWebtoon = false,
 					isDoubleTapSmartZoom = currentSmartZoom,
 					shaderConfig = uiState.shaderConfig,
+					colorFilter = uiState.colorFilter,
 					neuralRevision = uiState.neuralRevision,
 					loadPage = viewModel::loadPageImage,
 					onTapNormalized = ::handlePagedTap,
+					onLongPress = { onLongPressPage(firstPage) },
 					fallbackUrl = uiState.manga?.publicUrl,
 					onFindAlternative = migrateAction,
 					modifier = Modifier.fillMaxSize(),
@@ -1172,9 +1464,11 @@ private fun MangaReaderViewport(
 						isWebtoon = false,
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
+						colorFilter = uiState.colorFilter,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTapNormalized = { nx, ny -> handlePagedTap(nx * 0.5f, ny) },
+						onLongPress = { onLongPressPage(leftPage) },
 						fallbackUrl = uiState.manga?.publicUrl,
 						onFindAlternative = migrateAction,
 						modifier = Modifier
@@ -1187,9 +1481,11 @@ private fun MangaReaderViewport(
 						isWebtoon = false,
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
+						colorFilter = uiState.colorFilter,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
 						onTapNormalized = { nx, ny -> handlePagedTap(0.5f + nx * 0.5f, ny) },
+						onLongPress = { onLongPressPage(rightPage) },
 						fallbackUrl = uiState.manga?.publicUrl,
 						onFindAlternative = migrateAction,
 						modifier = Modifier
@@ -1240,16 +1536,20 @@ private fun SsivPageView(
 	isWebtoon: Boolean,
 	isDoubleTapSmartZoom: Boolean,
 	shaderConfig: ReaderShaderConfig,
+	colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
 	neuralRevision: Int,
 	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
 	onTapNormalized: (Float, Float) -> Unit,
+	onLongPress: () -> Unit = {},
 	fallbackUrl: String? = null,
 	onFindAlternative: (() -> Unit)? = null,
 	modifier: Modifier = Modifier,
 ) {
 	val context = LocalContext.current
 	val latestShaderConfig by rememberUpdatedState(shaderConfig)
+	val latestColorFilter by rememberUpdatedState(colorFilter)
 	val latestOnTap by rememberUpdatedState(onTapNormalized)
+	val latestOnLongPress by rememberUpdatedState(onLongPress)
 	val latestSmartZoom by rememberUpdatedState(isDoubleTapSmartZoom)
 	var retryToken by remember(page.id) { mutableStateOf(0) }
 	var resolved by remember(page.id) { mutableStateOf<Pair<Uri, Rect?>?>(null) }
@@ -1297,11 +1597,29 @@ private fun SsivPageView(
 		modifier.fillMaxSize()
 	}
 
+	val pair = resolved
+	// Forward center-taps and long-presses even BEFORE page URI resolves or when page fails to load!
+	val fallbackGestureModifier = if (!isWebtoon && (pair == null || errorText != null)) {
+		Modifier.pointerInput(page.id) {
+			detectTapGestures(
+				onTap = { offset ->
+					val nx = if (size.width > 0) (offset.x / size.width.toFloat()).coerceIn(0f, 1f) else 0.5f
+					val ny = if (size.height > 0) (offset.y / size.height.toFloat()).coerceIn(0f, 1f) else 0.5f
+					latestOnTap(nx, ny)
+				},
+				onLongPress = { latestOnLongPress() },
+			)
+		}
+	} else {
+		Modifier
+	}
+
 	Box(
-		modifier = boxModifier.background(Color.Black),
+		modifier = boxModifier
+			.background(Color.Black)
+			.then(fallbackGestureModifier),
 		contentAlignment = Alignment.Center,
 	) {
-		val pair = resolved
 		if (pair != null) {
 			val (uri, bounds) = pair
 			AndroidView(
@@ -1328,20 +1646,26 @@ private fun SsivPageView(
 									val nx = if (width > 0) (e.x / width.toFloat()).coerceIn(0f, 1f) else 0.5f
 									val ny = if (height > 0) (e.y / height.toFloat()).coerceIn(0f, 1f) else 0.5f
 									latestOnTap(nx, ny)
-									return false
+									return true
+								}
+
+								override fun onLongPress(e: MotionEvent) {
+									if (!isWebtoon) {
+										latestOnLongPress()
+									}
 								}
 							},
 						)
-						setOnTouchListener { _, event ->
+						setOnTouchListener { view, event ->
 							tapDetector.onTouchEvent(event)
-							false
+							!isWebtoon && !(view as SubsamplingScaleImageView).isReady
 						}
 						addOnImageEventListener(
 							object : DefaultOnImageEventListener {
 								override fun onReady() {
 									imageReady = true
 									configureSsivScaleAndZoom(this@apply, isWebtoon, latestSmartZoom)
-									applyShaderToSsiv(this@apply, latestShaderConfig)
+									applyShaderToSsiv(this@apply, latestShaderConfig, latestColorFilter)
 								}
 
 								override fun onImageLoadError(e: Throwable) {
@@ -1368,7 +1692,7 @@ private fun SsivPageView(
 					if (ssiv.isReady) {
 						configureSsivScaleAndZoom(ssiv, isWebtoon, isDoubleTapSmartZoom)
 					}
-					applyShaderToSsiv(ssiv, shaderConfig)
+					applyShaderToSsiv(ssiv, shaderConfig, colorFilter)
 				},
 				onRelease = { it.recycle() },
 				modifier = Modifier.fillMaxSize(),
@@ -1478,8 +1802,23 @@ private fun NovelReaderViewport(
 	onToggleHud: () -> Unit,
 ) {
 	val context = LocalContext.current
+	val density = LocalDensity.current
 	val listState = rememberLazyListState()
 	val coroutineScope = rememberCoroutineScope()
+
+	LaunchedEffect(uiState.isAutoScrollEnabled, uiState.isAutoScrollPaused, uiState.autoScrollSpeed) {
+		if (!uiState.isAutoScrollEnabled || uiState.isAutoScrollPaused) return@LaunchedEffect
+		var prevNanos = withFrameNanos { it }
+		while (true) {
+			val nowNanos = withFrameNanos { it }
+			val dtSec = ((nowNanos - prevNanos).coerceIn(0L, 64_000_000L)) / 1_000_000_000f
+			prevNanos = nowNanos
+			if (!listState.isScrollInProgress && listState.canScrollForward) {
+				val pxPerSec = with(density) { (42f + uiState.autoScrollSpeed * 280f).dp.toPx() }
+				listState.dispatchRawDelta(pxPerSec * dtSec)
+			}
+		}
+	}
 
 	val (bgColor, textColor, accentColor) = when (uiState.epubTheme) {
 		"white" -> Triple(Color(0xFFFAF8F4), Color(0xFF1D1F24), Color(0xFF00778F))
@@ -1715,9 +2054,939 @@ private data class PagerSpreadSlot(
 	val secondaryIndex: Int?,
 )
 
-private enum class ReaderSheetTab(val label: String) {
-	READ_MODE("Read Mode"),
-	TOOLS("Tools"),
+private enum class ReaderNavigatorTab {
+	CHAPTERS,
+	PAGES,
+	BOOKMARKS,
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReaderNavigatorModalSheet(
+	uiState: ReaderUiState,
+	viewModel: ReaderViewModel,
+	onDismiss: () -> Unit,
+) {
+	val context = LocalContext.current
+	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+	var selectedTab by rememberSaveable { mutableStateOf(ReaderNavigatorTab.CHAPTERS) }
+	var isExpandedFullscreen by rememberSaveable { mutableStateOf(false) }
+	var chapterSearchQuery by rememberSaveable { mutableStateOf("") }
+
+	val chapterPages = remember(uiState.pages, uiState.currentChapterId) {
+		uiState.pages.mapIndexedNotNull { globalIdx, page ->
+			if (page.chapterId == uiState.currentChapterId) globalIdx to page else null
+		}
+	}
+	val currentPageInChapterIdx = remember(chapterPages, uiState.currentPageIndex) {
+		chapterPages.indexOfFirst { (globalIdx, _) -> globalIdx == uiState.currentPageIndex }.coerceAtLeast(0)
+	}
+	val displayedChapters = remember(uiState.chapters, uiState.isChaptersReversed, chapterSearchQuery) {
+		val base = if (uiState.isChaptersReversed) uiState.chapters.asReversed() else uiState.chapters
+		val q = chapterSearchQuery.trim()
+		if (q.isEmpty()) {
+			base
+		} else {
+			base.filter { it.title.contains(q, ignoreCase = true) }
+		}
+	}
+	val chapterTitleById = remember(uiState.chapters) {
+		uiState.chapters.associate { it.chapter.id to it.title }
+	}
+
+	ModalBottomSheet(
+		onDismissRequest = onDismiss,
+		sheetState = sheetState,
+		containerColor = NemuriTheme.colors.sheet,
+		contentColor = NemuriTheme.colors.textPrimary,
+		shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.let { mod ->
+					if (isExpandedFullscreen) mod.fillMaxHeight(0.95f) else mod.height(510.dp)
+				}
+				.animateContentSize()
+				.navigationBarsPadding()
+				.padding(bottom = 16.dp),
+		) {
+			// Header with Title + [⛶] Expand Fullscreen Toggle + Close
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 18.dp, vertical = 2.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Column(
+					modifier = Modifier
+						.weight(1f)
+						.padding(end = 10.dp),
+				) {
+					Text(
+						text = when (selectedTab) {
+							ReaderNavigatorTab.CHAPTERS -> "Chapters"
+							ReaderNavigatorTab.PAGES -> if (uiState.isTextMode) "Blocks" else "Pages"
+							ReaderNavigatorTab.BOOKMARKS -> "Bookmarks"
+						},
+						style = MaterialTheme.typography.titleLarge,
+						color = NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+					Text(
+						text = uiState.chapterTitle.ifBlank { uiState.title },
+						style = MaterialTheme.typography.bodySmall,
+						color = NemuriTheme.colors.textMuted,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Surface(
+						color = if (isExpandedFullscreen) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = CircleShape,
+						border = if (isExpandedFullscreen) BorderStroke(1.dp, NemuriTheme.colors.cyan) else null,
+						modifier = Modifier
+							.size(36.dp)
+							.clip(CircleShape)
+							.clickable { isExpandedFullscreen = !isExpandedFullscreen },
+					) {
+						Box(contentAlignment = Alignment.Center) {
+							Icon(
+								imageVector = if (isExpandedFullscreen) Icons.Default.CloseFullscreen else Icons.Default.OpenInFull,
+								contentDescription = if (isExpandedFullscreen) "Collapse sheet" else "Expand fullscreen",
+								tint = if (isExpandedFullscreen) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								modifier = Modifier.size(17.dp),
+							)
+						}
+					}
+
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = CircleShape,
+						modifier = Modifier
+							.size(36.dp)
+							.clip(CircleShape)
+							.clickable(onClick = onDismiss),
+					) {
+						Box(contentAlignment = Alignment.Center) {
+							Icon(
+								imageVector = Icons.Default.Close,
+								contentDescription = "Close",
+								tint = NemuriTheme.colors.textSecondary,
+								modifier = Modifier.size(18.dp),
+							)
+						}
+					}
+				}
+			}
+
+			// Top 3 Equal-Width Icon Tabs (☰ Chapters | ⊞ Pages | 🔖 Bookmarks)
+			Surface(
+				color = NemuriTheme.colors.surfaceElevated,
+				shape = RoundedCornerShape(14.dp),
+				border = BorderStroke(1.dp, NemuriTheme.colors.border),
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 18.dp, vertical = 10.dp),
+			) {
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(3.dp),
+					horizontalArrangement = Arrangement.spacedBy(4.dp),
+				) {
+					val tabSpecs = listOf(
+						Triple(
+							ReaderNavigatorTab.CHAPTERS,
+							Icons.Default.FormatListBulleted,
+							"Chapters (${uiState.chapters.size})",
+						),
+						Triple(
+							ReaderNavigatorTab.PAGES,
+							Icons.Default.GridView,
+							if (uiState.isTextMode) "Blocks (${uiState.novelBlocks.size})" else "Pages (${chapterPages.size})",
+						),
+						Triple(
+							ReaderNavigatorTab.BOOKMARKS,
+							if (uiState.mangaBookmarks.isNotEmpty()) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+							"Bookmarks (${uiState.mangaBookmarks.size})",
+						),
+					)
+					tabSpecs.forEach { (tab, icon, label) ->
+						val selected = selectedTab == tab
+						Surface(
+							color = if (selected) NemuriTheme.colors.cyan else Color.Transparent,
+							shape = RoundedCornerShape(10.dp),
+							modifier = Modifier
+								.weight(1f)
+								.clip(RoundedCornerShape(10.dp))
+								.clickable { selectedTab = tab },
+						) {
+							Row(
+								modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+								horizontalArrangement = Arrangement.Center,
+								verticalAlignment = Alignment.CenterVertically,
+							) {
+								Icon(
+									imageVector = icon,
+									contentDescription = label,
+									tint = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.size(15.dp),
+								)
+								Spacer(modifier = Modifier.width(5.dp))
+								Text(
+									text = label,
+									style = MaterialTheme.typography.labelSmall,
+									fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+									color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.textSecondary,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
+						}
+					}
+				}
+			}
+
+			when (selectedTab) {
+				ReaderNavigatorTab.CHAPTERS -> {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 18.dp, vertical = 2.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						OutlinedTextField(
+							value = chapterSearchQuery,
+							onValueChange = { chapterSearchQuery = it },
+							placeholder = { Text("Search chapters…", style = MaterialTheme.typography.bodySmall) },
+							leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+							trailingIcon = {
+								if (chapterSearchQuery.isNotEmpty()) {
+									IconButton(onClick = { chapterSearchQuery = "" }) {
+										Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+									}
+								}
+							},
+							singleLine = true,
+							shape = RoundedCornerShape(12.dp),
+							colors = OutlinedTextFieldDefaults.colors(
+								focusedBorderColor = NemuriTheme.colors.cyan,
+								unfocusedBorderColor = NemuriTheme.colors.border,
+								focusedContainerColor = NemuriTheme.colors.surfaceElevated,
+								unfocusedContainerColor = NemuriTheme.colors.surfaceElevated,
+							),
+							modifier = Modifier.weight(1f),
+						)
+						Surface(
+							color = if (uiState.isChaptersReversed) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(12.dp),
+							border = BorderStroke(
+								1.dp,
+								if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+							),
+							modifier = Modifier
+								.size(48.dp)
+								.clip(RoundedCornerShape(12.dp))
+								.clickable(onClick = viewModel::toggleChaptersReversed),
+						) {
+							Box(contentAlignment = Alignment.Center) {
+								Icon(
+									imageVector = Icons.Default.SwapVert,
+									contentDescription = "Reverse chapter sort",
+									tint = if (uiState.isChaptersReversed) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.size(20.dp),
+								)
+							}
+						}
+					}
+
+					val currentChapterIdx = remember(displayedChapters) {
+						displayedChapters.indexOfFirst { it.isCurrent }.coerceAtLeast(0)
+					}
+					val chaptersListState = rememberLazyListState(initialFirstVisibleItemIndex = currentChapterIdx)
+
+					LazyColumn(
+						state = chaptersListState,
+						modifier = Modifier
+							.fillMaxWidth()
+							.weight(1f),
+						contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+						verticalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						items(displayedChapters, key = { it.chapter.id }) { item ->
+							Surface(
+								color = if (item.isCurrent) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								modifier = Modifier
+									.fillMaxWidth()
+									.border(
+										1.dp,
+										if (item.isCurrent) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+										RoundedCornerShape(10.dp),
+									)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable {
+										viewModel.selectChapter(item.chapter.id)
+										onDismiss()
+									},
+							) {
+								Row(
+									modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.SpaceBetween,
+								) {
+									Text(
+										text = item.title,
+										style = MaterialTheme.typography.bodyMedium,
+										fontWeight = if (item.isCurrent) FontWeight.Bold else FontWeight.Normal,
+										color = if (item.isCurrent) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+										maxLines = 2,
+										overflow = TextOverflow.Ellipsis,
+										modifier = Modifier.weight(1f),
+									)
+									if (item.isCurrent) {
+										Icon(
+											imageVector = Icons.Default.Check,
+											contentDescription = null,
+											tint = NemuriTheme.colors.cyan,
+											modifier = Modifier.size(16.dp),
+										)
+									}
+								}
+							}
+						}
+					}
+				}
+
+				ReaderNavigatorTab.PAGES -> {
+					if (uiState.isTextMode) {
+						val blocksListState = rememberLazyListState(
+							initialFirstVisibleItemIndex = uiState.novelCurrentBlockIndex.coerceAtLeast(0),
+						)
+						LazyColumn(
+							state = blocksListState,
+							modifier = Modifier
+								.fillMaxWidth()
+								.weight(1f),
+							contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+							verticalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							items(uiState.novelBlocks.size, key = { "blk_$it" }) { idx ->
+								val blk = uiState.novelBlocks[idx]
+								val isCurrent = idx == uiState.novelCurrentBlockIndex
+								val previewText = when (blk) {
+									is NovelBlock.Heading -> blk.text
+									is NovelBlock.Paragraph -> blk.text
+									is NovelBlock.Divider -> "— Section Divider —"
+									is NovelBlock.Image -> "[Illustration]"
+								}
+								Surface(
+									color = if (isCurrent) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(10.dp),
+									border = BorderStroke(
+										1.dp,
+										if (isCurrent) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.fillMaxWidth()
+										.clip(RoundedCornerShape(10.dp))
+										.clickable {
+											viewModel.jumpToNovelBlock(idx)
+											onDismiss()
+										},
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.spacedBy(10.dp),
+									) {
+										Text(
+											text = "#${idx + 1}",
+											style = MaterialTheme.typography.labelSmall,
+											fontWeight = FontWeight.Bold,
+											color = NemuriTheme.colors.cyan,
+										)
+										Text(
+											text = previewText,
+											style = MaterialTheme.typography.bodySmall,
+											color = NemuriTheme.colors.textPrimary,
+											maxLines = 1,
+											overflow = TextOverflow.Ellipsis,
+											modifier = Modifier.weight(1f),
+										)
+									}
+								}
+							}
+						}
+					} else {
+						// Sleek Top Horizontal Step Slider (2..6 Columns) scaling thumbnail grid live
+						Row(
+							modifier = Modifier
+								.fillMaxWidth()
+								.padding(horizontal = 18.dp, vertical = 2.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(10.dp),
+						) {
+							Icon(
+								imageVector = Icons.Default.GridView,
+								contentDescription = null,
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(16.dp),
+							)
+							Text(
+								text = "Columns",
+								style = MaterialTheme.typography.labelMedium,
+								color = NemuriTheme.colors.textSecondary,
+							)
+							Slider(
+								value = uiState.pagesGridColumns.coerceIn(2, 6).toFloat(),
+								onValueChange = { viewModel.setPagesGridColumns(it.roundToInt().coerceIn(2, 6)) },
+								valueRange = 2f..6f,
+								steps = 3,
+								colors = SliderDefaults.colors(
+									thumbColor = NemuriTheme.colors.cyan,
+									activeTrackColor = NemuriTheme.colors.cyan,
+									inactiveTrackColor = NemuriTheme.colors.surfaceElevated,
+								),
+								modifier = Modifier.weight(1f),
+							)
+							Surface(
+								color = NemuriTheme.colors.tealContainer,
+								shape = RoundedCornerShape(999.dp),
+								border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f)),
+							) {
+								Text(
+									text = "${uiState.pagesGridColumns} / row",
+									style = MaterialTheme.typography.labelSmall,
+									fontWeight = FontWeight.Bold,
+									color = NemuriTheme.colors.cyan,
+									modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+								)
+							}
+						}
+
+						val pagesGridState = rememberLazyGridState(
+							initialFirstVisibleItemIndex = currentPageInChapterIdx,
+						)
+						LaunchedEffect(currentPageInChapterIdx) {
+							if (currentPageInChapterIdx in chapterPages.indices) {
+								pagesGridState.scrollToItem(currentPageInChapterIdx)
+							}
+						}
+
+						LazyVerticalGrid(
+							state = pagesGridState,
+							columns = GridCells.Fixed(uiState.pagesGridColumns.coerceIn(2, 6)),
+							modifier = Modifier
+								.fillMaxWidth()
+								.weight(1f),
+							contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+							verticalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							items(chapterPages, key = { (_, page) -> page.id }) { (globalIdx, page) ->
+								val isCurrent = globalIdx == uiState.currentPageIndex
+								val isPageBookmarked = uiState.mangaBookmarks.any { bm ->
+									bm.chapterId == page.chapterId && bm.page in page.index..page.endIndex
+								}
+								val pageBadge = if (page.endIndex > page.index) {
+									"${page.index + 1}–${page.endIndex + 1}"
+								} else {
+									"${page.index + 1}"
+								}
+								Box(
+									modifier = Modifier
+										.fillMaxWidth()
+										.aspectRatio(0.70f)
+										.clip(RoundedCornerShape(10.dp))
+										.background(NemuriTheme.colors.surfaceElevated)
+										.border(
+											width = if (isCurrent) 2.dp else 1.dp,
+											color = if (isCurrent) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+											shape = RoundedCornerShape(10.dp),
+										)
+										.clickable {
+											viewModel.jumpToMangaPage(globalIdx)
+											onDismiss()
+										},
+									contentAlignment = Alignment.Center,
+								) {
+									SubcomposeAsyncImage(
+										model = ImageRequest.Builder(context)
+											.data(page.toMangaPage())
+											.size(CoilSize(320, 460))
+											.precision(Precision.INEXACT)
+											.build(),
+										contentDescription = "Page $pageBadge",
+										contentScale = ContentScale.Crop,
+										loading = {
+											Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+												Text(
+													text = pageBadge,
+													style = MaterialTheme.typography.labelMedium,
+													color = NemuriTheme.colors.textDim,
+												)
+											}
+										},
+										error = {
+											Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+												Text(
+													text = pageBadge,
+													style = MaterialTheme.typography.labelMedium,
+													color = NemuriTheme.colors.textDim,
+												)
+											}
+										},
+										modifier = Modifier.fillMaxSize(),
+									)
+
+									if (isPageBookmarked) {
+										Icon(
+											imageVector = Icons.Default.Bookmark,
+											contentDescription = "Bookmarked",
+											tint = NemuriTheme.colors.amber,
+											modifier = Modifier
+												.align(Alignment.TopEnd)
+												.padding(5.dp)
+												.size(15.dp),
+										)
+									}
+
+									Surface(
+										color = if (isCurrent) NemuriTheme.colors.cyan else Color.Black.copy(alpha = 0.72f),
+										shape = RoundedCornerShape(999.dp),
+										modifier = Modifier
+											.align(Alignment.BottomStart)
+											.padding(5.dp),
+									) {
+										Text(
+											text = pageBadge,
+											style = MaterialTheme.typography.labelSmall,
+											fontSize = 10.sp,
+											fontWeight = FontWeight.Bold,
+											color = if (isCurrent) NemuriTheme.colors.onCyan else Color.White,
+											modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.5.dp),
+										)
+									}
+								}
+							}
+						}
+					}
+				}
+
+				ReaderNavigatorTab.BOOKMARKS -> {
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.weight(1f)
+							.padding(horizontal = 18.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						if (!uiState.isBookmarked) {
+							Surface(
+								color = NemuriTheme.colors.tealContainer,
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f)),
+								modifier = Modifier
+									.fillMaxWidth()
+									.clip(RoundedCornerShape(12.dp))
+									.clickable(onClick = viewModel::toggleBookmark),
+							) {
+								Row(
+									modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.Center,
+								) {
+									Icon(
+										imageVector = Icons.Default.BookmarkBorder,
+										contentDescription = null,
+										tint = NemuriTheme.colors.cyan,
+										modifier = Modifier.size(17.dp),
+									)
+									Spacer(modifier = Modifier.width(6.dp))
+									Text(
+										text = "Bookmark Current Page",
+										style = MaterialTheme.typography.labelLarge,
+										fontWeight = FontWeight.SemiBold,
+										color = NemuriTheme.colors.cyan,
+									)
+								}
+							}
+						}
+
+						if (uiState.mangaBookmarks.isEmpty()) {
+							Box(
+								modifier = Modifier
+									.fillMaxWidth()
+									.weight(1f),
+								contentAlignment = Alignment.Center,
+							) {
+								Column(
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(6.dp),
+								) {
+									Icon(
+										imageVector = Icons.Default.BookmarkBorder,
+										contentDescription = null,
+										tint = NemuriTheme.colors.textDim,
+										modifier = Modifier.size(32.dp),
+									)
+									Text(
+										text = "No bookmarked pages yet",
+										style = MaterialTheme.typography.titleSmall,
+										color = NemuriTheme.colors.textSecondary,
+									)
+									Text(
+										text = "Tap the bookmark icon or long-press any page to save a quick jump marker.",
+										style = MaterialTheme.typography.bodySmall,
+										color = NemuriTheme.colors.textMuted,
+										textAlign = TextAlign.Center,
+									)
+								}
+							}
+						} else {
+							LazyColumn(
+								modifier = Modifier
+									.fillMaxWidth()
+									.weight(1f),
+								contentPadding = PaddingValues(vertical = 4.dp),
+								verticalArrangement = Arrangement.spacedBy(8.dp),
+							) {
+								items(uiState.mangaBookmarks, key = { "${it.chapterId}_${it.pageId}_${it.page}" }) { bm ->
+									val chName = chapterTitleById[bm.chapterId] ?: "Chapter"
+									val excerpt = bm.highlightText
+									Surface(
+										color = NemuriTheme.colors.surfaceElevated,
+										shape = RoundedCornerShape(12.dp),
+										border = BorderStroke(1.dp, NemuriTheme.colors.border),
+										modifier = Modifier
+											.fillMaxWidth()
+											.clip(RoundedCornerShape(12.dp))
+											.clickable {
+												viewModel.jumpToBookmark(bm)
+												onDismiss()
+											},
+									) {
+										Row(
+											modifier = Modifier.padding(10.dp),
+											verticalAlignment = Alignment.CenterVertically,
+											horizontalArrangement = Arrangement.spacedBy(12.dp),
+										) {
+											Box(
+												modifier = Modifier
+													.size(width = 44.dp, height = 62.dp)
+													.clip(RoundedCornerShape(8.dp))
+													.background(NemuriTheme.colors.card),
+												contentAlignment = Alignment.Center,
+											) {
+												SubcomposeAsyncImage(
+													model = ImageRequest.Builder(context)
+														.data(bm.toMangaPage())
+														.size(CoilSize(180, 260))
+														.precision(Precision.INEXACT)
+														.build(),
+													contentDescription = null,
+													contentScale = ContentScale.Crop,
+													modifier = Modifier.fillMaxSize(),
+												)
+											}
+											Column(
+												modifier = Modifier.weight(1f),
+												verticalArrangement = Arrangement.spacedBy(2.dp),
+											) {
+												Text(
+													text = "$chName • Page ${bm.page + 1}",
+													style = MaterialTheme.typography.titleSmall,
+													color = NemuriTheme.colors.textPrimary,
+													maxLines = 1,
+													overflow = TextOverflow.Ellipsis,
+												)
+												if (!excerpt.isNullOrBlank()) {
+													Text(
+														text = "“$excerpt”",
+														style = MaterialTheme.typography.bodySmall,
+														color = NemuriTheme.colors.textSecondary,
+														maxLines = 2,
+														overflow = TextOverflow.Ellipsis,
+													)
+												} else {
+													Text(
+														text = "Tap to jump straight to this page",
+														style = MaterialTheme.typography.labelSmall,
+														color = NemuriTheme.colors.cyan,
+													)
+												}
+											}
+											IconButton(
+												onClick = { viewModel.removeBookmarkItem(bm) },
+												modifier = Modifier.size(34.dp),
+											) {
+												Icon(
+													imageVector = Icons.Default.DeleteOutline,
+													contentDescription = "Remove bookmark",
+													tint = NemuriTheme.colors.danger,
+													modifier = Modifier.size(18.dp),
+												)
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun ReaderPageQuickSheet(
+	page: ReaderPage,
+	uiState: ReaderUiState,
+	viewModel: ReaderViewModel,
+	onOpenCompareSplit: () -> Unit,
+	onDismiss: () -> Unit,
+) {
+	val context = LocalContext.current
+	val isPageSavedBookmark = remember(uiState.mangaBookmarks, page.chapterId, page.index, page.endIndex) {
+		uiState.mangaBookmarks.any { bm ->
+			bm.chapterId == page.chapterId && bm.page in page.index..page.endIndex
+		}
+	}
+	val pageLabel = if (page.endIndex > page.index) {
+		"Pages ${page.index + 1}–${page.endIndex + 1}"
+	} else {
+		"Page ${page.index + 1}"
+	}
+
+	NemuriModalSheet(
+		title = "$pageLabel • Quick Menu",
+		subtitle = uiState.chapterTitle.ifBlank { uiState.title },
+		onDismiss = onDismiss,
+	) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.verticalScroll(rememberScrollState()),
+			verticalArrangement = Arrangement.spacedBy(12.dp),
+		) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+			) {
+				ReaderQuickActionTile(
+					icon = Icons.Default.Download,
+					label = "Save Page",
+					onClick = {
+						viewModel.savePageToGallery(page)
+						onDismiss()
+					},
+					modifier = Modifier.weight(1f),
+				)
+				ReaderQuickActionTile(
+					icon = Icons.Default.Share,
+					label = "Share Page",
+					onClick = {
+						viewModel.sharePage(page) { chooser ->
+							runCatching { context.startActivity(chooser) }
+						}
+						onDismiss()
+					},
+					modifier = Modifier.weight(1f),
+				)
+			}
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+			) {
+				ReaderQuickActionTile(
+					icon = Icons.Default.Image,
+					label = "Set as Cover",
+					onClick = {
+						viewModel.setPageAsMangaCover(page)
+						onDismiss()
+					},
+					modifier = Modifier.weight(1f),
+				)
+				ReaderQuickActionTile(
+					icon = if (isPageSavedBookmark) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+					label = if (isPageSavedBookmark) "Bookmarked" else "Bookmark Page",
+					highlighted = isPageSavedBookmark,
+					highlightTint = NemuriTheme.colors.amber,
+					onClick = {
+						viewModel.toggleBookmarkForPage(page)
+						onDismiss()
+					},
+					modifier = Modifier.weight(1f),
+				)
+			}
+
+			HorizontalDivider(color = NemuriTheme.colors.border)
+
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Text(
+					text = "QUICK READ MODE",
+					style = MaterialTheme.typography.labelSmall,
+					color = NemuriTheme.colors.cyan,
+				)
+				Text(
+					text = "Remembered for this manga",
+					style = MaterialTheme.typography.labelSmall,
+					color = NemuriTheme.colors.textMuted,
+				)
+			}
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(6.dp),
+			) {
+				listOf(
+					ReaderMode.STANDARD to "Standard",
+					ReaderMode.REVERSED to "R-to-L",
+					ReaderMode.VERTICAL to "Vertical",
+					ReaderMode.WEBTOON to "Webtoon",
+				).forEach { (mode, label) ->
+					val selected = uiState.readerMode == mode
+					Surface(
+						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(10.dp),
+						border = BorderStroke(
+							width = if (selected) 1.5.dp else 1.dp,
+							color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+						),
+						modifier = Modifier
+							.weight(1f)
+							.clip(RoundedCornerShape(10.dp))
+							.clickable { viewModel.setReaderMode(mode) },
+					) {
+						Text(
+							text = label,
+							style = MaterialTheme.typography.labelSmall,
+							fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+							color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+							textAlign = TextAlign.Center,
+							maxLines = 1,
+							modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+						)
+					}
+				}
+			}
+
+			if (UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) {
+				Surface(
+					color = NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(12.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f)),
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(RoundedCornerShape(12.dp))
+						.clickable(onClick = onOpenCompareSplit),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.Center,
+					) {
+						Icon(
+							imageVector = Icons.Default.Compare,
+							contentDescription = null,
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(18.dp),
+						)
+						Spacer(modifier = Modifier.width(8.dp))
+						Text(
+							text = "Compare Upscale / Shader (Before vs After)",
+							style = MaterialTheme.typography.labelMedium,
+							fontWeight = FontWeight.SemiBold,
+							color = NemuriTheme.colors.cyan,
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun ReaderQuickActionTile(
+	icon: ImageVector,
+	label: String,
+	onClick: () -> Unit,
+	modifier: Modifier = Modifier,
+	subtitle: String? = null,
+	highlighted: Boolean = false,
+	highlightTint: Color = NemuriTheme.colors.cyan,
+	enabled: Boolean = true,
+) {
+	Surface(
+		color = when {
+			!enabled -> NemuriTheme.colors.surfaceElevated.copy(alpha = 0.45f)
+			highlighted -> highlightTint.copy(alpha = 0.16f)
+			else -> NemuriTheme.colors.surfaceElevated
+		},
+		shape = RoundedCornerShape(12.dp),
+		border = BorderStroke(
+			width = if (highlighted) 1.5.dp else 1.dp,
+			color = if (highlighted) highlightTint else NemuriTheme.colors.border,
+		),
+		modifier = modifier
+			.clip(RoundedCornerShape(12.dp))
+			.clickable(enabled = enabled, onClick = onClick),
+	) {
+		Column(
+			modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
+			horizontalAlignment = Alignment.CenterHorizontally,
+			verticalArrangement = Arrangement.spacedBy(4.dp),
+		) {
+			Icon(
+				imageVector = icon,
+				contentDescription = label,
+				tint = when {
+					!enabled -> NemuriTheme.colors.textDim
+					highlighted -> highlightTint
+					else -> NemuriTheme.colors.cyan
+				},
+				modifier = Modifier.size(20.dp),
+			)
+			Text(
+				text = label,
+				style = MaterialTheme.typography.labelSmall,
+				fontWeight = if (highlighted) FontWeight.Bold else FontWeight.SemiBold,
+				color = when {
+					!enabled -> NemuriTheme.colors.textDim
+					highlighted -> highlightTint
+					else -> NemuriTheme.colors.textPrimary
+				},
+				textAlign = TextAlign.Center,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			if (!subtitle.isNullOrBlank()) {
+				Text(
+					text = subtitle,
+					style = MaterialTheme.typography.labelSmall,
+					fontSize = 9.5.sp,
+					color = NemuriTheme.colors.textMuted,
+					textAlign = TextAlign.Center,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+			}
+		}
+	}
 }
 
 private fun resolveSnapEdge(normX: Float, normY: Float): ReaderScrubberEdge = when {
@@ -2157,15 +3426,27 @@ private fun ReaderMovableCapsuleScrubber(
 private fun ReaderSettingsModalSheet(
 	uiState: ReaderUiState,
 	viewModel: ReaderViewModel,
+	isLandscape: Boolean,
+	isOrientationLocked: Boolean,
+	onToggleManualRotate: () -> Unit,
+	onResetAutoRotate: () -> Unit,
 	onDismiss: () -> Unit,
 ) {
+	val context = LocalContext.current
 	var showShaderPreview by remember { mutableStateOf(false) }
-	var activeTab by remember { mutableStateOf(ReaderSheetTab.READ_MODE) }
+	var showColorFilterControls by rememberSaveable { mutableStateOf(!uiState.colorFilter.isEmpty) }
+	var showAdvancedLayoutControls by rememberSaveable { mutableStateOf(false) }
+	var showNeuralModelsList by rememberSaveable { mutableStateOf(uiState.neuralDownloadState.activeModelId != null) }
 	val isVisualDiagram = uiState.selectionMenuStyle == SelectionMenuStyle.VISUAL_DIAGRAM
+	val currentPage = uiState.pages.getOrNull(uiState.currentPageIndex)
 
 	NemuriModalSheet(
 		title = if (uiState.isTextMode) "Typography & Reader" else "Reader & Enhance",
-		subtitle = if (uiState.isTextMode) uiState.chapterTitle else "${uiState.readerMode.name.lowercase().replaceFirstChar { it.uppercase() }} • ${uiState.scrubberEdge.label}",
+		subtitle = if (uiState.isTextMode) {
+			uiState.chapterTitle
+		} else {
+			"${uiState.readerMode.name.lowercase().replaceFirstChar { it.uppercase() }} • ${uiState.scrubberEdge.label}"
+		},
 		onDismiss = onDismiss,
 	) {
 		Column(
@@ -2174,53 +3455,32 @@ private fun ReaderSettingsModalSheet(
 				.padding(vertical = 4.dp),
 			verticalArrangement = Arrangement.spacedBy(14.dp),
 		) {
-			// Header row: Segmented Pill Switcher (Read Mode | Tools) + Visual <-> Compact Menu Toggle Chip
-			Row(
-				modifier = Modifier.fillMaxWidth(),
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(8.dp),
-			) {
-				Surface(
-					color = NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(12.dp),
-					border = BorderStroke(1.dp, NemuriTheme.colors.border),
-					modifier = Modifier.weight(1f),
+			// 1. HIGH-FREQUENCY TOP: Visual Read Mode Selector Cards + Visual <-> Compact Menu Toggle
+			if (!uiState.isTextMode) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.SpaceBetween,
 				) {
-					Row(
-						modifier = Modifier.padding(3.dp),
-						horizontalArrangement = Arrangement.spacedBy(4.dp),
-					) {
-						ReaderSheetTab.entries.forEach { tab ->
-							val selected = activeTab == tab
-							Surface(
-								color = if (selected) NemuriTheme.colors.cyan else Color.Transparent,
-								shape = RoundedCornerShape(9.dp),
-								modifier = Modifier
-									.weight(1f)
-									.clip(RoundedCornerShape(9.dp))
-									.clickable { activeTab = tab },
-							) {
-								Text(
-									text = tab.label,
-									style = MaterialTheme.typography.labelMedium,
-									fontWeight = FontWeight.Bold,
-									color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.textSecondary,
-									textAlign = TextAlign.Center,
-									maxLines = 1,
-									modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
-								)
-							}
-						}
+					Column(modifier = Modifier.weight(1f)) {
+						Text(
+							text = "READING MODE",
+							style = MaterialTheme.typography.labelSmall,
+							fontWeight = FontWeight.Bold,
+							color = NemuriTheme.colors.cyan,
+						)
+						Text(
+							text = "Remembered for this manga",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
+						)
 					}
-				}
-
-				if (!uiState.isTextMode && activeTab == ReaderSheetTab.READ_MODE) {
 					Surface(
 						color = NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(12.dp),
+						shape = RoundedCornerShape(999.dp),
 						border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
 						modifier = Modifier
-							.clip(RoundedCornerShape(12.dp))
+							.clip(RoundedCornerShape(999.dp))
 							.clickable {
 								val next = if (isVisualDiagram) {
 									SelectionMenuStyle.COMPACT_LIST
@@ -2231,7 +3491,7 @@ private fun ReaderSettingsModalSheet(
 							},
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(5.dp),
 						) {
@@ -2239,10 +3499,10 @@ private fun ReaderSettingsModalSheet(
 								imageVector = if (isVisualDiagram) Icons.Default.GridView else Icons.Default.ViewList,
 								contentDescription = "Toggle menu style",
 								tint = NemuriTheme.colors.cyan,
-								modifier = Modifier.size(15.dp),
+								modifier = Modifier.size(14.dp),
 							)
 							Text(
-								text = if (isVisualDiagram) "Visual" else "Compact",
+								text = if (isVisualDiagram) "Visual ↔ Compact" else "Compact ↔ Visual",
 								style = MaterialTheme.typography.labelSmall,
 								fontWeight = FontWeight.SemiBold,
 								color = NemuriTheme.colors.cyan,
@@ -2250,419 +3510,700 @@ private fun ReaderSettingsModalSheet(
 						}
 					}
 				}
-			}
 
-			when (activeTab) {
-				ReaderSheetTab.READ_MODE -> {
-					if (!uiState.isTextMode) {
-						Text(
-							text = "READING MODE",
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.cyan,
-						)
-						val modeEntries = listOf(
-							ReaderMode.STANDARD to "Standard",
-							ReaderMode.REVERSED to "R-to-L",
-							ReaderMode.VERTICAL to "Vertical",
-							ReaderMode.WEBTOON to "Webtoon",
-						)
-						if (isVisualDiagram) {
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
+				val modeEntries = listOf(
+					ReaderMode.STANDARD to "Standard",
+					ReaderMode.REVERSED to "R-to-L",
+					ReaderMode.VERTICAL to "Vertical",
+					ReaderMode.WEBTOON to "Webtoon",
+				)
+				if (isVisualDiagram) {
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						modeEntries.forEach { (mode, label) ->
+							val selected = uiState.readerMode == mode
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(
+									width = if (selected) 1.5.dp else 1.dp,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(12.dp))
+									.clickable { viewModel.setReaderMode(mode) },
 							) {
-								modeEntries.forEach { (mode, label) ->
-									val selected = uiState.readerMode == mode
-									Surface(
-										color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-										shape = RoundedCornerShape(12.dp),
-										border = BorderStroke(
-											width = if (selected) 1.5.dp else 1.dp,
-											color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-										),
-										modifier = Modifier
-											.weight(1f)
-											.clip(RoundedCornerShape(12.dp))
-											.clickable { viewModel.setReaderMode(mode) },
-									) {
-										Column(
-											modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
-											horizontalAlignment = Alignment.CenterHorizontally,
-											verticalArrangement = Arrangement.spacedBy(6.dp),
-										) {
-											ReaderModeDiagramCanvas(
-												mode = mode,
-												selected = selected,
-												modifier = Modifier.size(width = 44.dp, height = 34.dp),
-											)
-											Text(
-												text = label,
-												style = MaterialTheme.typography.labelSmall,
-												fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-												color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-												maxLines = 1,
-											)
-										}
-									}
-								}
-							}
-						} else {
-							Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-								listOf(
-									ReaderMode.STANDARD to "Left to Right (Paged)",
-									ReaderMode.REVERSED to "Right to Left (Manga)",
-									ReaderMode.VERTICAL to "Vertical (Paged)",
-									ReaderMode.WEBTOON to "Webtoon (Continuous)",
-								).forEach { (mode, label) ->
-									val selected = uiState.readerMode == mode
-									ReaderCompactChoiceRow(
-										label = label,
+								Column(
+									modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
+									horizontalAlignment = Alignment.CenterHorizontally,
+									verticalArrangement = Arrangement.spacedBy(6.dp),
+								) {
+									ReaderModeDiagramCanvas(
+										mode = mode,
 										selected = selected,
-										onClick = { viewModel.setReaderMode(mode) },
+										modifier = Modifier.size(width = 44.dp, height = 34.dp),
+									)
+									Text(
+										text = label,
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										maxLines = 1,
 									)
 								}
 							}
 						}
+					}
+				} else {
+					Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+						listOf(
+							ReaderMode.STANDARD to "Left to Right (Paged)",
+							ReaderMode.REVERSED to "Right to Left (Manga)",
+							ReaderMode.VERTICAL to "Vertical (Paged)",
+							ReaderMode.WEBTOON to "Webtoon (Continuous)",
+						).forEach { (mode, label) ->
+							ReaderCompactChoiceRow(
+								label = label,
+								selected = uiState.readerMode == mode,
+								onClick = { viewModel.setReaderMode(mode) },
+							)
+						}
+					}
+				}
+			} else {
+				Text("PAPER THEME & TYPOGRAPHY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = NemuriTheme.colors.cyan)
+				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					listOf(
+						"system" to "Night",
+						"black" to "AMOLED",
+						"gray" to "Sepia",
+						"white" to "Light",
+					).forEach { (key, label) ->
+						val selected = uiState.epubTheme == key
+						Surface(
+							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(10.dp),
+							modifier = Modifier
+								.weight(1f)
+								.border(
+									1.dp,
+									if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									RoundedCornerShape(10.dp),
+								)
+								.clip(RoundedCornerShape(10.dp))
+								.clickable { viewModel.setEpubTheme(key) },
+						) {
+							Text(
+								text = label,
+								style = MaterialTheme.typography.labelMedium,
+								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								textAlign = TextAlign.Center,
+								modifier = Modifier.padding(vertical = 8.dp),
+							)
+						}
+					}
+				}
+				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					listOf(
+						"serif" to "Serif",
+						"sans-serif" to "Sans",
+						"monospace" to "Mono",
+					).forEach { (key, label) ->
+						val selected = uiState.epubFontFamily == key
+						Surface(
+							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(10.dp),
+							modifier = Modifier
+								.weight(1f)
+								.border(
+									1.dp,
+									if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									RoundedCornerShape(10.dp),
+								)
+								.clip(RoundedCornerShape(10.dp))
+								.clickable { viewModel.setEpubFontFamily(key) },
+						) {
+							Text(
+								text = label,
+								style = MaterialTheme.typography.labelMedium,
+								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								textAlign = TextAlign.Center,
+								modifier = Modifier.padding(vertical = 8.dp),
+							)
+						}
+					}
+				}
+				Text("Font Size (${uiState.epubFontSize}%)", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textMuted)
+				Slider(
+					value = uiState.epubFontSize.toFloat(),
+					onValueChange = { viewModel.setEpubFontSize(it.roundToInt()) },
+					valueRange = 70f..200f,
+					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+				)
+				Text("Line Spacing (${uiState.epubLineHeight}%)", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textMuted)
+				Slider(
+					value = uiState.epubLineHeight.toFloat(),
+					onValueChange = { viewModel.setEpubLineHeight(it.roundToInt()) },
+					valueRange = 110f..230f,
+					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+				)
+				Text("Margins (${uiState.epubHorizontalPadding} dp)", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textMuted)
+				Slider(
+					value = uiState.epubHorizontalPadding.toFloat(),
+					onValueChange = { viewModel.setEpubHorizontalPadding(it.roundToInt()) },
+					valueRange = 8f..56f,
+					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+				)
+			}
 
-						HorizontalDivider(color = NemuriTheme.colors.border)
+			HorizontalDivider(color = NemuriTheme.colors.border)
 
-						Text(
-							text = "TAP-ZONE LAYOUT",
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.cyan,
+			// 2. 2×3 CONVENIENCE ACTION GRID (DropSauce Style)
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Text(
+					text = "QUICK ACTIONS",
+					style = MaterialTheme.typography.labelSmall,
+					fontWeight = FontWeight.Bold,
+					color = NemuriTheme.colors.cyan,
+				)
+				if (isOrientationLocked) {
+					Text(
+						text = "Unlock Auto-Rotate",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.amber,
+						modifier = Modifier
+							.clip(RoundedCornerShape(6.dp))
+							.clickable(onClick = onResetAutoRotate)
+							.padding(horizontal = 6.dp, vertical = 2.dp),
+					)
+				}
+			}
+
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					ReaderQuickActionTile(
+						icon = if (uiState.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+						label = if (uiState.isBookmarked) "Bookmarked" else "Bookmark",
+						highlighted = uiState.isBookmarked,
+						highlightTint = NemuriTheme.colors.amber,
+						onClick = viewModel::toggleBookmark,
+						modifier = Modifier.weight(1f),
+					)
+					ReaderQuickActionTile(
+						icon = Icons.Default.SlowMotionVideo,
+						label = "Auto-Scroll",
+						subtitle = if (uiState.isAutoScrollEnabled) "Active" else null,
+						highlighted = uiState.isAutoScrollEnabled,
+						onClick = {
+							val turningOn = !uiState.isAutoScrollEnabled
+							viewModel.toggleAutoScroll()
+							if (turningOn) onDismiss()
+						},
+						modifier = Modifier.weight(1f),
+					)
+					ReaderQuickActionTile(
+						icon = Icons.Default.Download,
+						label = "Save Page",
+						enabled = !uiState.isTextMode && currentPage != null,
+						onClick = {
+							viewModel.savePageToGallery(currentPage)
+							onDismiss()
+						},
+						modifier = Modifier.weight(1f),
+					)
+				}
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					ReaderQuickActionTile(
+						icon = Icons.Default.Share,
+						label = "Share Page",
+						enabled = !uiState.isTextMode && currentPage != null,
+						onClick = {
+							viewModel.sharePage(currentPage) { chooser ->
+								runCatching { context.startActivity(chooser) }
+							}
+							onDismiss()
+						},
+						modifier = Modifier.weight(1f),
+					)
+					ReaderQuickActionTile(
+						icon = Icons.Default.ScreenRotation,
+						label = if (isLandscape) "To Portrait" else "To Landscape",
+						highlighted = isOrientationLocked,
+						onClick = onToggleManualRotate,
+						modifier = Modifier.weight(1f),
+					)
+					ReaderQuickActionTile(
+						icon = Icons.Default.Palette,
+						label = "Color Filter",
+						enabled = !uiState.isTextMode,
+						highlighted = !uiState.colorFilter.isEmpty || showColorFilterControls,
+						onClick = { showColorFilterControls = !showColorFilterControls },
+						modifier = Modifier.weight(1f),
+					)
+				}
+			}
+
+			// Expandable Color Correction / Image Filter Panel
+			if (!uiState.isTextMode && showColorFilterControls) {
+				val cf = uiState.colorFilter
+				Surface(
+					color = NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(14.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Column(
+						modifier = Modifier.padding(12.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Text(
+								text = "COLOR CORRECTION & IMAGE FILTER",
+								style = MaterialTheme.typography.labelSmall,
+								fontWeight = FontWeight.Bold,
+								color = NemuriTheme.colors.cyan,
+							)
+							if (!cf.isEmpty) {
+								Text(
+									text = "Reset",
+									style = MaterialTheme.typography.labelSmall,
+									fontWeight = FontWeight.Bold,
+									color = NemuriTheme.colors.amber,
+									modifier = Modifier
+										.clip(RoundedCornerShape(6.dp))
+										.clickable(onClick = viewModel::resetColorFilter)
+										.padding(horizontal = 6.dp, vertical = 2.dp),
+								)
+							}
+						}
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Text("Brightness", style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textPrimary)
+							Text("${(cf.brightness * 100f).roundToInt()}%", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan)
+						}
+						Slider(
+							value = cf.brightness,
+							onValueChange = { viewModel.setColorFilter(cf.copy(brightness = it)) },
+							valueRange = -0.5f..0.5f,
+							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
 						)
-						if (isVisualDiagram) {
-							Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-								ReaderTapZoneMode.entries.chunked(2).forEach { rowModes ->
-									Row(
-										modifier = Modifier.fillMaxWidth(),
-										horizontalArrangement = Arrangement.spacedBy(8.dp),
-									) {
-										rowModes.forEach { tz ->
-											val selected = uiState.tapZoneMode == tz
-											Surface(
-												color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-												shape = RoundedCornerShape(12.dp),
-												border = BorderStroke(
-													width = if (selected) 1.5.dp else 1.dp,
-													color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-												),
-												modifier = Modifier
-													.weight(1f)
-													.clip(RoundedCornerShape(12.dp))
-													.clickable { viewModel.setTapZoneMode(tz) },
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Text("Contrast", style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textPrimary)
+							Text("${(cf.contrast * 100f).roundToInt()}%", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.cyan)
+						}
+						Slider(
+							value = cf.contrast,
+							onValueChange = { viewModel.setColorFilter(cf.copy(contrast = it)) },
+							valueRange = -0.5f..0.8f,
+							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+						)
+
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							listOf(
+								Triple("Invert", cf.isInverted) { viewModel.setColorFilter(cf.copy(isInverted = !cf.isInverted)) },
+								Triple("Grayscale", cf.isGrayscale) { viewModel.setColorFilter(cf.copy(isGrayscale = !cf.isGrayscale)) },
+								Triple("Warm Book", cf.isBookBackground) { viewModel.setColorFilter(cf.copy(isBookBackground = !cf.isBookBackground)) },
+							).forEach { (label, active, toggle) ->
+								Surface(
+									color = if (active) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
+									shape = RoundedCornerShape(10.dp),
+									border = BorderStroke(
+										1.dp,
+										if (active) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.weight(1f)
+										.clip(RoundedCornerShape(10.dp))
+										.clickable(onClick = toggle),
+								) {
+									Text(
+										text = label,
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+										color = if (active) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										textAlign = TextAlign.Center,
+										maxLines = 1,
+										modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+									)
+								}
+							}
+						}
+					}
+				}
+			}
+
+			HorizontalDivider(color = NemuriTheme.colors.border)
+
+			// 3. QUICK READER TOGGLES (Keep Screen On, Volume Keys, Page Numbers, 4-Side Scrubber Edge, Smart Stitch)
+			Text(
+				text = "QUICK READER TOGGLES",
+				style = MaterialTheme.typography.labelSmall,
+				fontWeight = FontWeight.Bold,
+				color = NemuriTheme.colors.cyan,
+			)
+			ReaderInlineSwitchRow(
+				title = "Keep Screen On",
+				subtitle = "Prevent device sleep while reading",
+				checked = uiState.keepScreenOn,
+				onCheckedChange = viewModel::setKeepScreenOn,
+			)
+			ReaderInlineSwitchRow(
+				title = "Volume Keys Navigation",
+				subtitle = "Turn pages or scroll using hardware volume buttons",
+				checked = uiState.volumeButtonsEnabled,
+				onCheckedChange = viewModel::setVolumeButtonsEnabled,
+			)
+			if (!uiState.isTextMode) {
+				ReaderInlineSwitchRow(
+					title = "Show Page Numbers",
+					subtitle = "Display subtle corner page indicator when HUD is hidden",
+					checked = uiState.showPageNumbers,
+					onCheckedChange = viewModel::setShowPageNumbers,
+				)
+				ReaderInlineSwitchRow(
+					title = "Seamless Smart Stitch",
+					subtitle = "Merges uneven sliver slices into single pages with 0px seams",
+					checked = uiState.isSeamlessStitchEnabled,
+					onCheckedChange = viewModel::setSeamlessStitchEnabled,
+				)
+			}
+
+			Text(
+				text = "4-SIDE SCRUBBER EDGE (LONG-PRESS SCRUBBER TO DRAG)",
+				style = MaterialTheme.typography.labelSmall,
+				color = NemuriTheme.colors.cyan,
+			)
+			if (isVisualDiagram && !uiState.isTextMode) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					ReaderScrubberEdge.entries.forEach { edge ->
+						val selected = uiState.scrubberEdge == edge
+						val shortName = when (edge) {
+							ReaderScrubberEdge.RIGHT -> "Right"
+							ReaderScrubberEdge.LEFT -> "Left"
+							ReaderScrubberEdge.BOTTOM -> "Bottom"
+							ReaderScrubberEdge.TOP -> "Top"
+						}
+						Surface(
+							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(12.dp),
+							border = BorderStroke(
+								width = if (selected) 1.5.dp else 1.dp,
+								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+							),
+							modifier = Modifier
+								.weight(1f)
+								.clip(RoundedCornerShape(12.dp))
+								.clickable { viewModel.setScrubberEdge(edge) },
+						) {
+							Column(
+								modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+								horizontalAlignment = Alignment.CenterHorizontally,
+								verticalArrangement = Arrangement.spacedBy(5.dp),
+							) {
+								ScrubberEdgeDiagramCanvas(
+									edge = edge,
+									selected = selected,
+									modifier = Modifier.size(width = 30.dp, height = 34.dp),
+								)
+								Text(
+									text = shortName,
+									style = MaterialTheme.typography.labelSmall,
+									fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									maxLines = 1,
+								)
+							}
+						}
+					}
+				}
+			} else {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					ReaderScrubberEdge.entries.forEach { edge ->
+						val selected = uiState.scrubberEdge == edge
+						Surface(
+							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(10.dp),
+							border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+							modifier = Modifier
+								.weight(1f)
+								.clip(RoundedCornerShape(10.dp))
+								.clickable { viewModel.setScrubberEdge(edge) },
+						) {
+							Text(
+								text = edge.name.lowercase().replaceFirstChar { it.uppercase() },
+								style = MaterialTheme.typography.labelSmall,
+								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+								textAlign = TextAlign.Center,
+								modifier = Modifier.padding(vertical = 8.dp),
+							)
+						}
+					}
+				}
+			}
+
+			if (!uiState.isTextMode) {
+				Surface(
+					color = NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(12.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.border),
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(RoundedCornerShape(12.dp))
+						.clickable { showAdvancedLayoutControls = !showAdvancedLayoutControls },
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.SpaceBetween,
+					) {
+						Column(modifier = Modifier.weight(1f)) {
+							Text(
+								text = "Tap Zones, Webtoon & Two-Page Spreads",
+								style = MaterialTheme.typography.labelLarge,
+								color = NemuriTheme.colors.textPrimary,
+							)
+							Text(
+								text = "${uiState.tapZoneMode.label} • Zoom-out ${uiState.defaultWebtoonZoomOutPercent}%",
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.textMuted,
+							)
+						}
+						Icon(
+							imageVector = if (showAdvancedLayoutControls) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+							contentDescription = "Expand layout options",
+							tint = NemuriTheme.colors.cyan,
+						)
+					}
+				}
+
+				if (showAdvancedLayoutControls) {
+					Text(
+						text = "TAP-ZONE LAYOUT",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.cyan,
+					)
+					if (isVisualDiagram) {
+						Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+							ReaderTapZoneMode.entries.chunked(2).forEach { rowModes ->
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(8.dp),
+								) {
+									rowModes.forEach { tz ->
+										val selected = uiState.tapZoneMode == tz
+										Surface(
+											color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+											shape = RoundedCornerShape(12.dp),
+											border = BorderStroke(
+												width = if (selected) 1.5.dp else 1.dp,
+												color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+											),
+											modifier = Modifier
+												.weight(1f)
+												.clip(RoundedCornerShape(12.dp))
+												.clickable { viewModel.setTapZoneMode(tz) },
+										) {
+											Row(
+												modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+												verticalAlignment = Alignment.CenterVertically,
+												horizontalArrangement = Arrangement.spacedBy(10.dp),
 											) {
-												Row(
-													modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-													verticalAlignment = Alignment.CenterVertically,
-													horizontalArrangement = Arrangement.spacedBy(10.dp),
-												) {
-													TapZoneDiagramCanvas(
-														mode = tz,
-														selected = selected,
-														modifier = Modifier.size(width = 30.dp, height = 38.dp),
-													)
-													Text(
-														text = tz.label,
-														style = MaterialTheme.typography.labelMedium,
-														fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-														color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
-														maxLines = 1,
-													)
-												}
+												TapZoneDiagramCanvas(
+													mode = tz,
+													selected = selected,
+													modifier = Modifier.size(width = 30.dp, height = 38.dp),
+												)
+												Text(
+													text = tz.label,
+													style = MaterialTheme.typography.labelMedium,
+													fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+													color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+													maxLines = 1,
+												)
 											}
 										}
 									}
 								}
-								Text(
-									text = uiState.tapZoneMode.description,
-									style = MaterialTheme.typography.labelSmall,
-									color = NemuriTheme.colors.textMuted,
-								)
 							}
-						} else {
-							Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-								ReaderTapZoneMode.entries.forEach { tz ->
-									ReaderCompactChoiceRow(
-										label = "${tz.label} — ${tz.description}",
-										selected = uiState.tapZoneMode == tz,
-										onClick = { viewModel.setTapZoneMode(tz) },
-									)
-								}
-							}
-						}
-
-						ReaderInlineSwitchRow(
-							title = "Smart Double-Tap Fill Zoom",
-							subtitle = "Snaps pillarboxed/stitched pages edge-to-edge or 2x focal zoom",
-							checked = uiState.isDoubleTapSmartZoom,
-							onCheckedChange = viewModel::setDoubleTapSmartZoom,
-						)
-
-						HorizontalDivider(color = NemuriTheme.colors.border)
-
-						Text(
-							text = "SCRUBBER EDGE (LONG-PRESS SCRUBBER TO DRAG)",
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.cyan,
-						)
-						if (isVisualDiagram) {
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.spacedBy(8.dp),
-							) {
-								ReaderScrubberEdge.entries.forEach { edge ->
-									val selected = uiState.scrubberEdge == edge
-									val shortName = when (edge) {
-										ReaderScrubberEdge.RIGHT -> "Right"
-										ReaderScrubberEdge.LEFT -> "Left"
-										ReaderScrubberEdge.BOTTOM -> "Bottom"
-										ReaderScrubberEdge.TOP -> "Top"
-									}
-									Surface(
-										color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-										shape = RoundedCornerShape(12.dp),
-										border = BorderStroke(
-											width = if (selected) 1.5.dp else 1.dp,
-											color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-										),
-										modifier = Modifier
-											.weight(1f)
-											.clip(RoundedCornerShape(12.dp))
-											.clickable { viewModel.setScrubberEdge(edge) },
-									) {
-										Column(
-											modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
-											horizontalAlignment = Alignment.CenterHorizontally,
-											verticalArrangement = Arrangement.spacedBy(5.dp),
-										) {
-											ScrubberEdgeDiagramCanvas(
-												edge = edge,
-												selected = selected,
-												modifier = Modifier.size(width = 30.dp, height = 34.dp),
-											)
-											Text(
-												text = shortName,
-												style = MaterialTheme.typography.labelSmall,
-												fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-												color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-												maxLines = 1,
-											)
-										}
-									}
-								}
-							}
-						} else {
-							Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-								ReaderScrubberEdge.entries.forEach { edge ->
-									ReaderCompactChoiceRow(
-										label = edge.label,
-										selected = uiState.scrubberEdge == edge,
-										onClick = { viewModel.setScrubberEdge(edge) },
-									)
-								}
-							}
-						}
-
-						HorizontalDivider(color = NemuriTheme.colors.border)
-
-						Text(
-							text = "WEBTOON & TWO-PAGE SPREADS",
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.cyan,
-						)
-						Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.SpaceBetween,
-							) {
-								Text(
-									text = "Default Webtoon Zoom-Out",
-									style = MaterialTheme.typography.bodyMedium,
-									color = NemuriTheme.colors.textPrimary,
-								)
-								Text(
-									text = "${uiState.defaultWebtoonZoomOutPercent}%",
-									style = MaterialTheme.typography.labelLarge,
-									color = NemuriTheme.colors.cyan,
-								)
-							}
-							Slider(
-								value = uiState.defaultWebtoonZoomOutPercent.toFloat(),
-								onValueChange = { viewModel.setDefaultWebtoonZoomOutPercent(it.roundToInt()) },
-								valueRange = 0f..50f,
-								colors = SliderDefaults.colors(
-									thumbColor = NemuriTheme.colors.cyan,
-									activeTrackColor = NemuriTheme.colors.cyan,
-									inactiveTrackColor = NemuriTheme.colors.border,
-								),
-							)
-						}
-
-						ReaderInlineSwitchRow(
-							title = "Webtoon Panel Gaps",
-							subtitle = "Add 12dp breathing room between vertical webtoon blocks",
-							checked = uiState.isWebtoonGapsEnabled,
-							onCheckedChange = viewModel::setWebtoonGapsEnabled,
-						)
-						ReaderInlineSwitchRow(
-							title = "Seamless Smart Stitch",
-							subtitle = "Merges uneven sliver slices into single pages with 0px seams",
-							checked = uiState.isSeamlessStitchEnabled,
-							onCheckedChange = viewModel::setSeamlessStitchEnabled,
-						)
-						ReaderInlineSwitchRow(
-							title = "Two-Page in Landscape",
-							subtitle = "Pair portrait pages into spreads automatically in landscape",
-							checked = uiState.isDoubleOnLandscape,
-							onCheckedChange = viewModel::setDoubleOnLandscape,
-						)
-						ReaderInlineSwitchRow(
-							title = "Foldable Auto Two-Page",
-							subtitle = "Pair portrait pages automatically on unfolded inner screens",
-							checked = uiState.isDoubleOnFoldable,
-							onCheckedChange = viewModel::setDoubleOnFoldable,
-						)
-						Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.SpaceBetween,
-							) {
-								Text(
-									text = "Spread Sensitivity",
-									style = MaterialTheme.typography.bodyMedium,
-									color = NemuriTheme.colors.textPrimary,
-								)
-								Text(
-									text = "${(uiState.doublePagesSensitivity * 100f).roundToInt()}%",
-									style = MaterialTheme.typography.labelLarge,
-									color = NemuriTheme.colors.cyan,
-								)
-							}
-							Slider(
-								value = uiState.doublePagesSensitivity,
-								onValueChange = viewModel::setDoublePagesSensitivity,
-								valueRange = 0f..1f,
-								colors = SliderDefaults.colors(
-									thumbColor = NemuriTheme.colors.cyan,
-									activeTrackColor = NemuriTheme.colors.cyan,
-									inactiveTrackColor = NemuriTheme.colors.border,
-								),
+							Text(
+								text = uiState.tapZoneMode.description,
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.textMuted,
 							)
 						}
 					} else {
-						Text("Paper Theme", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.cyan)
-						Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-							listOf(
-								"system" to "Night",
-								"black" to "AMOLED",
-								"gray" to "Sepia",
-								"white" to "Light",
-							).forEach { (key, label) ->
-								val selected = uiState.epubTheme == key
-								Surface(
-									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-									shape = RoundedCornerShape(10.dp),
-									modifier = Modifier
-										.weight(1f)
-										.border(
-											1.dp,
-											if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-											RoundedCornerShape(10.dp),
-										)
-										.clip(RoundedCornerShape(10.dp))
-										.clickable { viewModel.setEpubTheme(key) },
-								) {
-									Text(
-										text = label,
-										style = MaterialTheme.typography.labelMedium,
-										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-										textAlign = TextAlign.Center,
-										modifier = Modifier.padding(vertical = 8.dp),
-									)
-								}
+						Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+							ReaderTapZoneMode.entries.forEach { tz ->
+								ReaderCompactChoiceRow(
+									label = "${tz.label} — ${tz.description}",
+									selected = uiState.tapZoneMode == tz,
+									onClick = { viewModel.setTapZoneMode(tz) },
+								)
 							}
 						}
+					}
 
-						Text("Font Family", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.cyan)
-						Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-							listOf(
-								"serif" to "Serif",
-								"sans-serif" to "Sans",
-								"monospace" to "Mono",
-							).forEach { (key, label) ->
-								val selected = uiState.epubFontFamily == key
-								Surface(
-									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-									shape = RoundedCornerShape(10.dp),
-									modifier = Modifier
-										.weight(1f)
-										.border(
-											1.dp,
-											if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-											RoundedCornerShape(10.dp),
-										)
-										.clip(RoundedCornerShape(10.dp))
-										.clickable { viewModel.setEpubFontFamily(key) },
-								) {
-									Text(
-										text = label,
-										style = MaterialTheme.typography.labelMedium,
-										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-										textAlign = TextAlign.Center,
-										modifier = Modifier.padding(vertical = 8.dp),
-									)
-								}
-							}
+					ReaderInlineSwitchRow(
+						title = "Smart Double-Tap Fill Zoom",
+						subtitle = "Snaps pillarboxed/stitched pages edge-to-edge or 2x focal zoom",
+						checked = uiState.isDoubleTapSmartZoom,
+						onCheckedChange = viewModel::setDoubleTapSmartZoom,
+					)
+					Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Text(
+								text = "Default Webtoon Zoom-Out",
+								style = MaterialTheme.typography.bodyMedium,
+								color = NemuriTheme.colors.textPrimary,
+							)
+							Text(
+								text = "${uiState.defaultWebtoonZoomOutPercent}%",
+								style = MaterialTheme.typography.labelLarge,
+								color = NemuriTheme.colors.cyan,
+							)
 						}
-
-						Text("Font Size (${uiState.epubFontSize}%)", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textMuted)
 						Slider(
-							value = uiState.epubFontSize.toFloat(),
-							onValueChange = { viewModel.setEpubFontSize(it.roundToInt()) },
-							valueRange = 70f..200f,
-							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+							value = uiState.defaultWebtoonZoomOutPercent.toFloat(),
+							onValueChange = { viewModel.setDefaultWebtoonZoomOutPercent(it.roundToInt()) },
+							valueRange = 0f..50f,
+							colors = SliderDefaults.colors(
+								thumbColor = NemuriTheme.colors.cyan,
+								activeTrackColor = NemuriTheme.colors.cyan,
+								inactiveTrackColor = NemuriTheme.colors.border,
+							),
 						)
-
-						Text("Line Spacing (${uiState.epubLineHeight}%)", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textMuted)
+					}
+					ReaderInlineSwitchRow(
+						title = "Webtoon Panel Gaps",
+						subtitle = "Add 12dp breathing room between vertical webtoon blocks",
+						checked = uiState.isWebtoonGapsEnabled,
+						onCheckedChange = viewModel::setWebtoonGapsEnabled,
+					)
+					ReaderInlineSwitchRow(
+						title = "Two-Page in Landscape",
+						subtitle = "Pair portrait pages into spreads automatically in landscape",
+						checked = uiState.isDoubleOnLandscape,
+						onCheckedChange = viewModel::setDoubleOnLandscape,
+					)
+					ReaderInlineSwitchRow(
+						title = "Foldable Auto Two-Page",
+						subtitle = "Pair portrait pages automatically on unfolded inner screens",
+						checked = uiState.isDoubleOnFoldable,
+						onCheckedChange = viewModel::setDoubleOnFoldable,
+					)
+					Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Text(
+								text = "Spread Sensitivity",
+								style = MaterialTheme.typography.bodyMedium,
+								color = NemuriTheme.colors.textPrimary,
+							)
+							Text(
+								text = "${(uiState.doublePagesSensitivity * 100f).roundToInt()}%",
+								style = MaterialTheme.typography.labelLarge,
+								color = NemuriTheme.colors.cyan,
+							)
+						}
 						Slider(
-							value = uiState.epubLineHeight.toFloat(),
-							onValueChange = { viewModel.setEpubLineHeight(it.roundToInt()) },
-							valueRange = 110f..230f,
-							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+							value = uiState.doublePagesSensitivity,
+							onValueChange = viewModel::setDoublePagesSensitivity,
+							valueRange = 0f..1f,
+							colors = SliderDefaults.colors(
+								thumbColor = NemuriTheme.colors.cyan,
+								activeTrackColor = NemuriTheme.colors.cyan,
+								inactiveTrackColor = NemuriTheme.colors.border,
+							),
 						)
+					}
+				}
 
-						Text("Margins (${uiState.epubHorizontalPadding} dp)", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textMuted)
-						Slider(
-							value = uiState.epubHorizontalPadding.toFloat(),
-							onValueChange = { viewModel.setEpubHorizontalPadding(it.roundToInt()) },
-							valueRange = 8f..56f,
-							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
-						)
+				HorizontalDivider(color = NemuriTheme.colors.border)
 
-						HorizontalDivider(color = NemuriTheme.colors.border)
-						Text("Scrubber Edge", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.cyan)
+				// 4. UPSCALER & NEURAL MODELS (Below everyday controls, with active delegate strip + collapsible model downloader)
+				Text(
+					text = "UPSCALER & NEURAL SUPER-RESOLUTION",
+					style = MaterialTheme.typography.labelSmall,
+					fontWeight = FontWeight.Bold,
+					color = NemuriTheme.colors.cyan,
+				)
+				HardwareTelemetryStrip(
+					activeDelegateOverride = uiState.activeNeuralDelegate,
+				)
+
+				Text(
+					text = "Universal GPU Shaders" + if (!UpscaleEffect.isSupported) " (Requires Android 13+)" else "",
+					style = MaterialTheme.typography.labelLarge,
+					color = NemuriTheme.colors.cyan,
+				)
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					ReaderShaderPreset.entries.chunked(2).forEach { rowPresets ->
 						Row(
 							modifier = Modifier.fillMaxWidth(),
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
 						) {
-							ReaderScrubberEdge.entries.forEach { edge ->
-								val selected = uiState.scrubberEdge == edge
+							rowPresets.forEach { preset ->
+								val selected = uiState.shaderConfig.preset == preset
 								Surface(
 									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
 									shape = RoundedCornerShape(10.dp),
-									border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 									modifier = Modifier
 										.weight(1f)
+										.border(
+											1.dp,
+											if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+											RoundedCornerShape(10.dp),
+										)
 										.clip(RoundedCornerShape(10.dp))
-										.clickable { viewModel.setScrubberEdge(edge) },
+										.clickable(enabled = UpscaleEffect.isSupported) {
+											viewModel.setShaderPreset(preset)
+										},
 								) {
 									Text(
-										text = edge.name.lowercase().replaceFirstChar { it.uppercase() },
+										text = preset.label,
 										style = MaterialTheme.typography.labelSmall,
 										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 										textAlign = TextAlign.Center,
-										modifier = Modifier.padding(vertical = 8.dp),
+										maxLines = 1,
+										modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
 									)
 								}
 							}
@@ -2670,292 +4211,254 @@ private fun ReaderSettingsModalSheet(
 					}
 				}
 
-				ReaderSheetTab.TOOLS -> {
-					HardwareTelemetryStrip(
-						activeDelegateOverride = uiState.activeNeuralDelegate,
-					)
+				ReaderInlineSwitchRow(
+					title = "Halftone Moiré Descreen",
+					subtitle = "Smooths halftone dot noise while keeping ink sharp",
+					checked = uiState.shaderConfig.descreen,
+					enabled = UpscaleEffect.isSupported,
+					onCheckedChange = viewModel::setShaderDescreen,
+				)
+				ReaderInlineSwitchRow(
+					title = "Ink Contrast Levels",
+					subtitle = "Deepens faded blacks & cleans muddy scan paper",
+					checked = uiState.shaderConfig.inkLevels,
+					enabled = UpscaleEffect.isSupported,
+					onCheckedChange = viewModel::setShaderInkLevels,
+				)
+				Text(
+					text = "Enhancement Intensity (${(uiState.shaderConfig.strength * 100f).roundToInt()}%)",
+					style = MaterialTheme.typography.labelLarge,
+					color = NemuriTheme.colors.textMuted,
+				)
+				Slider(
+					value = uiState.shaderConfig.strength,
+					onValueChange = viewModel::setShaderStrength,
+					valueRange = 0.3f..1.0f,
+					enabled = UpscaleEffect.isSupported && uiState.shaderConfig.isActive,
+					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
+				)
 
-					if (!uiState.isTextMode) {
-						Text(
-							text = "Universal GPU Shaders" + if (!UpscaleEffect.isSupported) " (Requires Android 13+)" else "",
-							style = MaterialTheme.typography.labelLarge,
-							color = NemuriTheme.colors.cyan,
+				if ((UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) && currentPage != null) {
+					Button(
+						onClick = { showShaderPreview = true },
+						colors = ButtonDefaults.buttonColors(
+							containerColor = NemuriTheme.colors.surfaceElevated,
+							contentColor = NemuriTheme.colors.cyan,
+						),
+						shape = RoundedCornerShape(10.dp),
+						modifier = Modifier
+							.fillMaxWidth()
+							.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+					) {
+						Text("Compare Split (Before / After Preview)")
+					}
+					if (showShaderPreview) {
+						ShaderSplitPreviewDialog(
+							page = currentPage,
+							config = uiState.shaderConfig,
+							isNeuralActive = uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel,
+							neuralModelLabel = uiState.activeNeuralModelLabel,
+							neuralRevision = uiState.neuralRevision,
+							loadOriginalPage = viewModel::loadRawPageImage,
+							loadEnhancedPage = viewModel::loadPageImage,
+							onDismiss = { showShaderPreview = false },
 						)
-						Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-							ReaderShaderPreset.entries.chunked(2).forEach { rowPresets ->
-								Row(
-									modifier = Modifier.fillMaxWidth(),
-									horizontalArrangement = Arrangement.spacedBy(8.dp),
-								) {
-									rowPresets.forEach { preset ->
-										val selected = uiState.shaderConfig.preset == preset
-										Surface(
-											color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-											shape = RoundedCornerShape(10.dp),
-											modifier = Modifier
-												.weight(1f)
-												.border(
-													1.dp,
-													if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-													RoundedCornerShape(10.dp),
-												)
-												.clip(RoundedCornerShape(10.dp))
-												.clickable(enabled = UpscaleEffect.isSupported) {
-													viewModel.setShaderPreset(preset)
-												},
-										) {
-											Text(
-												text = preset.label,
-												style = MaterialTheme.typography.labelSmall,
-												color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-												textAlign = TextAlign.Center,
-												maxLines = 1,
-												modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
-											)
-										}
-									}
-								}
-							}
+					}
+				}
+
+				HorizontalDivider(color = NemuriTheme.colors.border, modifier = Modifier.padding(vertical = 2.dp))
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Row(
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+						) {
+							Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = NemuriTheme.colors.mergePurple, modifier = Modifier.size(16.dp))
+							Text("Neural 2x Super-Resolution", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.mergePurple)
 						}
-
-						ReaderInlineSwitchRow(
-							title = "Halftone Moiré Descreen",
-							subtitle = "Smooths halftone dot noise while keeping ink sharp",
-							checked = uiState.shaderConfig.descreen,
-							enabled = UpscaleEffect.isSupported,
-							onCheckedChange = viewModel::setShaderDescreen,
-						)
-
-						ReaderInlineSwitchRow(
-							title = "Ink Contrast Levels",
-							subtitle = "Deepens faded blacks & cleans muddy scan paper",
-							checked = uiState.shaderConfig.inkLevels,
-							enabled = UpscaleEffect.isSupported,
-							onCheckedChange = viewModel::setShaderInkLevels,
-						)
-
 						Text(
-							text = "Enhancement Intensity (${(uiState.shaderConfig.strength * 100f).roundToInt()}%)",
-							style = MaterialTheme.typography.labelLarge,
+							text = if (!uiState.isNeuralUpscaleSupported) {
+								"Available in GitHub builds with native NPU/GPU/ONNX runtimes"
+							} else {
+								"${uiState.activeNeuralDelegate} • Adaptive 256/512px tiled NPU/GPU/CPU"
+							},
+							style = MaterialTheme.typography.labelSmall,
 							color = NemuriTheme.colors.textMuted,
 						)
-						Slider(
-							value = uiState.shaderConfig.strength,
-							onValueChange = viewModel::setShaderStrength,
-							valueRange = 0.3f..1.0f,
-							enabled = UpscaleEffect.isSupported && uiState.shaderConfig.isActive,
-							colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
-						)
+					}
+					Switch(
+						checked = uiState.isNeuralUpscaleEnabled,
+						onCheckedChange = viewModel::setNeuralUpscaleEnabled,
+						enabled = uiState.isNeuralUpscaleSupported,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.mergePurple,
+						),
+					)
+				}
 
-						val currentPage = uiState.pages.getOrNull(uiState.currentPageIndex)
-						if ((UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) && currentPage != null) {
-							Button(
-								onClick = { showShaderPreview = true },
-								colors = ButtonDefaults.buttonColors(
-									containerColor = NemuriTheme.colors.surfaceElevated,
-									contentColor = NemuriTheme.colors.cyan,
-								),
+				if (uiState.isNeuralUpscaleSupported) {
+					Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+						NeuralAccelerator.entries.forEach { accel ->
+							val selected = uiState.neuralAccelerator == accel
+							Surface(
+								color = if (selected) NemuriTheme.colors.mergePurple.copy(alpha = 0.18f) else NemuriTheme.colors.surfaceElevated,
 								shape = RoundedCornerShape(10.dp),
 								modifier = Modifier
-									.fillMaxWidth()
-									.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+									.weight(1f)
+									.border(
+										1.dp,
+										if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
+										RoundedCornerShape(10.dp),
+									)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setNeuralAccelerator(accel) },
 							) {
-								Text("Compare Split (Before / After Preview)")
-							}
-							if (showShaderPreview) {
-								ShaderSplitPreviewDialog(
-									page = currentPage,
-									config = uiState.shaderConfig,
-									isNeuralActive = uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel,
-									neuralModelLabel = uiState.activeNeuralModelLabel,
-									neuralRevision = uiState.neuralRevision,
-									loadOriginalPage = viewModel::loadRawPageImage,
-									loadEnhancedPage = viewModel::loadPageImage,
-									onDismiss = { showShaderPreview = false },
-								)
-							}
-						}
-
-						HorizontalDivider(color = NemuriTheme.colors.border, modifier = Modifier.padding(vertical = 2.dp))
-
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.SpaceBetween,
-							verticalAlignment = Alignment.CenterVertically,
-						) {
-							Column(modifier = Modifier.weight(1f)) {
-								Row(
-									verticalAlignment = Alignment.CenterVertically,
-									horizontalArrangement = Arrangement.spacedBy(6.dp),
-								) {
-									Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = NemuriTheme.colors.mergePurple, modifier = Modifier.size(16.dp))
-									Text("Neural 2x Super-Resolution", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.mergePurple)
-								}
 								Text(
-									text = if (!uiState.isNeuralUpscaleSupported) {
-										"Available in GitHub builds with native NPU/GPU/ONNX runtimes"
-									} else {
-										"${uiState.activeNeuralDelegate} • Adaptive 256/512px tiled NPU/GPU/CPU • Skips >4096px webtoons & Battery Saver"
+									text = when (accel) {
+										NeuralAccelerator.AUTO -> "Auto"
+										NeuralAccelerator.NPU -> "NPU"
+										NeuralAccelerator.GPU -> "GPU"
+										NeuralAccelerator.CPU -> "CPU"
 									},
 									style = MaterialTheme.typography.labelSmall,
-									color = NemuriTheme.colors.textMuted,
+									color = if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textSecondary,
+									textAlign = TextAlign.Center,
+									maxLines = 1,
+									modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
 								)
 							}
-							Switch(
-								checked = uiState.isNeuralUpscaleEnabled,
-								onCheckedChange = viewModel::setNeuralUpscaleEnabled,
-								enabled = uiState.isNeuralUpscaleSupported,
-								colors = SwitchDefaults.colors(
-									checkedThumbColor = NemuriTheme.colors.onCyan,
-									checkedTrackColor = NemuriTheme.colors.mergePurple,
-								),
+						}
+					}
+
+					val dl = uiState.neuralDownloadState
+					val catalogModels = uiState.neuralCatalog.filter { it.isDownloadable || it.isDownloaded }
+					val isModelsExpanded = showNeuralModelsList || dl.activeModelId != null
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(12.dp),
+						border = BorderStroke(1.dp, NemuriTheme.colors.mergePurple.copy(alpha = 0.45f)),
+						modifier = Modifier
+							.fillMaxWidth()
+							.clip(RoundedCornerShape(12.dp))
+							.clickable { showNeuralModelsList = !showNeuralModelsList },
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(modifier = Modifier.weight(1f)) {
+								Text(
+									text = "Model Downloader (${catalogModels.size} models)",
+									style = MaterialTheme.typography.labelLarge,
+									color = NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = "Active: ${uiState.activeNeuralModelLabel}",
+									style = MaterialTheme.typography.labelSmall,
+									color = if (uiState.hasReadyNeuralModel) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textMuted,
+								)
+							}
+							Icon(
+								imageVector = if (isModelsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+								contentDescription = "Toggle neural model catalog",
+								tint = NemuriTheme.colors.mergePurple,
 							)
 						}
+					}
 
-						if (uiState.isNeuralUpscaleSupported) {
-							Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-								NeuralAccelerator.entries.forEach { accel ->
-									val selected = uiState.neuralAccelerator == accel
-									Surface(
-										color = if (selected) NemuriTheme.colors.mergePurple.copy(alpha = 0.18f) else NemuriTheme.colors.surfaceElevated,
-										shape = RoundedCornerShape(10.dp),
-										modifier = Modifier
-											.weight(1f)
-											.border(
-												1.dp,
-												if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
-												RoundedCornerShape(10.dp),
-											)
-											.clip(RoundedCornerShape(10.dp))
-											.clickable { viewModel.setNeuralAccelerator(accel) },
+					if (isModelsExpanded) {
+						catalogModels.forEach { model ->
+							val isDownloadingThis = dl.activeModelId == model.id
+							Surface(
+								color = if (model.isSelected && model.isDownloaded) {
+									NemuriTheme.colors.mergePurple.copy(alpha = 0.14f)
+								} else {
+									NemuriTheme.colors.surfaceElevated
+								},
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(
+									1.dp,
+									if (model.isSelected && model.isDownloaded) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
+								),
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+									Row(
+										modifier = Modifier.fillMaxWidth(),
+										verticalAlignment = Alignment.CenterVertically,
+										horizontalArrangement = Arrangement.SpaceBetween,
 									) {
-										Text(
-											text = when (accel) {
-												NeuralAccelerator.AUTO -> "Auto"
-												NeuralAccelerator.NPU -> "NPU"
-												NeuralAccelerator.GPU -> "GPU"
-												NeuralAccelerator.CPU -> "CPU"
-											},
-											style = MaterialTheme.typography.labelSmall,
-											color = if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textSecondary,
-											textAlign = TextAlign.Center,
-											maxLines = 1,
-											modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+										Column(modifier = Modifier.weight(1f)) {
+											Text(model.title, style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textPrimary)
+											Text(model.subtitle, style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+										}
+										if (model.isDownloaded) {
+											Row(verticalAlignment = Alignment.CenterVertically) {
+												TextButton(onClick = { viewModel.selectNeuralModel(model.id) }) {
+													Text(
+														text = if (model.isSelected) "Active" else "Use",
+														color = if (model.isSelected) NemuriTheme.colors.healthy else NemuriTheme.colors.cyan,
+													)
+												}
+												IconButton(onClick = { viewModel.deleteNeuralModel(model.id) }, modifier = Modifier.size(28.dp)) {
+													Icon(Icons.Default.Delete, contentDescription = "Delete model", tint = NemuriTheme.colors.danger, modifier = Modifier.size(16.dp))
+												}
+											}
+										} else if (isDownloadingThis) {
+											IconButton(onClick = viewModel::cancelNeuralDownload, modifier = Modifier.size(28.dp)) {
+												Icon(Icons.Default.Close, contentDescription = "Cancel", tint = NemuriTheme.colors.amber, modifier = Modifier.size(16.dp))
+											}
+										} else {
+											TextButton(
+												onClick = { viewModel.downloadNeuralModel(model.id) },
+												enabled = dl.activeModelId == null,
+											) {
+												Icon(Icons.Default.Download, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(15.dp))
+												Spacer(Modifier.width(4.dp))
+												Text(model.sizeLabel, color = NemuriTheme.colors.cyan)
+											}
+										}
+									}
+									if (isDownloadingThis) {
+										val frac = if (dl.totalBytes > 0L) (dl.downloadedBytes.toFloat() / dl.totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+										LinearProgressIndicator(
+											progress = { frac },
+											color = NemuriTheme.colors.mergePurple,
+											trackColor = NemuriTheme.colors.border,
+											modifier = Modifier.fillMaxWidth(),
 										)
 									}
 								}
 							}
-
-							val dl = uiState.neuralDownloadState
-							uiState.neuralCatalog.filter { it.isDownloadable || it.isDownloaded }.forEach { model ->
-								val isDownloadingThis = dl.activeModelId == model.id
-								Surface(
-									color = if (model.isSelected && model.isDownloaded) {
-										NemuriTheme.colors.mergePurple.copy(alpha = 0.14f)
-									} else {
-										NemuriTheme.colors.surfaceElevated
-									},
-									shape = RoundedCornerShape(10.dp),
-									border = BorderStroke(
-										1.dp,
-										if (model.isSelected && model.isDownloaded) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
-									),
-									modifier = Modifier.fillMaxWidth(),
-								) {
-									Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-										Row(
-											modifier = Modifier.fillMaxWidth(),
-											verticalAlignment = Alignment.CenterVertically,
-											horizontalArrangement = Arrangement.SpaceBetween,
-										) {
-											Column(modifier = Modifier.weight(1f)) {
-												Text(model.title, style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textPrimary)
-												Text(model.subtitle, style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
-											}
-											if (model.isDownloaded) {
-												Row(verticalAlignment = Alignment.CenterVertically) {
-													TextButton(onClick = { viewModel.selectNeuralModel(model.id) }) {
-														Text(
-															text = if (model.isSelected) "Active" else "Use",
-															color = if (model.isSelected) NemuriTheme.colors.healthy else NemuriTheme.colors.cyan,
-														)
-													}
-													IconButton(onClick = { viewModel.deleteNeuralModel(model.id) }, modifier = Modifier.size(28.dp)) {
-														Icon(Icons.Default.Delete, contentDescription = "Delete model", tint = NemuriTheme.colors.danger, modifier = Modifier.size(16.dp))
-													}
-												}
-											} else if (isDownloadingThis) {
-												IconButton(onClick = viewModel::cancelNeuralDownload, modifier = Modifier.size(28.dp)) {
-													Icon(Icons.Default.Close, contentDescription = "Cancel", tint = NemuriTheme.colors.amber, modifier = Modifier.size(16.dp))
-												}
-											} else {
-												TextButton(
-													onClick = { viewModel.downloadNeuralModel(model.id) },
-													enabled = dl.activeModelId == null,
-												) {
-													Icon(Icons.Default.Download, contentDescription = null, tint = NemuriTheme.colors.cyan, modifier = Modifier.size(15.dp))
-													Spacer(Modifier.width(4.dp))
-													Text(model.sizeLabel, color = NemuriTheme.colors.cyan)
-												}
-											}
-										}
-										if (isDownloadingThis) {
-											val frac = if (dl.totalBytes > 0L) (dl.downloadedBytes.toFloat() / dl.totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
-											LinearProgressIndicator(
-												progress = { frac },
-												color = NemuriTheme.colors.mergePurple,
-												trackColor = NemuriTheme.colors.border,
-												modifier = Modifier.fillMaxWidth(),
-											)
-										}
-									}
-								}
-							}
-
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.SpaceBetween,
-								verticalAlignment = Alignment.CenterVertically,
-							) {
-								Text(
-									text = "Upscale cache: ${String.format(java.util.Locale.US, "%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))} / 250 MB",
-									style = MaterialTheme.typography.labelSmall,
-									color = NemuriTheme.colors.textMuted,
-								)
-								TextButton(
-									onClick = viewModel::clearNeuralCache,
-									enabled = uiState.neuralCacheBytes > 0L,
-								) {
-									Text(
-										text = "Clear Upscale Cache",
-										color = if (uiState.neuralCacheBytes > 0L) NemuriTheme.colors.cyan else NemuriTheme.colors.textDim,
-									)
-								}
-							}
 						}
-
-						HorizontalDivider(color = NemuriTheme.colors.border)
 					}
 
-					ReaderInlineSwitchRow(
-						title = "Keep Screen On",
-						subtitle = "Prevent device sleep while reading",
-						checked = uiState.keepScreenOn,
-						onCheckedChange = viewModel::setKeepScreenOn,
-					)
-					ReaderInlineSwitchRow(
-						title = "Volume Keys Navigation",
-						subtitle = "Turn pages or scroll using hardware volume buttons",
-						checked = uiState.volumeButtonsEnabled,
-						onCheckedChange = viewModel::setVolumeButtonsEnabled,
-					)
-					if (!uiState.isTextMode) {
-						ReaderInlineSwitchRow(
-							title = "Show Page Numbers Overlay",
-							subtitle = "Display subtle corner page indicator when HUD is hidden",
-							checked = uiState.showPageNumbers,
-							onCheckedChange = viewModel::setShowPageNumbers,
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Text(
+							text = "Upscale cache: ${String.format(java.util.Locale.US, "%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))} / 250 MB",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
 						)
+						TextButton(
+							onClick = viewModel::clearNeuralCache,
+							enabled = uiState.neuralCacheBytes > 0L,
+						) {
+							Text(
+								text = "Clear Upscale Cache",
+								color = if (uiState.neuralCacheBytes > 0L) NemuriTheme.colors.cyan else NemuriTheme.colors.textDim,
+							)
+						}
 					}
 				}
 			}
@@ -3286,7 +4789,10 @@ private fun openMigrateFromReader(context: Context, mangaId: Long) {
 	(context as? android.app.Activity)?.finish()
 }
 
-private data class AppliedShaderState(val key: Pair<ReaderShaderConfig, Float>?)
+private data class AppliedShaderState(
+	val shaderKey: Pair<ReaderShaderConfig, Float>?,
+	val colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
+)
 
 private class SsivHolderState(
 	var imageKey: String? = null,
@@ -3299,8 +4805,8 @@ private fun ssivState(ssiv: SubsamplingScaleImageView): SsivHolderState =
 private fun applyShaderToSsiv(
 	ssiv: SubsamplingScaleImageView,
 	config: ReaderShaderConfig,
+	colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
 ) {
-	if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
 	val pm = ssiv.context.getSystemService(Context.POWER_SERVICE) as? PowerManager
 	val isPowerSave = pm?.isPowerSaveMode == true
 	val fitScale = if (ssiv.sWidth > 0 && ssiv.width > 0) {
@@ -3309,15 +4815,44 @@ private fun applyShaderToSsiv(
 		UpscaleEffect.MIN_SCALE
 	}
 	val desired = AppliedShaderState(
-		key = if (!config.isActive || isPowerSave) null else (config to fitScale),
+		shaderKey = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && config.isActive && !isPowerSave) {
+			config to fitScale
+		} else {
+			null
+		},
+		colorFilter = colorFilter,
 	)
 	val holder = ssivState(ssiv)
 	if (holder.shaderState == desired) return
 	holder.shaderState = desired
-	if (desired.key == null) {
-		ssiv.setRenderEffect(null)
+
+	if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+		val cfEffect = if (!colorFilter.isEmpty) {
+			RenderEffect.createColorFilterEffect(colorFilter.toColorFilter())
+		} else {
+			null
+		}
+		val upscaleEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && desired.shaderKey != null) {
+			UpscaleEffect.create(fitScale, config)
+		} else {
+			null
+		}
+		val combined = when {
+			cfEffect != null && upscaleEffect != null -> RenderEffect.createChainEffect(cfEffect, upscaleEffect)
+			cfEffect != null -> cfEffect
+			upscaleEffect != null -> upscaleEffect
+			else -> null
+		}
+		ssiv.setRenderEffect(combined)
 	} else {
-		ssiv.setRenderEffect(UpscaleEffect.create(fitScale, config))
+		if (!colorFilter.isEmpty) {
+			ssiv.setLayerType(
+				View.LAYER_TYPE_HARDWARE,
+				Paint().apply { this.colorFilter = colorFilter.toColorFilter() },
+			)
+		} else {
+			ssiv.setLayerType(View.LAYER_TYPE_NONE, null)
+		}
 	}
 }
 

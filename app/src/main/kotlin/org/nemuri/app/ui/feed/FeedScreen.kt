@@ -62,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +79,7 @@ import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.ui.components.CornerSafeCoverProgressBar
 import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
@@ -136,53 +138,60 @@ fun FeedScreen(
 			onSettingsClick = onOpenSettings,
 		)
 
-		// Row 1: 4 Persisted Mode Pills (Hub | Updates | Gallery | For You)
+		// Row 1: 4 Equal-Width Persisted Mode Tabs (Hub | Updates | Gallery | For You)
 		Row(
 			modifier = Modifier
 				.fillMaxWidth()
-				.horizontalScroll(rememberScrollState())
 				.padding(horizontal = 14.dp, vertical = 4.dp),
 			horizontalArrangement = Arrangement.spacedBy(6.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
 			FeedModePill(
-				label = "📰 Hub",
+				label = "Hub",
+				badgeCount = 0,
 				selected = uiState.mode == FeedScreenMode.HUB,
 				onClick = { viewModel.setMode(FeedScreenMode.HUB) },
+				modifier = Modifier.weight(1f),
 			)
 			FeedModePill(
-				label = if (uiState.unreadCount > 0) "⚡ Updates (${uiState.unreadCount})" else "⚡ Updates",
+				label = "Updates",
+				badgeCount = uiState.unreadCount,
 				selected = uiState.mode == FeedScreenMode.UPDATES,
 				onClick = { viewModel.setMode(FeedScreenMode.UPDATES) },
+				modifier = Modifier.weight(1f),
 			)
 			FeedModePill(
-				label = "🖼️ Gallery",
+				label = "Gallery",
+				badgeCount = 0,
 				selected = uiState.mode == FeedScreenMode.GALLERY,
 				onClick = { viewModel.setMode(FeedScreenMode.GALLERY) },
+				modifier = Modifier.weight(1f),
 			)
 			FeedModePill(
-				label = "✨ For You",
+				label = "For You",
+				badgeCount = 0,
 				selected = uiState.mode == FeedScreenMode.FOR_YOU,
 				onClick = { viewModel.setMode(FeedScreenMode.FOR_YOU) },
+				modifier = Modifier.weight(1f),
 			)
 		}
 
-		// Row 2: Secondary Filter Chips (All | Unread | Downloaded | Not in Library) + Actions
+		// Row 2: Secondary Filter Chips (All | Unread | Downloaded | Not in Library) + Clipped Right Actions
 		Row(
 			modifier = Modifier
 				.fillMaxWidth()
 				.padding(horizontal = 14.dp, vertical = 2.dp),
 			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(6.dp),
 		) {
-			Row(
+			LazyRow(
 				modifier = Modifier
 					.weight(1f)
-					.horizontalScroll(rememberScrollState()),
+					.clipToBounds(),
 				horizontalArrangement = Arrangement.spacedBy(6.dp),
 				verticalAlignment = Alignment.CenterVertically,
+				contentPadding = PaddingValues(end = 4.dp),
 			) {
-				FeedSecondaryFilter.entries.forEach { filter ->
+				items(FeedSecondaryFilter.entries, key = { it.name }) { filter ->
 					val selected = uiState.secondaryFilter == filter
 					val chipLabel = if (filter == FeedSecondaryFilter.UNREAD && uiState.unreadCount > 0) {
 						"Unread (${uiState.unreadCount})"
@@ -197,114 +206,121 @@ fun FeedScreen(
 				}
 			}
 
-			if (uiState.unreadCount > 0 && uiState.mode != FeedScreenMode.FOR_YOU) {
-				IconButton(
-					onClick = viewModel::markAllRead,
-					modifier = Modifier.size(32.dp),
-				) {
-					Icon(
-						imageVector = Icons.Default.DoneAll,
-						contentDescription = "Mark all read",
-						tint = NemuriTheme.colors.textSecondary,
-						modifier = Modifier.size(17.dp),
-					)
-				}
-			}
+			Spacer(modifier = Modifier.width(8.dp))
 
-			if (uiState.mode == FeedScreenMode.UPDATES && uiState.totalCount > 0) {
-				IconButton(
-					onClick = { showClearDialog = true },
-					modifier = Modifier.size(32.dp),
-				) {
-					Icon(
-						imageVector = Icons.Default.DeleteSweep,
-						contentDescription = "Clear feed",
-						tint = NemuriTheme.colors.textSecondary,
-						modifier = Modifier.size(17.dp),
-					)
-				}
-			}
-
-			if (uiState.mode == FeedScreenMode.FOR_YOU) {
-				Surface(
-					color = if (uiState.isDiscoveryLoading) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(999.dp),
-					modifier = Modifier
-						.border(
-							1.dp,
-							if (uiState.isDiscoveryLoading) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-							RoundedCornerShape(999.dp),
-						)
-						.clip(RoundedCornerShape(999.dp))
-						.clickable(enabled = !uiState.isDiscoveryLoading) { viewModel.refreshDiscovery(force = true) },
-				) {
-					Row(
-						modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(5.dp),
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(4.dp),
+			) {
+				if (uiState.unreadCount > 0 && uiState.mode != FeedScreenMode.FOR_YOU) {
+					IconButton(
+						onClick = viewModel::markAllRead,
+						modifier = Modifier.size(32.dp),
 					) {
-						if (uiState.isDiscoveryLoading) {
-							CircularProgressIndicator(
-								color = NemuriTheme.colors.cyan,
-								strokeWidth = 2.dp,
-								modifier = Modifier.size(12.dp),
-							)
-						} else {
-							Icon(
-								imageVector = Icons.Default.Refresh,
-								contentDescription = "Refresh recommendations",
-								tint = NemuriTheme.colors.cyan,
-								modifier = Modifier.size(14.dp),
-							)
-						}
-						Text(
-							text = "Refresh",
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.cyan,
+						Icon(
+							imageVector = Icons.Default.DoneAll,
+							contentDescription = "Mark all read",
+							tint = NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(17.dp),
 						)
 					}
 				}
-			} else {
-				Surface(
-					color = if (uiState.isTrackerRunning) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(999.dp),
-					modifier = Modifier
-						.border(
-							1.dp,
-							if (uiState.isTrackerRunning) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-							RoundedCornerShape(999.dp),
-						)
-						.clip(RoundedCornerShape(999.dp))
-						.clickable(onClick = viewModel::checkForUpdatesNow),
-				) {
-					Row(
-						modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(5.dp),
+
+				if (uiState.mode == FeedScreenMode.UPDATES && uiState.totalCount > 0) {
+					IconButton(
+						onClick = { showClearDialog = true },
+						modifier = Modifier.size(32.dp),
 					) {
-						if (uiState.isTrackerRunning) {
-							CircularProgressIndicator(
-								color = NemuriTheme.colors.cyan,
-								strokeWidth = 2.dp,
-								modifier = Modifier.size(12.dp),
+						Icon(
+							imageVector = Icons.Default.DeleteSweep,
+							contentDescription = "Clear feed",
+							tint = NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(17.dp),
+						)
+					}
+				}
+
+				if (uiState.mode == FeedScreenMode.FOR_YOU) {
+					Surface(
+						color = if (uiState.isDiscoveryLoading) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(999.dp),
+						modifier = Modifier
+							.border(
+								1.dp,
+								if (uiState.isDiscoveryLoading) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								RoundedCornerShape(999.dp),
 							)
+							.clip(RoundedCornerShape(999.dp))
+							.clickable(enabled = !uiState.isDiscoveryLoading) { viewModel.refreshDiscovery(force = true) },
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(5.dp),
+						) {
+							if (uiState.isDiscoveryLoading) {
+								CircularProgressIndicator(
+									color = NemuriTheme.colors.cyan,
+									strokeWidth = 2.dp,
+									modifier = Modifier.size(12.dp),
+								)
+							} else {
+								Icon(
+									imageVector = Icons.Default.Refresh,
+									contentDescription = "Refresh recommendations",
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(14.dp),
+								)
+							}
 							Text(
-								text = "Syncing",
+								text = "Refresh",
 								style = MaterialTheme.typography.labelSmall,
 								color = NemuriTheme.colors.cyan,
 							)
-						} else {
-							Icon(
-								imageVector = Icons.Default.Refresh,
-								contentDescription = "Check updates",
-								tint = NemuriTheme.colors.cyan,
-								modifier = Modifier.size(14.dp),
+						}
+					}
+				} else {
+					Surface(
+						color = if (uiState.isTrackerRunning) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(999.dp),
+						modifier = Modifier
+							.border(
+								1.dp,
+								if (uiState.isTrackerRunning) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								RoundedCornerShape(999.dp),
 							)
-							Text(
-								text = "Check",
-								style = MaterialTheme.typography.labelSmall,
-								color = NemuriTheme.colors.textSecondary,
-							)
+							.clip(RoundedCornerShape(999.dp))
+							.clickable(onClick = viewModel::checkForUpdatesNow),
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(5.dp),
+						) {
+							if (uiState.isTrackerRunning) {
+								CircularProgressIndicator(
+									color = NemuriTheme.colors.cyan,
+									strokeWidth = 2.dp,
+									modifier = Modifier.size(12.dp),
+								)
+								Text(
+									text = "Syncing",
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.cyan,
+								)
+							} else {
+								Icon(
+									imageVector = Icons.Default.Refresh,
+									contentDescription = "Check updates",
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(14.dp),
+								)
+								Text(
+									text = "Check",
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.textSecondary,
+								)
+							}
 						}
 					}
 				}
@@ -1413,7 +1429,10 @@ private fun ContinueReadingCard(
 				shape = RoundedCornerShape(999.dp),
 				modifier = Modifier
 					.align(Alignment.BottomEnd)
-					.padding(cornerSafeBadgeInset(safeCorner))
+					.padding(
+						end = cornerSafeBadgeInset(safeCorner),
+						bottom = cornerSafeBadgeInset(safeCorner) + 6.dp,
+					)
 					.border(0.8.dp, NemuriTheme.colors.border, RoundedCornerShape(999.dp)),
 			) {
 				Row(
@@ -1437,14 +1456,11 @@ private fun ContinueReadingCard(
 					)
 				}
 			}
-			LinearProgressIndicator(
-				progress = { item.progressBarFraction.coerceIn(0.03f, 1f) },
-				color = NemuriTheme.colors.cyan,
-				trackColor = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.65f),
-				modifier = Modifier
-					.fillMaxWidth()
-					.height(3.dp)
-					.align(Alignment.BottomCenter),
+			CornerSafeCoverProgressBar(
+				progress = item.progressBarFraction.coerceIn(0.04f, 1f),
+				cornerRadiusDp = safeCorner,
+				fillColor = NemuriTheme.colors.cyan,
+				modifier = Modifier.align(Alignment.BottomCenter),
 			)
 		}
 		Column(
@@ -1553,13 +1569,16 @@ private fun HubDiscoveryPosterCard(
 @Composable
 private fun FeedModePill(
 	label: String,
+	badgeCount: Int,
 	selected: Boolean,
 	onClick: () -> Unit,
+	modifier: Modifier = Modifier,
 ) {
 	Surface(
 		color = if (selected) MaterialTheme.colorScheme.primaryContainer else NemuriTheme.colors.surfaceElevated,
 		shape = RoundedCornerShape(999.dp),
-		modifier = Modifier
+		modifier = modifier
+			.height(36.dp)
 			.border(
 				1.dp,
 				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
@@ -1568,15 +1587,41 @@ private fun FeedModePill(
 			.clip(RoundedCornerShape(999.dp))
 			.clickable(onClick = onClick),
 	) {
-		Text(
-			text = label,
-			style = MaterialTheme.typography.labelLarge,
-			fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-			color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else NemuriTheme.colors.textSecondary,
-			maxLines = 1,
-			softWrap = false,
-			modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
-		)
+		Row(
+			modifier = Modifier
+				.fillMaxSize()
+				.padding(horizontal = 6.dp),
+			horizontalArrangement = Arrangement.Center,
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			Text(
+				text = label,
+				style = MaterialTheme.typography.labelMedium,
+				fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+				color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else NemuriTheme.colors.textSecondary,
+				maxLines = 1,
+				softWrap = false,
+				overflow = TextOverflow.Ellipsis,
+			)
+			if (badgeCount > 0) {
+				Spacer(modifier = Modifier.width(4.dp))
+				Surface(
+					color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.tealContainer,
+					shape = RoundedCornerShape(999.dp),
+				) {
+					Text(
+						text = if (badgeCount > 99) "99+" else badgeCount.toString(),
+						style = MaterialTheme.typography.labelSmall,
+						fontSize = 9.5.sp,
+						fontWeight = FontWeight.Bold,
+						color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.cyan,
+						maxLines = 1,
+						softWrap = false,
+						modifier = Modifier.padding(horizontal = 4.5.dp, vertical = 1.dp),
+					)
+				}
+			}
+		}
 	}
 }
 

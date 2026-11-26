@@ -1,10 +1,21 @@
 package org.nemuri.app.reader
 
+import android.content.ClipData
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Size
 import androidx.compose.runtime.Immutable
+import androidx.core.content.FileProvider
+import androidx.core.net.toFile
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
 import androidx.lifecycle.SavedStateHandle
@@ -52,7 +63,10 @@ import org.koitharu.kotatsu.core.prefs.ReaderMode
 import org.koitharu.kotatsu.core.prefs.ReaderScrubberEdge
 import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
+import org.koitharu.kotatsu.core.ui.model.MangaOverride
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
+import org.koitharu.kotatsu.core.util.ext.isFileUri
+import org.koitharu.kotatsu.core.util.ext.isPdfUri
 import org.koitharu.kotatsu.core.util.ext.isZipUri
 import org.koitharu.kotatsu.details.data.MangaDetails
 import org.koitharu.kotatsu.details.domain.DetailsLoadUseCase
@@ -70,6 +84,7 @@ import org.koitharu.kotatsu.reader.domain.NeuralUpscaleModelManager
 import org.koitharu.kotatsu.reader.domain.PageLoader
 import org.koitharu.kotatsu.reader.domain.PageStitcher
 import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
+import org.koitharu.kotatsu.reader.domain.ReaderColorFilter
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.ui.ReaderState
@@ -130,6 +145,14 @@ data class ReaderUiState(
 	val hasPrevChapter: Boolean = false,
 	val hasNextChapter: Boolean = false,
 	val isBookmarked: Boolean = false,
+	val mangaBookmarks: List<Bookmark> = emptyList(),
+	val isChaptersReversed: Boolean = false,
+	val pagesGridColumns: Int = 3,
+	val colorFilter: ReaderColorFilter = ReaderColorFilter.EMPTY,
+	val isAutoScrollEnabled: Boolean = false,
+	val isAutoScrollPaused: Boolean = false,
+	val autoScrollSpeed: Float = AppSettings.DEFAULT_AUTOSCROLL_SPEED,
+	val autoScrollPageDelaySec: Int = AppSettings.DEFAULT_AUTOSCROLL_PAGE_DELAY,
 	val isIncognito: Boolean = false,
 	val keepScreenOn: Boolean = true,
 	val volumeButtonsEnabled: Boolean = false,
@@ -208,6 +231,10 @@ class ReaderViewModel @Inject constructor(
 			keepScreenOn = settings.isReaderKeepScreenOn,
 			volumeButtonsEnabled = settings.isReaderVolumeButtonsEnabled,
 			is32BitColors = settings.is32BitColorsEnabled,
+			pagesGridColumns = settings.readerPagesGridColumns,
+			colorFilter = settings.readerColorFilter ?: ReaderColorFilter.EMPTY,
+			autoScrollSpeed = settings.readerAutoscrollSpeed,
+			autoScrollPageDelaySec = settings.readerAutoscrollPageDelay,
 			shaderConfig = ReaderShaderConfig(
 				preset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
 				descreen = settings.isReaderDescreenEnabled,
@@ -246,6 +273,7 @@ class ReaderViewModel @Inject constructor(
 	private var autosaveJob: Job? = null
 	private var neuralPreloadJob: Job? = null
 	private val bookmarkTargetFlow = MutableStateFlow<Triple<Manga, Long, Int>?>(null)
+	private val activeMangaFlow = MutableStateFlow<Manga?>(null)
 	private var effectiveIncognito: Boolean = extraIncognito || settings.isIncognitoModeEnabled
 	private var latestChapterPageIndex: Int = 0
 	private var latestChapterEndPageIndex: Int = 0
@@ -292,6 +320,19 @@ class ReaderViewModel @Inject constructor(
 				.distinctUntilChanged()
 				.collect { saved ->
 					_uiState.update { it.copy(isBookmarked = saved) }
+				}
+		}
+		viewModelScope.launch {
+			activeMangaFlow
+				.flatMapLatest { manga ->
+					if (manga == null) {
+						flowOf(emptyList())
+					} else {
+						bookmarksRepository.observeBookmarks(manga).catch { emit(emptyList()) }
+					}
+				}
+				.collect { bookmarks ->
+					_uiState.update { it.copy(mangaBookmarks = bookmarks) }
 				}
 		}
 		loadReader()
@@ -408,6 +449,72 @@ class ReaderViewModel @Inject constructor(
 	fun setVolumeButtonsEnabled(enabled: Boolean) {
 		settings.setReaderVolumeButtonsEnabled(enabled)
 		_uiState.update { it.copy(volumeButtonsEnabled = enabled) }
+	}
+
+	fun setPagesGridColumns(columns: Int) {
+		val clamped = columns.coerceIn(2, 6)
+		settings.readerPagesGridColumns = clamped
+		_uiState.update { it.copy(pagesGridColumns = clamped) }
+	}
+
+	fun toggleChaptersReversed() {
+		_uiState.update { it.copy(isChaptersReversed = !it.isChaptersReversed) }
+	}
+
+	fun toggleAutoScroll() {
+		_uiState.update {
+			val nextEnabled = !it.isAutoScrollEnabled
+			it.copy(
+				isAutoScrollEnabled = nextEnabled,
+				isAutoScrollPaused = false,
+			)
+		}
+	}
+
+	fun setAutoScrollEnabled(enabled: Boolean) {
+		_uiState.update {
+			it.copy(
+				isAutoScrollEnabled = enabled,
+				isAutoScrollPaused = false,
+			)
+		}
+	}
+
+	fun setAutoScrollPaused(paused: Boolean) {
+		_uiState.update { it.copy(isAutoScrollPaused = paused) }
+	}
+
+	fun setAutoScrollSpeed(speed: Float) {
+		val clamped = speed.coerceIn(0.05f, 1.0f)
+		settings.readerAutoscrollSpeed = clamped
+		_uiState.update { it.copy(autoScrollSpeed = clamped) }
+	}
+
+	fun setAutoScrollPageDelaySec(seconds: Int) {
+		val clamped = seconds.coerceIn(1, 10)
+		settings.readerAutoscrollPageDelay = clamped
+		_uiState.update { it.copy(autoScrollPageDelaySec = clamped) }
+	}
+
+	fun setColorFilter(filter: ReaderColorFilter) {
+		val normalized = ReaderColorFilter(
+			brightness = filter.brightness.coerceIn(-0.5f, 0.5f),
+			contrast = filter.contrast.coerceIn(-0.5f, 0.8f),
+			isInverted = filter.isInverted,
+			isGrayscale = filter.isGrayscale,
+			isBookBackground = filter.isBookBackground,
+		)
+		val toPersist = normalized.takeUnless { it.isEmpty }
+		settings.readerColorFilter = toPersist
+		_uiState.update { it.copy(colorFilter = normalized) }
+		val manga = _uiState.value.manga ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching { mangaDataRepository.saveColorFilter(manga, toPersist) }
+		}
+	}
+
+	fun resetColorFilter() {
+		setColorFilter(ReaderColorFilter.EMPTY)
 	}
 
 	fun getCachedPageSize(pageId: Long): Size? = pageBoundsCache[pageId]
@@ -799,6 +906,249 @@ class ReaderViewModel @Inject constructor(
 		}
 	}
 
+	fun isPageBookmarked(page: ReaderPage): Boolean {
+		return _uiState.value.mangaBookmarks.any { bm ->
+			bm.chapterId == page.chapterId && bm.page in page.index..page.endIndex
+		}
+	}
+
+	fun toggleBookmarkForPage(page: ReaderPage) {
+		val state = _uiState.value
+		val manga = state.manga ?: return
+		val chapterIdx = activeBranchChapters.indexOfFirst { it.id == page.chapterId }.coerceAtLeast(0)
+		val percent = if (activeBranchChapters.isNotEmpty()) {
+			((chapterIdx + 0.5f) / activeBranchChapters.size).coerceIn(0f, 1f)
+		} else {
+			0f
+		}
+		viewModelScope.launch(Dispatchers.IO) {
+			val existing = _uiState.value.mangaBookmarks.filter { bm ->
+				bm.chapterId == page.chapterId && bm.page in page.index..page.endIndex
+			}
+			if (existing.isNotEmpty()) {
+				existing.forEach { bm -> runCatching { bookmarksRepository.removeBookmark(bm) } }
+				toastManager.show("Bookmark removed")
+			} else {
+				val bookmark = Bookmark(
+					manga = manga,
+					pageId = page.id,
+					chapterId = page.chapterId,
+					page = page.index,
+					scroll = 0,
+					imageUrl = page.preview ?: page.url.ifBlank { manga.coverUrl.orEmpty() },
+					createdAt = Instant.now(),
+					percent = percent,
+				)
+				bookmarksRepository.addBookmark(bookmark)
+				toastManager.show("Bookmarked page ${page.index + 1}")
+			}
+		}
+	}
+
+	fun removeBookmarkItem(bookmark: Bookmark) {
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching { bookmarksRepository.removeBookmark(bookmark) }
+				.onSuccess { toastManager.show("Bookmark removed") }
+		}
+	}
+
+	fun jumpToBookmark(bookmark: Bookmark) {
+		val state = _uiState.value
+		if (bookmark.chapterId == state.currentChapterId) {
+			if (state.isTextMode) {
+				val blockIdx = ReaderState.decodeEpubOffset(bookmark.scroll) ?: bookmark.page
+				jumpToNovelBlock(blockIdx)
+			} else {
+				val globalIdx = state.pages.indexOfFirst {
+					it.chapterId == bookmark.chapterId && it.containsRawIndex(bookmark.page)
+				}.let { found ->
+					if (found >= 0) found else (state.chapterStartGlobalIndex + bookmark.page)
+				}
+				jumpToMangaPage(globalIdx)
+			}
+		} else {
+			val details = activeDetails ?: return
+			val targetChapter = activeBranchChapters.firstOrNull { it.id == bookmark.chapterId }
+				?: details.allChapters.firstOrNull { it.id == bookmark.chapterId }
+				?: return
+			loadChapterContent(
+				details = details,
+				chapter = targetChapter,
+				targetPage = bookmark.page,
+				targetScroll = bookmark.scroll,
+			)
+		}
+	}
+
+	fun savePageToGallery(targetPage: ReaderPage? = null) {
+		val state = _uiState.value
+		val page = targetPage ?: state.pages.getOrNull(state.currentPageIndex) ?: return
+		val safeTitle = state.title
+			.replace(Regex("[^A-Za-z0-9._ -]"), "")
+			.trim()
+			.replace(Regex("\\s+"), "_")
+			.take(36)
+			.ifBlank { "Nemuri" }
+		val pageNum = page.index + 1
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatchingCancellable {
+				val (bytes, ext, mimeType) = readExportablePageBytes(page)
+				val fileName = "${safeTitle}_P${pageNum}_${System.currentTimeMillis()}.$ext"
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+					val values = ContentValues().apply {
+						put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+						put(MediaStore.Images.Media.MIME_TYPE, mimeType)
+						put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Nemuri")
+						put(MediaStore.Images.Media.IS_PENDING, 1)
+					}
+					val resolver = context.contentResolver
+					val destUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+						?: error("Unable to create image in Pictures/Nemuri")
+					try {
+						resolver.openOutputStream(destUri)?.use { out -> out.write(bytes) }
+							?: error("Unable to write image stream")
+						values.clear()
+						values.put(MediaStore.Images.Media.IS_PENDING, 0)
+						resolver.update(destUri, values, null, null)
+					} catch (t: Throwable) {
+						runCatching { resolver.delete(destUri, null, null) }
+						throw t
+					}
+				} else {
+					@Suppress("DEPRECATION")
+					val picturesDir = File(
+						Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+						"Nemuri",
+					).apply { mkdirs() }
+					val outFile = File(picturesDir, fileName)
+					outFile.writeBytes(bytes)
+					MediaScannerConnection.scanFile(context, arrayOf(outFile.absolutePath), arrayOf(mimeType), null)
+				}
+			}.onSuccess {
+				toastManager.show("Saved page $pageNum to Pictures/Nemuri")
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to save page")
+			}
+		}
+	}
+
+	fun sharePage(targetPage: ReaderPage? = null, onChooserReady: (Intent) -> Unit) {
+		val state = _uiState.value
+		val page = targetPage ?: state.pages.getOrNull(state.currentPageIndex) ?: return
+		val pageNum = page.index + 1
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatchingCancellable {
+				val (bytes, ext, mimeType) = readExportablePageBytes(page)
+				val shareDir = File(context.cacheDir, "shared_pages").apply {
+					mkdirs()
+					listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000L }
+						?.forEach { runCatching { it.delete() } }
+				}
+				val shareFile = File(shareDir, "Nemuri_Page_${pageNum}.${ext}")
+				shareFile.writeBytes(bytes)
+				val contentUri = FileProvider.getUriForFile(
+					context,
+					"${context.packageName}.files",
+					shareFile,
+				)
+				val sendIntent = Intent(Intent.ACTION_SEND).apply {
+					type = mimeType
+					putExtra(Intent.EXTRA_STREAM, contentUri)
+					clipData = ClipData.newRawUri("${state.title} - Page $pageNum", contentUri)
+					addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+				}
+				Intent.createChooser(sendIntent, "Share Page $pageNum")
+			}.onSuccess { chooser ->
+				withContext(Dispatchers.Main) {
+					onChooserReady(chooser)
+				}
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to prepare page for sharing")
+			}
+		}
+	}
+
+	fun setPageAsMangaCover(targetPage: ReaderPage? = null) {
+		val state = _uiState.value
+		val manga = state.manga ?: return
+		val page = targetPage ?: state.pages.getOrNull(state.currentPageIndex) ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatchingCancellable {
+				val (bytes, ext, _) = readExportablePageBytes(page)
+				val coversDir = File(context.filesDir, "custom_covers").apply { mkdirs() }
+				coversDir.listFiles()
+					?.filter { it.name.startsWith("cover_${manga.id}_") }
+					?.forEach { runCatching { it.delete() } }
+				val destFile = File(coversDir, "cover_${manga.id}_${System.currentTimeMillis()}.$ext")
+				destFile.writeBytes(bytes)
+				val coverUri = destFile.toUri().toString()
+				val existing = mangaDataRepository.getOverride(manga.id)
+				mangaDataRepository.setOverride(
+					manga = manga,
+					override = MangaOverride(
+						coverUrl = coverUri,
+						title = existing?.title,
+						description = existing?.description,
+						contentRating = existing?.contentRating,
+					),
+				)
+				val updatedManga = manga.copy(coverUrl = coverUri, largeCoverUrl = coverUri)
+				MangaTransferCache.put(updatedManga)
+				_uiState.update { it.copy(manga = updatedManga) }
+			}.onSuccess {
+				toastManager.show("Set page ${page.index + 1} as manga cover")
+			}.onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to update cover")
+			}
+		}
+	}
+
+	private suspend fun readExportablePageBytes(page: ReaderPage): Triple<ByteArray, String, String> {
+		val (rawUri, _) = resolveLogicalPageUri(page, force = false)
+		val effectiveUri = if (rawUri.isPdfUri()) {
+			pageLoader.loadPageImage(page.toMangaPage())
+		} else {
+			rawUri
+		}
+		val rawBytes = when {
+			effectiveUri.isZipUri() -> {
+				val zipPath = effectiveUri.path?.takeIf { it.isNotBlank() }
+					?: effectiveUri.schemeSpecificPart.substringBefore('#').removePrefix("//")
+				val entryName = effectiveUri.fragment.orEmpty()
+				ZipFile(File(zipPath)).use { zip ->
+					val entry = zip.getEntry(entryName)
+						?: zip.getEntry(Uri.decode(entryName))
+						?: error("Archive page entry not found")
+					zip.getInputStream(entry).use { it.readBytes() }
+				}
+			}
+			effectiveUri.isFileUri() -> effectiveUri.toFile().readBytes()
+			else -> context.contentResolver.openInputStream(effectiveUri)?.use { it.readBytes() }
+				?: error("Unable to read page image")
+		}
+		if (rawBytes.size >= 12) {
+			val isPng = rawBytes[0] == 0x89.toByte() && rawBytes[1] == 0x50.toByte() &&
+				rawBytes[2] == 0x4E.toByte() && rawBytes[3] == 0x47.toByte()
+			val isJpeg = rawBytes[0] == 0xFF.toByte() && rawBytes[1] == 0xD8.toByte()
+			val isWebp = rawBytes[0] == 'R'.code.toByte() && rawBytes[1] == 'I'.code.toByte() &&
+				rawBytes[2] == 'F'.code.toByte() && rawBytes[3] == 'F'.code.toByte() &&
+				rawBytes[8] == 'W'.code.toByte() && rawBytes[9] == 'E'.code.toByte()
+			when {
+				isPng -> return Triple(rawBytes, "png", "image/png")
+				isJpeg -> return Triple(rawBytes, "jpg", "image/jpeg")
+				isWebp -> return Triple(rawBytes, "webp", "image/webp")
+			}
+		}
+		val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+		if (decoded != null) {
+			val out = java.io.ByteArrayOutputStream()
+			decoded.compress(Bitmap.CompressFormat.PNG, 100, out)
+			decoded.recycle()
+			return Triple(out.toByteArray(), "png", "image/png")
+		}
+		return Triple(rawBytes, "jpg", "image/jpeg")
+	}
+
 	suspend fun loadRawPageImage(page: ReaderPage): Result<Pair<Uri, Rect?>> =
 		withContext(Dispatchers.IO) {
 			runCatchingCancellable {
@@ -1011,8 +1361,13 @@ class ReaderViewModel @Inject constructor(
 					val loaded = rawLoaded.withChaptersOrder(sortOrder)
 					activeDetails = loaded
 					val manga = loaded.toManga()
+					activeMangaFlow.value = manga
 					MangaTransferCache.put(manga)
 					effectiveIncognito = extraIncognito || settings.isIncognitoModeEnabled(manga.isNsfw())
+					val savedColorFilter = runCatchingCancellable { mangaDataRepository.getColorFilter(manga.id) }.getOrNull()
+						?: settings.readerColorFilter
+						?: ReaderColorFilter.EMPTY
+					_uiState.update { it.copy(colorFilter = savedColorFilter) }
 
 					val history = runCatchingCancellable { historyRepository.getOne(manga) }.getOrNull()
 					val branch = requestedBranch?.takeIf { loaded.chapters.containsKey(it) }
@@ -1293,13 +1648,24 @@ class ReaderViewModel @Inject constructor(
 		if (uri.isZipUri() || url.substringBefore('#').endsWith(".epub", ignoreCase = true)) {
 			val zipPath = uri.path?.takeIf { it.isNotBlank() }
 				?: uri.schemeSpecificPart.substringBefore('#').removePrefix("//")
-			val entryName = uri.fragment.orEmpty().removePrefix("/")
-			if (zipPath.isNotBlank() && entryName.isNotBlank()) {
-				ZipFile(File(zipPath)).use { zip ->
-					val entry = zip.getEntry(entryName)
-						?: zip.entries().asSequence().firstOrNull { it.name.equals(entryName, ignoreCase = true) }
+			val rawEntry = uri.fragment.orEmpty().removePrefix("/").substringBefore('#')
+			val decodedEntry = Uri.decode(rawEntry).removePrefix("/")
+			if (zipPath.isNotBlank() && rawEntry.isNotBlank()) {
+				val zipFileObj = File(zipPath)
+				val zip = try {
+					ZipFile(zipFileObj)
+				} catch (_: IllegalArgumentException) {
+					ZipFile(zipFileObj, java.nio.charset.Charset.forName("ISO-8859-1"))
+				}
+				zip.use { archive ->
+					val entry = archive.getEntry(rawEntry)
+						?: archive.getEntry(decodedEntry)
+						?: archive.entries().asSequence().firstOrNull {
+							it.name.equals(rawEntry, ignoreCase = true) ||
+								it.name.equals(decodedEntry, ignoreCase = true)
+						}
 					if (entry != null) {
-						return@runInterruptible zip.getInputStream(entry).bufferedReader().use { it.readText() }
+						return@runInterruptible archive.getInputStream(entry).bufferedReader().use { it.readText() }
 					}
 				}
 			}

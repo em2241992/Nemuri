@@ -22,13 +22,21 @@ fun Uri.isFileUri() = scheme == URI_SCHEME_FILE
 /** A page of a PDF kept as-is: `file+pdf:///path/book.pdf#<page index>`. */
 fun Uri.isPdfUri() = scheme == URI_SCHEME_PDF
 
-fun File.toPdfUri(pageIndex: Int): Uri = "$URI_SCHEME_PDF://$absolutePath#$pageIndex".toUri()
+fun File.toPdfUri(pageIndex: Int): Uri = Uri.fromFile(this)
+	.buildUpon()
+	.scheme(URI_SCHEME_PDF)
+	.fragment(pageIndex.toString())
+	.build()
 
 fun Uri.isNetworkUri() = scheme.let {
 	it == URI_SCHEME_HTTP || it == URI_SCHEME_HTTPS
 }
 
-fun File.toZipUri(entryPath: String): Uri = "$URI_SCHEME_ZIP://$absolutePath#$entryPath".toUri()
+fun File.toZipUri(entryPath: String): Uri = Uri.fromFile(this)
+	.buildUpon()
+	.scheme(URI_SCHEME_ZIP)
+	.fragment(entryPath)
+	.build()
 
 fun File.toZipUri(entryPath: Path?): Uri =
 	toZipUri(entryPath?.toString()?.removePrefix(Path.DIRECTORY_SEPARATOR).orEmpty())

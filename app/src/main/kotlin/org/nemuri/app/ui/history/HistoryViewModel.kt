@@ -8,20 +8,25 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.core.model.MangaHistory
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.prefs.AppSettings
+import org.koitharu.kotatsu.core.ui.util.ReversibleHandle
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
 import org.koitharu.kotatsu.history.data.HistoryRepository
 import org.koitharu.kotatsu.list.domain.ListFilterOption
@@ -52,9 +57,16 @@ data class HistoryEntryItem(
 	val timeSummary: String,
 )
 
+data class HistoryUndoEvent(
+	val message: String,
+	val handle: ReversibleHandle,
+)
+
 @Immutable
 data class HistoryUiState(
 	val groups: Map<String, List<HistoryEntryItem>> = emptyMap(),
+	val allVisibleIds: List<Long> = emptyList(),
+	val selectedIds: Set<Long> = emptySet(),
 	val totalCount: Int = 0,
 	val query: String = "",
 	val sortOrder: ListSortOrder = ListSortOrder.LAST_READ,
@@ -73,6 +85,9 @@ class HistoryViewModel @Inject constructor(
 
 	private val queryFlow = MutableStateFlow("")
 	private val quickFilterFlow = MutableStateFlow(HistoryQuickFilter.ALL)
+	private val selectedIdsFlow = MutableStateFlow<Set<Long>>(emptySet())
+	private val _undoEvents = MutableSharedFlow<HistoryUndoEvent>(extraBufferCapacity = 4)
+	val undoEvents: SharedFlow<HistoryUndoEvent> = _undoEvents.asSharedFlow()
 
 	private val prefStateFlow = settings.observeChanges()
 		.filter {
@@ -96,11 +111,11 @@ class HistoryViewModel @Inject constructor(
 	}
 
 	val uiState: StateFlow<HistoryUiState> = combine(
-		rawHistoryFlow,
-		queryFlow,
-		quickFilterFlow,
-		prefStateFlow,
-	) { items, query, filter, _ ->
+		combine(rawHistoryFlow, queryFlow, quickFilterFlow, prefStateFlow) { items, query, filter, _ ->
+			Triple(items, query, filter)
+		},
+		selectedIdsFlow,
+	) { (items, query, filter), selectedIds ->
 		val sortOrder = settings.historySortOrder
 		val groupEnabled = settings.isHistoryGroupingEnabled &&
 			(sortOrder.type == ListSortOrder.Type.LAST_READ || sortOrder.type == ListSortOrder.Type.DATE_ADDED || sortOrder.type == ListSortOrder.Type.PROGRESS)
@@ -159,8 +174,13 @@ class HistoryViewModel @Inject constructor(
 			grouped[item.dateGroup] = (grouped[item.dateGroup].orEmpty() + item)
 		}
 
+		val visibleIds = filtered.map { it.manga.id }
+		val validSelected = selectedIds.intersect(visibleIds.toSet())
+
 		HistoryUiState(
 			groups = grouped,
+			allVisibleIds = visibleIds,
+			selectedIds = validSelected,
 			totalCount = filtered.size,
 			query = query,
 			sortOrder = sortOrder,
@@ -192,15 +212,54 @@ class HistoryViewModel @Inject constructor(
 		settings.isHistoryGroupingEnabled = enabled
 	}
 
+	fun toggleSelection(mangaId: Long) {
+		selectedIdsFlow.update { cur ->
+			if (mangaId in cur) cur - mangaId else cur + mangaId
+		}
+	}
+
+	fun setSelection(ids: Set<Long>) {
+		selectedIdsFlow.value = ids
+	}
+
+	fun selectAll() {
+		selectedIdsFlow.value = uiState.value.allVisibleIds.toSet()
+	}
+
+	fun clearSelection() {
+		selectedIdsFlow.value = emptySet()
+	}
+
 	fun removeEntry(manga: Manga) {
 		viewModelScope.launch(Dispatchers.IO) {
+			selectedIdsFlow.update { it - manga.id }
 			val handle = historyRepository.delete(listOf(manga.id))
-			toastManager.show(
-				message = "Removed ${manga.title} from history",
-				actionLabel = "Undo",
-				onAction = { handle.reverseAsync() },
+			_undoEvents.emit(
+				HistoryUndoEvent(
+					message = "Removed ${manga.title} from history",
+					handle = handle,
+				),
 			)
 		}
+	}
+
+	fun removeSelectedEntries() {
+		val ids = uiState.value.selectedIds.toList()
+		if (ids.isEmpty()) return
+		selectedIdsFlow.value = emptySet()
+		viewModelScope.launch(Dispatchers.IO) {
+			val handle = historyRepository.delete(ids)
+			_undoEvents.emit(
+				HistoryUndoEvent(
+					message = "Removed ${ids.size} entry(ies) from history",
+					handle = handle,
+				),
+			)
+		}
+	}
+
+	fun undoDelete(handle: ReversibleHandle) {
+		handle.reverseAsync()
 	}
 
 	fun clearAllHistory() {

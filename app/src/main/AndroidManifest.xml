@@ -68,7 +68,79 @@
 				<category android:name="android.intent.category.BROWSABLE" />
 				<data android:scheme="org.nemuri.app" />
 			</intent-filter>
+
+			<!-- Local Comics (.cbz, .cbr) & Light Novels (.epub) by MIME type -->
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="content" />
+				<data android:scheme="file" />
+				<data android:mimeType="application/vnd.comicbook+zip" />
+				<data android:mimeType="application/x-cbz" />
+				<data android:mimeType="application/cbz" />
+				<data android:mimeType="application/vnd.comicbook-rar" />
+				<data android:mimeType="application/x-cbr" />
+				<data android:mimeType="application/cbr" />
+				<data android:mimeType="application/epub+zip" />
+			</intent-filter>
+
+			<!-- Local Comics, Light Novels & Nemuri/Mihon Backups (.bk.zip, .tachibk, .proto.gz) by extension -->
+			<intent-filter tools:ignore="AppLinkUrlError">
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="content" />
+				<data android:scheme="file" />
+				<data android:host="*" />
+				<data android:mimeType="*/*" />
+				<data android:pathSuffix=".cbz" />
+				<data android:pathSuffix=".cbr" />
+				<data android:pathSuffix=".epub" />
+				<data android:pathSuffix=".bk.zip" />
+				<data android:pathSuffix=".tachibk" />
+				<data android:pathSuffix=".proto.gz" />
+				<data android:pathPattern=".*\\.cbz" />
+				<data android:pathPattern=".*\\.cbr" />
+				<data android:pathPattern=".*\\.epub" />
+				<data android:pathPattern=".*\\.bk\\.zip" />
+				<data android:pathPattern=".*\\.tachibk" />
+				<data android:pathPattern=".*\\.proto\\.gz" />
+			</intent-filter>
+
+			<!-- Open Web Manga Deep Links (MangaDex title/chapter + common open manga hosts) -->
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="https" />
+				<data android:scheme="http" />
+				<data android:host="mangadex.org" android:pathPrefix="/title/" />
+				<data android:host="mangadex.org" android:pathPrefix="/manga/" />
+				<data android:host="mangadex.org" android:pathPrefix="/chapter/" />
+				<data android:host="www.mangadex.org" android:pathPrefix="/title/" />
+				<data android:host="www.mangadex.org" android:pathPrefix="/manga/" />
+				<data android:host="www.mangadex.org" android:pathPrefix="/chapter/" />
+				<data android:host="comick.io" android:pathPrefix="/comic/" />
+				<data android:host="bato.to" android:pathPrefix="/series/" />
+				<data android:host="bato.to" android:pathPrefix="/title/" />
+				<data android:host="xbato.com" android:pathPrefix="/title/" />
+				<data android:host="zbato.com" android:pathPrefix="/title/" />
+				<data android:host="mangapark.net" android:pathPrefix="/title/" />
+				<data android:host="dynasty-scans.com" android:pathPrefix="/series/" />
+				<data android:host="dynasty-scans.com" android:pathPrefix="/chapters/" />
+				<data android:host="mangafire.to" android:pathPrefix="/manga/" />
+				<data android:host="mangaplus.shueisha.co.jp" android:pathPrefix="/titles/" />
+			</intent-filter>
 		</activity>
+
+		<activity
+			android:name=".crash.CrashReportActivity"
+			android:process=":crash"
+			android:exported="false"
+			android:excludeFromRecents="true"
+			android:finishOnTaskLaunch="true"
+			android:launchMode="singleInstance" />
 
 		<activity
 			android:name=".browser.NemuriBrowserActivity"

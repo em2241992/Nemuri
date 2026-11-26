@@ -19,14 +19,18 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
@@ -36,6 +40,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
@@ -67,6 +73,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -96,6 +103,7 @@ import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.nemuri.app.BuildConfig
 import org.nemuri.app.navigation.SettingsSection
+import org.nemuri.app.ui.components.CornerSafeCoverProgressBar
 import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.components.NonWrappingBadgeText
 import org.nemuri.app.ui.components.cornerSafeBadgeInset
@@ -699,14 +707,10 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 							}
 						}
 						if (state.showBottomProgressBar) {
-							LinearProgressIndicator(
-								progress = { 0.65f },
-								color = MaterialTheme.colorScheme.primary,
-								trackColor = Color.Black.copy(alpha = 0.35f),
-								modifier = Modifier
-									.fillMaxWidth()
-									.height(3.dp)
-									.align(Alignment.BottomCenter),
+							CornerSafeCoverProgressBar(
+								progress = 0.65f,
+								cornerRadiusDp = corner,
+								modifier = Modifier.align(Alignment.BottomCenter),
 							)
 						}
 					}
@@ -1074,6 +1078,43 @@ fun ReadingSettingsScreen(
 						verticalArrangement = Arrangement.spacedBy(8.dp),
 					) {
 						val dl = state.neuralDownloadState
+						var modelsExpanded by remember { mutableStateOf(dl.activeModelId != null) }
+						val activeDownloaded = state.neuralCatalog.firstOrNull { it.isSelected && it.isDownloaded }
+						Surface(
+							color = NemuriTheme.colors.surfaceElevated,
+							shape = RoundedCornerShape(12.dp),
+							border = BorderStroke(1.dp, NemuriTheme.colors.border),
+							modifier = Modifier
+								.fillMaxWidth()
+								.clip(RoundedCornerShape(12.dp))
+								.clickable { modelsExpanded = !modelsExpanded },
+						) {
+							Row(
+								modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.SpaceBetween,
+							) {
+								Column(modifier = Modifier.weight(1f)) {
+									Text(
+										text = "Neural Model Catalog (${state.neuralCatalog.size})",
+										style = MaterialTheme.typography.labelLarge,
+										color = NemuriTheme.colors.textPrimary,
+									)
+									Text(
+										text = activeDownloaded?.let { "Active: ${it.title}" }
+											?: "Tap to download or manage ONNX / LiteRT models",
+										style = MaterialTheme.typography.labelSmall,
+										color = if (activeDownloaded != null) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
+									)
+								}
+								Icon(
+									imageVector = if (modelsExpanded || dl.activeModelId != null) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+									contentDescription = "Toggle models",
+									tint = NemuriTheme.colors.cyan,
+								)
+							}
+						}
+						if (modelsExpanded || dl.activeModelId != null) {
 						state.neuralCatalog.forEach { item ->
 							val isDownloadingThis = dl.activeModelId == item.id
 							Surface(
@@ -1151,6 +1192,7 @@ fun ReadingSettingsScreen(
 									}
 								}
 							}
+						}
 						}
 						OutlinedButton(
 							onClick = viewModel::clearNeuralCache,
@@ -1670,6 +1712,7 @@ fun PrivacySettingsScreen(
 	onBack: () -> Unit,
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
+	var showLockTimeoutDialog by remember { mutableStateOf(false) }
 	var showIncognitoNsfwDialog by remember { mutableStateOf(false) }
 	var showScreenshotsDialog by remember { mutableStateOf(false) }
 	var showDohDialog by remember { mutableStateOf(false) }
@@ -1679,6 +1722,33 @@ fun PrivacySettingsScreen(
 		title = SettingsSection.PRIVACY.title,
 		onBack = onBack,
 	) {
+		item {
+			SettingsGroupCard("App Lock & Screen Security") {
+				SettingsToggleRow(
+					title = "Require Biometric / Device PIN Unlock",
+					subtitle = "Lock Nemuri with fingerprint, face unlock, or device screen lock PIN",
+					checked = state.isAppLockEnabled,
+					onCheckedChange = viewModel::setAppLockEnabled,
+				)
+				if (state.isAppLockEnabled) {
+					SettingsRowDivider()
+					SettingsChoiceRow(
+						title = "App Lock Timeout",
+						subtitle = "When to re-lock after switching away from Nemuri",
+						currentLabel = appLockTimeoutLabel(state.appLockTimeout),
+						onClick = { showLockTimeoutDialog = true },
+					)
+				}
+				SettingsRowDivider()
+				SettingsChoiceRow(
+					title = "Hide / Secure Screen in Recent Apps & Screenshots",
+					subtitle = "Applies FLAG_SECURE to blank Recent Apps previews and block screen capture",
+					currentLabel = screenshotsPolicyLabel(state.screenshotsPolicy),
+					onClick = { showScreenshotsDialog = true },
+				)
+			}
+		}
+
 		item {
 			SettingsGroupCard("Reading Privacy") {
 				SettingsToggleRow(
@@ -1693,13 +1763,6 @@ fun PrivacySettingsScreen(
 					subtitle = "Automatically protect reading sessions on adult entries",
 					currentLabel = incognitoNsfwLabel(state.incognitoForNsfw),
 					onClick = { showIncognitoNsfwDialog = true },
-				)
-				SettingsRowDivider()
-				SettingsChoiceRow(
-					title = "Screenshots Policy",
-					subtitle = "Controls FLAG_SECURE protection in reader and app views",
-					currentLabel = screenshotsPolicyLabel(state.screenshotsPolicy),
-					onClick = { showScreenshotsDialog = true },
 				)
 			}
 		}
@@ -1771,10 +1834,34 @@ fun PrivacySettingsScreen(
 		)
 	}
 
-	if (showScreenshotsDialog) {
+	if (showLockTimeoutDialog) {
+		val lockTimeoutOptions = listOf(
+			org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.INSTANT,
+			org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.MINUTE_1,
+			org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.MINUTES_5,
+			org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.MINUTES_15,
+		).map { it to appLockTimeoutLabel(it) }
 		SettingsOptionDialog(
-			title = "Screenshots Policy",
-			options = ScreenshotsPolicy.entries.map { it to screenshotsPolicyLabel(it) },
+			title = "App Lock Timeout",
+			options = lockTimeoutOptions,
+			selected = state.appLockTimeout,
+			onSelect = viewModel::setAppLockTimeout,
+			onDismiss = { showLockTimeoutDialog = false },
+		)
+	}
+
+	if (showScreenshotsDialog) {
+		val screenshotOptions = buildList {
+			add(ScreenshotsPolicy.ALLOW to screenshotsPolicyLabel(ScreenshotsPolicy.ALLOW))
+			add(ScreenshotsPolicy.BLOCK_INCOGNITO to screenshotsPolicyLabel(ScreenshotsPolicy.BLOCK_INCOGNITO))
+			if (state.screenshotsPolicy == ScreenshotsPolicy.BLOCK_NSFW) {
+				add(ScreenshotsPolicy.BLOCK_NSFW to screenshotsPolicyLabel(ScreenshotsPolicy.BLOCK_NSFW))
+			}
+			add(ScreenshotsPolicy.BLOCK_ALL to screenshotsPolicyLabel(ScreenshotsPolicy.BLOCK_ALL))
+		}
+		SettingsOptionDialog(
+			title = "Hide / Secure Screen",
+			options = screenshotOptions,
 			selected = state.screenshotsPolicy,
 			onSelect = viewModel::setScreenshotsPolicy,
 			onDismiss = { showScreenshotsDialog = false },
@@ -1912,7 +1999,9 @@ fun AboutSettingsScreen(
 	onBack: () -> Unit,
 	onRerunSetupWizard: () -> Unit = { viewModel.rerunSetupWizard() },
 ) {
+	val context = LocalContext.current
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
+	var crashLogSheetText by remember { mutableStateOf<String?>(null) }
 
 	SettingsLazyPage(
 		title = SettingsSection.ABOUT.title,
@@ -1960,6 +2049,16 @@ fun AboutSettingsScreen(
 					checked = state.isVerboseLoggingEnabled,
 					onCheckedChange = viewModel::setVerboseLogging,
 				)
+				if (state.hasLastCrashLog) {
+					SettingsRowDivider()
+					SettingsActionRow(
+						icon = Icons.Default.BugReport,
+						title = "View / Export Last Crash Log",
+						subtitle = "Inspect, copy, or share the most recent local crash report",
+						tint = NemuriTheme.colors.amber,
+						onClick = { crashLogSheetText = viewModel.readLastCrashLog() },
+					)
+				}
 			}
 		}
 
@@ -1978,6 +2077,83 @@ fun AboutSettingsScreen(
 				}
 			}
 		}
+	}
+
+	val activeCrashReport = crashLogSheetText
+	if (activeCrashReport != null) {
+		AlertDialog(
+			onDismissRequest = { crashLogSheetText = null },
+			containerColor = NemuriTheme.colors.sheet,
+			titleContentColor = NemuriTheme.colors.textPrimary,
+			title = { Text("Last Local Crash Log") },
+			text = {
+				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+					Surface(
+						color = NemuriTheme.colors.surfaceElevated,
+						shape = RoundedCornerShape(10.dp),
+						border = BorderStroke(1.dp, NemuriTheme.colors.border),
+						modifier = Modifier
+							.fillMaxWidth()
+							.heightIn(max = 320.dp),
+					) {
+						Box(
+							modifier = Modifier
+								.verticalScroll(rememberScrollState())
+								.padding(10.dp),
+						) {
+							Text(
+								text = activeCrashReport,
+								fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+								fontSize = 10.5.sp,
+								lineHeight = 14.5.sp,
+								color = NemuriTheme.colors.textSecondary,
+							)
+						}
+					}
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+					) {
+						TextButton(
+							onClick = {
+								org.nemuri.app.crash.CrashLogStore.copyToClipboard(context, activeCrashReport)
+								viewModel.toastManager.show("Crash log copied to clipboard")
+							},
+						) {
+							Text("Copy", color = NemuriTheme.colors.cyan)
+						}
+						TextButton(
+							onClick = {
+								runCatching {
+									context.startActivity(
+										org.nemuri.app.crash.CrashLogStore.createShareIntent(context, activeCrashReport),
+									)
+								}
+							},
+						) {
+							Text("Share", color = NemuriTheme.colors.cyan)
+						}
+						TextButton(
+							onClick = {
+								viewModel.clearLastCrashLog()
+								crashLogSheetText = null
+							},
+						) {
+							Text("Clear Log", color = NemuriTheme.colors.danger)
+						}
+					}
+				}
+			},
+			confirmButton = {
+				Button(
+					onClick = { crashLogSheetText = null },
+					colors = ButtonDefaults.buttonColors(
+						containerColor = NemuriTheme.colors.cyan,
+						contentColor = NemuriTheme.colors.onCyan,
+					),
+				) { Text("Close") }
+			},
+		)
 	}
 }
 
@@ -2071,9 +2247,17 @@ private fun frequencyLabel(factor: Float): String = when {
 	else -> "4x (Frequent)"
 }
 
+private fun appLockTimeoutLabel(timeout: org.koitharu.kotatsu.core.prefs.AppProtectionTimeout): String = when (timeout) {
+	org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.INSTANT -> "Immediately"
+	org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.SECONDS_10 -> "After 10 seconds"
+	org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.MINUTE_1 -> "After 1 minute"
+	org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.MINUTES_5 -> "After 5 minutes"
+	org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.MINUTES_15 -> "After 15 minutes"
+}
+
 private fun screenshotsPolicyLabel(policy: ScreenshotsPolicy): String = when (policy) {
-	ScreenshotsPolicy.ALLOW -> "Allow everywhere"
-	ScreenshotsPolicy.BLOCK_NSFW -> "Block on 18+ titles"
-	ScreenshotsPolicy.BLOCK_INCOGNITO -> "Block in Incognito"
-	ScreenshotsPolicy.BLOCK_ALL -> "Block everywhere"
+	ScreenshotsPolicy.ALLOW -> "Disabled"
+	ScreenshotsPolicy.BLOCK_INCOGNITO -> "Incognito Mode Only"
+	ScreenshotsPolicy.BLOCK_NSFW -> "Incognito & 18+ Titles"
+	ScreenshotsPolicy.BLOCK_ALL -> "Always"
 }

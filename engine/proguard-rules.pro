@@ -222,8 +222,10 @@
     public static final <fields>;
 }
 
-# Discord RPC (KizzyRPC) & Junrar (.cbr)
+# Discord RPC (KizzyRPC), Junrar (.cbr RAR unpacker), Biometric & Local Archive Parsers
 -keep class com.my.kizzyrpc.** { *; }
 -dontwarn com.my.kizzyrpc.**
+-keep class com.github.junrar.** { *; }
 -dontwarn com.github.junrar.**
 -dontwarn org.apache.commons.logging.**
+-keep class org.koitharu.kotatsu.local.** { *; }

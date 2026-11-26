@@ -34,6 +34,7 @@ import org.koitharu.kotatsu.list.domain.ListFilterOption
 import org.koitharu.kotatsu.list.domain.ListSortOrder
 import org.koitharu.kotatsu.list.domain.ReadingProgress
 import org.koitharu.kotatsu.parsers.model.Manga
+import org.koitharu.kotatsu.parsers.model.MangaState
 import org.koitharu.kotatsu.tracker.domain.TrackingRepository
 import org.koitharu.kotatsu.tracker.work.TrackWorker
 import org.nemuri.app.ui.components.NemuriToastManager
@@ -41,9 +42,10 @@ import javax.inject.Inject
 
 enum class LibraryQuickFilter(val label: String, val option: ListFilterOption?) {
 	ALL("All", null),
+	UNREAD("Unread", ListFilterOption.NOT_COMPLETED),
 	DOWNLOADED("Downloaded", ListFilterOption.Downloaded),
 	NEW_CHAPTERS("New Chapters", ListFilterOption.Macro.NEW_CHAPTERS),
-	ONGOING("Ongoing", ListFilterOption.NOT_COMPLETED),
+	ONGOING("Ongoing", ListFilterOption.State(MangaState.ONGOING)),
 	COMPLETED("Completed", ListFilterOption.Macro.COMPLETED),
 }
 
@@ -62,6 +64,7 @@ data class LibraryUiState(
 	val categories: List<FavouriteCategory> = emptyList(),
 	val selectedCategoryId: Long = LibraryViewModel.ALL_CATEGORIES_ID,
 	val items: List<LibraryMangaItem> = emptyList(),
+	val totalLibraryCount: Int = 0,
 	val query: String = "",
 	val quickFilter: LibraryQuickFilter = LibraryQuickFilter.ALL,
 	val listMode: ListMode = ListMode.GRID,
@@ -89,6 +92,7 @@ private data class LibraryPrefSnapshot(
 
 private data class LibrarySupplementary(
 	val categories: List<FavouriteCategory>,
+	val totalLibraryCount: Int,
 	val progressByManga: Map<Long, Float>,
 	val newChaptersByManga: Map<Long, Int>,
 	val downloadedIds: Set<Long>,
@@ -130,7 +134,10 @@ class LibraryViewModel @Inject constructor(
 		}
 
 	private val supplementaryFlow = combine(
-		favouritesRepository.observeCategoriesForLibrary(),
+		combine(
+			favouritesRepository.observeCategoriesForLibrary(),
+			favouritesRepository.observeMangaCount(),
+		) { categories, totalCount -> categories to totalCount },
 		historyRepository.observeAllWithHistory(ListSortOrder.LAST_READ, emptySet(), Int.MAX_VALUE)
 			.map { list ->
 				list.associate { entry ->
@@ -143,9 +150,10 @@ class LibraryViewModel @Inject constructor(
 		favouritesRepository.observeAll(ListSortOrder.ALPHABETIC, setOf(ListFilterOption.Downloaded), Int.MAX_VALUE)
 			.map { list -> list.mapTo(HashSet()) { it.id } },
 		trackScheduler.observeIsRunning(),
-	) { categories, progress, newChapters, downloaded, running ->
+	) { (categories, totalCount), progress, newChapters, downloaded, running ->
 		LibrarySupplementary(
 			categories = categories,
+			totalLibraryCount = totalCount,
 			progressByManga = progress,
 			newChaptersByManga = newChapters,
 			downloadedIds = downloaded,
@@ -203,6 +211,7 @@ class LibraryViewModel @Inject constructor(
 			categories = supp.categories,
 			selectedCategoryId = effectiveCatId,
 			items = mapped,
+			totalLibraryCount = supp.totalLibraryCount,
 			query = ctrl.query,
 			quickFilter = ctrl.quickFilter,
 			listMode = prefs.listMode,

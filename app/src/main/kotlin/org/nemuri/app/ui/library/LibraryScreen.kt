@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -34,6 +35,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -52,6 +54,7 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,6 +79,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -87,6 +91,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
@@ -204,76 +209,151 @@ fun LibraryScreen(
 				)
 			}
 
-			// Categories Row
-			if (uiState.categories.isNotEmpty() || uiState.items.isNotEmpty()) {
-				Row(
+			// Row 1: Categories Row inside subtle tonal container track with Folder icon badge
+			if (uiState.categories.isNotEmpty() || uiState.items.isNotEmpty() || uiState.totalLibraryCount > 0) {
+				Surface(
+					color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
+					shape = RoundedCornerShape(16.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.border),
 					modifier = Modifier
 						.fillMaxWidth()
-						.horizontalScroll(rememberScrollState())
-						.padding(horizontal = 16.dp, vertical = 4.dp),
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					verticalAlignment = Alignment.CenterVertically,
+						.padding(horizontal = 14.dp, vertical = 3.dp),
 				) {
-					if (uiState.showAllCategoryTab || uiState.categories.isEmpty()) {
-						LibraryChip(
-							label = "All",
-							selected = uiState.selectedCategoryId == LibraryViewModel.ALL_CATEGORIES_ID,
-							onClick = { viewModel.selectCategory(LibraryViewModel.ALL_CATEGORIES_ID) },
-						)
-					}
-					uiState.categories.forEach { cat ->
-						LibraryChip(
-							label = cat.title,
-							selected = uiState.selectedCategoryId == cat.id,
-							onClick = { viewModel.selectCategory(cat.id) },
-						)
-					}
-					Surface(
-						color = NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(999.dp),
+					Row(
 						modifier = Modifier
-							.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(999.dp))
-							.clip(RoundedCornerShape(999.dp))
-							.clickable {
-								newCategoryName = ""
-								showCreateCategoryDialog = true
-							},
+							.fillMaxWidth()
+							.padding(horizontal = 8.dp, vertical = 6.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
 					) {
-						Row(
-							modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(4.dp),
+						Surface(
+							color = NemuriTheme.colors.tealContainer,
+							shape = RoundedCornerShape(10.dp),
+							border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+							modifier = Modifier.size(30.dp),
 						) {
-							Icon(
-								imageVector = Icons.Default.Add,
-								contentDescription = "New category",
-								tint = NemuriTheme.colors.cyan,
-								modifier = Modifier.size(16.dp),
-							)
-							Text(
-								text = "Category",
-								style = MaterialTheme.typography.labelMedium,
-								color = NemuriTheme.colors.cyan,
-							)
+							Box(contentAlignment = Alignment.Center) {
+								Icon(
+									imageVector = Icons.Rounded.Folder,
+									contentDescription = "Categories",
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(16.dp),
+								)
+							}
+						}
+
+						Row(
+							modifier = Modifier
+								.weight(1f)
+								.clipToBounds()
+								.horizontalScroll(rememberScrollState()),
+							horizontalArrangement = Arrangement.spacedBy(6.dp),
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							if (uiState.showAllCategoryTab || uiState.categories.isEmpty()) {
+								val isAllSelected = uiState.selectedCategoryId == LibraryViewModel.ALL_CATEGORIES_ID
+								val allCount = if (isAllSelected && uiState.query.isBlank() && uiState.quickFilter == LibraryQuickFilter.ALL) {
+									uiState.items.size.takeIf { it > 0 } ?: uiState.totalLibraryCount
+								} else {
+									uiState.totalLibraryCount
+								}
+								LibraryCategoryPill(
+									label = "All",
+									count = allCount.takeIf { it > 0 },
+									selected = isAllSelected,
+									onClick = { viewModel.selectCategory(LibraryViewModel.ALL_CATEGORIES_ID) },
+								)
+							}
+							uiState.categories.forEach { cat ->
+								val selected = uiState.selectedCategoryId == cat.id
+								LibraryCategoryPill(
+									label = cat.title,
+									count = if (selected) uiState.items.size else null,
+									selected = selected,
+									onClick = { viewModel.selectCategory(cat.id) },
+								)
+							}
+							Surface(
+								color = NemuriTheme.colors.card,
+								shape = RoundedCornerShape(999.dp),
+								modifier = Modifier
+									.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(999.dp))
+									.clip(RoundedCornerShape(999.dp))
+									.clickable {
+										newCategoryName = ""
+										showCreateCategoryDialog = true
+									},
+							) {
+								Row(
+									modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.spacedBy(3.dp),
+								) {
+									Icon(
+										imageVector = Icons.Default.Add,
+										contentDescription = "New category",
+										tint = NemuriTheme.colors.cyan,
+										modifier = Modifier.size(14.dp),
+									)
+									Text(
+										text = "Category",
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.SemiBold,
+										color = NemuriTheme.colors.cyan,
+									)
+								}
+							}
 						}
 					}
 				}
 			}
 
-			// Quick Filters
+			// Row 2: Status Filters prefixed with STATUS micro-label + colored status indicator dots
 			Row(
 				modifier = Modifier
 					.fillMaxWidth()
-					.horizontalScroll(rememberScrollState())
-					.padding(horizontal = 16.dp, vertical = 4.dp),
+					.padding(horizontal = 16.dp, vertical = 3.dp),
+				verticalAlignment = Alignment.CenterVertically,
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 			) {
-				LibraryQuickFilter.entries.forEach { filter ->
-					LibraryChip(
-						label = filter.label,
-						selected = uiState.quickFilter == filter,
-						onClick = { viewModel.setQuickFilter(filter) },
-					)
+				Text(
+					text = "STATUS",
+					style = MaterialTheme.typography.labelSmall,
+					fontSize = 10.sp,
+					fontWeight = FontWeight.Bold,
+					letterSpacing = 0.8.sp,
+					color = NemuriTheme.colors.textMuted,
+				)
+				Box(
+					modifier = Modifier
+						.width(1.dp)
+						.height(14.dp)
+						.background(NemuriTheme.colors.border),
+				)
+				Row(
+					modifier = Modifier
+						.weight(1f)
+						.clipToBounds()
+						.horizontalScroll(rememberScrollState()),
+					horizontalArrangement = Arrangement.spacedBy(6.dp),
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					LibraryQuickFilter.entries.forEach { filter ->
+						val dotColor: Color? = when (filter) {
+							LibraryQuickFilter.ALL -> null
+							LibraryQuickFilter.UNREAD -> NemuriTheme.colors.cyan
+							LibraryQuickFilter.DOWNLOADED -> NemuriTheme.colors.healthy
+							LibraryQuickFilter.NEW_CHAPTERS -> NemuriTheme.colors.amber
+							LibraryQuickFilter.ONGOING -> Color(0xFF60A5FA)
+							LibraryQuickFilter.COMPLETED -> NemuriTheme.colors.mergePurple
+						}
+						LibraryStatusChip(
+							label = filter.label,
+							dotColor = dotColor,
+							selected = uiState.quickFilter == filter,
+							onClick = { viewModel.setQuickFilter(filter) },
+						)
+					}
 				}
 			}
 
@@ -1029,6 +1109,102 @@ private fun ContextualBarAction(
 			maxLines = 1,
 			softWrap = false,
 		)
+	}
+}
+
+@Composable
+private fun LibraryCategoryPill(
+	label: String,
+	count: Int?,
+	selected: Boolean,
+	onClick: () -> Unit,
+) {
+	Surface(
+		color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.card,
+		shape = RoundedCornerShape(999.dp),
+		modifier = Modifier
+			.border(
+				1.dp,
+				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+				RoundedCornerShape(999.dp),
+			)
+			.clip(RoundedCornerShape(999.dp))
+			.clickable(onClick = onClick),
+	) {
+		Row(
+			modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(5.dp),
+		) {
+			Text(
+				text = label,
+				style = MaterialTheme.typography.labelMedium,
+				fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+				color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.textPrimary,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			if (count != null) {
+				Surface(
+					color = if (selected) NemuriTheme.colors.onCyan.copy(alpha = 0.18f) else NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(999.dp),
+				) {
+					Text(
+						text = count.toString(),
+						style = MaterialTheme.typography.labelSmall,
+						fontSize = 10.sp,
+						fontWeight = FontWeight.Bold,
+						color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.textMuted,
+						maxLines = 1,
+						modifier = Modifier.padding(horizontal = 5.dp, vertical = 0.5.dp),
+					)
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun LibraryStatusChip(
+	label: String,
+	dotColor: Color?,
+	selected: Boolean,
+	onClick: () -> Unit,
+) {
+	val activeTint = dotColor ?: NemuriTheme.colors.cyan
+	Surface(
+		color = if (selected) activeTint.copy(alpha = 0.16f) else Color.Transparent,
+		shape = RoundedCornerShape(999.dp),
+		modifier = Modifier
+			.border(
+				1.dp,
+				if (selected) activeTint else NemuriTheme.colors.border.copy(alpha = 0.85f),
+				RoundedCornerShape(999.dp),
+			)
+			.clip(RoundedCornerShape(999.dp))
+			.clickable(onClick = onClick),
+	) {
+		Row(
+			modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(5.dp),
+		) {
+			if (dotColor != null) {
+				Box(
+					modifier = Modifier
+						.size(6.5.dp)
+						.background(dotColor, CircleShape),
+				)
+			}
+			Text(
+				text = label,
+				style = MaterialTheme.typography.labelSmall,
+				fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+				color = if (selected) activeTint else NemuriTheme.colors.textSecondary,
+				maxLines = 1,
+				softWrap = false,
+			)
+		}
 	}
 }
 

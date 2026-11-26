@@ -55,8 +55,21 @@ class SingleMangaImporter @Inject constructor(
 	}
 
 	private suspend fun importFile(uri: Uri): LocalManga = withContext(Dispatchers.IO) {
+		runCatching { storageManager.takePermissions(uri) }
 		val contentResolver = storageManager.contentResolver
-		val name = contentResolver.resolveName(uri) ?: throw IOException("Cannot fetch name from uri: $uri")
+		val rawName = contentResolver.resolveName(uri) ?: throw IOException("Cannot fetch name from uri: $uri")
+		val sanitizedBase = rawName
+			.replace('/', '_')
+			.replace('\\', '_')
+			.replace('\u0000', '_')
+			.trim()
+			.ifEmpty { "imported_manga" }
+		val name = if (isSupportedArchive(sanitizedBase)) {
+			sanitizedBase
+		} else {
+			val inferredExt = inferArchiveExtension(contentResolver.getType(uri))
+			if (inferredExt != null) "$sanitizedBase.$inferredExt" else sanitizedBase
+		}
 		if (!isSupportedArchive(name)) {
 			throw UnsupportedFileException("Unsupported file $name on $uri")
 		}
@@ -244,6 +257,19 @@ class SingleMangaImporter @Inject constructor(
 		return runCatching {
 			DocumentFile.fromTreeUri(context, uri)?.isDirectory == true
 		}.getOrDefault(false)
+	}
+
+	private fun inferArchiveExtension(mimeType: String?): String? {
+		val mime = mimeType?.trim()?.lowercase().orEmpty()
+		return when {
+			mime == "application/epub+zip" -> "epub"
+			mime == "application/vnd.comicbook+zip" || mime == "application/x-cbz" || mime == "application/cbz" -> "cbz"
+			mime == "application/vnd.comicbook-rar" || mime == "application/x-cbr" || mime == "application/cbr" ||
+				mime == "application/vnd.rar" || mime == "application/x-rar-compressed" -> "cbr"
+			mime == "application/pdf" -> "pdf"
+			mime == "application/zip" || mime == "application/x-zip-compressed" -> "cbz"
+			else -> null
+		}
 	}
 
 	private companion object {

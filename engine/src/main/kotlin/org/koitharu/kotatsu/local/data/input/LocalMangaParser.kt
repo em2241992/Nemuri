@@ -61,7 +61,7 @@ class LocalMangaParser(private val uri: Uri) {
 
 	constructor(file: File) : this(file.toUri())
 
-	private val rootFile: File = File(uri.schemeSpecificPart)
+	private val rootFile: File = File(uri.path ?: uri.schemeSpecificPart)
 
 	suspend fun getManga(withDetails: Boolean): LocalManga = runInterruptible(Dispatchers.IO) {
 		val epubFiles = when {
@@ -497,7 +497,7 @@ class LocalMangaParser(private val uri: Uri) {
 			val resolved = resolve()
 			return when {
 				resolved.isZipUri() -> FsAndPath(
-					FileSystem.SYSTEM.openZip(resolved.schemeSpecificPart.toPath()),
+					FileSystem.SYSTEM.openZip((resolved.path ?: resolved.schemeSpecificPart).toPath()),
 					resolved.fragment.orEmpty().toRootedPath(),
 					isCloseable = true,
 				)
@@ -509,7 +509,7 @@ class LocalMangaParser(private val uri: Uri) {
 					// download landed in a fresh "Title_N.epub" instead of merging.
 					if (file.isZipArchive || file.isEpubFile) {
 						FsAndPath(
-							FileSystem.SYSTEM.openZip(schemeSpecificPart.toPath()),
+							FileSystem.SYSTEM.openZip((path ?: schemeSpecificPart).toPath()),
 							fragment.orEmpty().toRootedPath(),
 							isCloseable = true,
 						)

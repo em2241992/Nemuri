@@ -142,6 +142,9 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 	val isStatusBarHidden: Boolean
 		get() = prefs.getBoolean(KEY_HIDE_STATUS_BAR, false)
 
+	val hasOnboardingDecisionRecorded: Boolean
+		get() = prefs.contains(KEY_ONBOARDING_COMPLETED)
+
 	var isOnboardingCompleted: Boolean
 		get() = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
 			&& prefs.getString(KEY_ONBOARDING_INSTALL_ID, null) == onboardingInstallId
@@ -153,6 +156,10 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 				remove(KEY_ONBOARDING_INSTALL_ID)
 			}
 		}
+
+	var readerPagesGridColumns: Int
+		get() = prefs.getInt(KEY_READER_PAGES_COLUMNS, 3).coerceIn(2, 6)
+		set(value) = prefs.edit { putInt(KEY_READER_PAGES_COLUMNS, value.coerceIn(2, 6)) }
 
 	var mainNavItems: List<NavItem>
 		get() {
@@ -2033,6 +2040,7 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_DISCORD_TOKEN = "discord_token"
 		const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 		const val KEY_ONBOARDING_INSTALL_ID = "onboarding_install_id"
+		const val KEY_READER_PAGES_COLUMNS = "reader_pages_grid_columns"
 
 		/**
 		 * Keys that must never leave the device: credentials, app-lock state and per-install ids.

@@ -59,6 +59,7 @@ import org.koitharu.kotatsu.core.network.webview.adblock.AdBlock
 import org.koitharu.kotatsu.core.util.ext.configureForParser
 import org.koitharu.kotatsu.core.util.ext.printStackTraceDebug
 import org.koitharu.kotatsu.parsers.util.nullIfEmpty
+import org.nemuri.app.security.ObserveWindowSecurity
 import org.nemuri.app.ui.theme.NemuriTheme
 import javax.inject.Inject
 
@@ -103,6 +104,7 @@ class NemuriBrowserActivity : ComponentActivity() {
 			}
 
 			NemuriTheme {
+				ObserveWindowSecurity()
 				Column(
 					modifier = Modifier
 						.fillMaxSize()

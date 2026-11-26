@@ -151,6 +151,8 @@ data class SettingsUiState(
 	val isSuggestionsExcludeNsfw: Boolean = false,
 	val isSuggestionsExcludeNovels: Boolean = true,
 	// Privacy & Network
+	val isAppLockEnabled: Boolean = false,
+	val appLockTimeout: org.koitharu.kotatsu.core.prefs.AppProtectionTimeout = org.koitharu.kotatsu.core.prefs.AppProtectionTimeout.INSTANT,
 	val isIncognitoEnabled: Boolean = false,
 	val incognitoForNsfw: TriStateOption = TriStateOption.ASK,
 	val screenshotsPolicy: ScreenshotsPolicy = ScreenshotsPolicy.BLOCK_INCOGNITO,
@@ -165,12 +167,15 @@ data class SettingsUiState(
 	// Cloud & About summaries
 	val syncSnapshot: SyncStatusSnapshot = SyncStatusSnapshot(),
 	val isVerboseLoggingEnabled: Boolean = false,
+	val hasLastCrashLog: Boolean = false,
 	val roomSchemaVersion: Int = 0,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+	@dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 	private val settings: AppSettings,
+	private val appLockManager: org.nemuri.app.security.AppLockManager,
 	private val storageManager: LocalStorageManager,
 	private val trackScheduler: TrackWorker.Scheduler,
 	private val suggestionsScheduler: SuggestionsWorker.Scheduler,
@@ -186,6 +191,7 @@ class SettingsViewModel @Inject constructor(
 	private val storageStatsFlow = MutableStateFlow(StorageStats())
 	private val schemaVersionFlow = MutableStateFlow(0)
 	private val neuralCacheVersion = MutableStateFlow(0)
+	private val crashLogVersionFlow = MutableStateFlow(0)
 
 	init {
 		refreshStorageStats()
@@ -206,7 +212,7 @@ class SettingsViewModel @Inject constructor(
 		combine(
 			upscaleModelManager.downloadState,
 			upscaleModelManager.inventoryVersion,
-			neuralCacheVersion,
+			combine(neuralCacheVersion, crashLogVersionFlow) { a, b -> a + b },
 			pageUpscaleEngine.activeDelegateLabel,
 			pageUpscaleEngine.cacheBytesFlow,
 		) { dl, _, _, activeLabel, cacheBytes -> Triple(dl, activeLabel, cacheBytes) },
@@ -298,6 +304,8 @@ class SettingsViewModel @Inject constructor(
 			isSuggestionsWifiOnly = settings.isSuggestionsWiFiOnly,
 			isSuggestionsExcludeNsfw = settings.isSuggestionsExcludeNsfw,
 			isSuggestionsExcludeNovels = settings.isSuggestionsExcludeNovels,
+			isAppLockEnabled = settings.isAppProtectionEnabled,
+			appLockTimeout = settings.appProtectionTimeout,
 			isIncognitoEnabled = settings.isIncognitoModeEnabled,
 			incognitoForNsfw = settings.incognitoModeForNsfw,
 			screenshotsPolicy = settings.screenshotsPolicy,
@@ -311,6 +319,7 @@ class SettingsViewModel @Inject constructor(
 			proxyPassword = settings.proxyPassword.orEmpty(),
 			syncSnapshot = syncFeature.statusSnapshot(),
 			isVerboseLoggingEnabled = settings.isVerboseLoggingEnabled,
+			hasLastCrashLog = org.nemuri.app.crash.CrashLogStore.hasLastCrashLog(appContext),
 			roomSchemaVersion = schemaVersion,
 		)
 	}.stateIn(
@@ -609,6 +618,19 @@ class SettingsViewModel @Inject constructor(
 	}
 
 	// Privacy & Network
+	fun setAppLockEnabled(enabled: Boolean) {
+		if (enabled && !appLockManager.canAuthenticateDevice(appContext) && !settings.isAppPasswordSet) {
+			toastManager.show("Set up a fingerprint, face unlock, or screen lock PIN in Android Settings first")
+			return
+		}
+		appLockManager.onAppLockPreferenceChanged(enabled)
+		toastManager.show(if (enabled) "Biometric / PIN app lock enabled" else "App lock disabled")
+	}
+
+	fun setAppLockTimeout(timeout: org.koitharu.kotatsu.core.prefs.AppProtectionTimeout) {
+		settings.appProtectionTimeout = timeout
+	}
+
 	fun setIncognito(enabled: Boolean) {
 		settings.isIncognitoModeEnabled = enabled
 	}
@@ -644,5 +666,13 @@ class SettingsViewModel @Inject constructor(
 	fun rerunSetupWizard() {
 		settings.isOnboardingCompleted = false
 		toastManager.show("Setup wizard reopened")
+	}
+
+	fun readLastCrashLog(): String? = org.nemuri.app.crash.CrashLogStore.readLastCrashLog(appContext)
+
+	fun clearLastCrashLog() {
+		org.nemuri.app.crash.CrashLogStore.clearLastCrashLog(appContext)
+		crashLogVersionFlow.value += 1
+		toastManager.show("Crash log cleared")
 	}
 }

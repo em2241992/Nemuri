@@ -33,9 +33,10 @@ class AppUpdateRepository @Inject constructor(
 ) {
 
 	private val availableUpdate = MutableStateFlow<AppVersion?>(null)
+	private val configuredRepo: String = context.getString(R.string.github_updates_repo).trim()
 	private val releasesUrl = buildString {
 		append("https://api.github.com/repos/")
-		append(context.getString(R.string.github_updates_repo))
+		append(configuredRepo)
 		append("/releases?page=1&per_page=10")
 	}
 	private val currentVersionName = context.packageManager
@@ -92,8 +93,23 @@ class AppUpdateRepository @Inject constructor(
 		}.getOrNull()
 	}
 
-	// Disabled so upstream DropSauce releases are never prompted over Nemuri builds.
-	fun isUpdateSupported(): Boolean = false
+	/**
+	 * Strictly guarded so F-Droid builds never phone home to GitHub and upstream Kotatsu/DropSauce
+	 * repositories can never be queried over a Nemuri installation.
+	 */
+	fun isUpdateSupported(): Boolean {
+		if (BuildConfig.FLAVOR == "fdroid" || BuildConfig.DEBUG) {
+			return false
+		}
+		if (configuredRepo.isBlank() || '/' !in configuredRepo) {
+			return false
+		}
+		val lower = configuredRepo.lowercase()
+		if ("kotatsu" in lower || "dropsauce" in lower || "haziffe" in lower) {
+			return false
+		}
+		return true
+	}
 
 	private inline fun JSONArray.find(predicate: (JSONObject) -> Boolean): JSONObject? {
 		val size = length()

@@ -1,6 +1,9 @@
 package org.nemuri.app
 
+import android.app.ActivityManager
 import android.app.Application
+import android.os.Build
+import android.os.Process
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.room.InvalidationTracker
 import androidx.work.Configuration
@@ -25,8 +28,11 @@ import org.koitharu.kotatsu.local.data.LocalStorageChanges
 import org.koitharu.kotatsu.local.data.index.LocalMangaIndex
 import org.koitharu.kotatsu.local.domain.model.LocalManga
 import org.koitharu.kotatsu.mihon.MihonExtensionManager
+import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
 import org.koitharu.kotatsu.settings.sources.catalog.EXTENSION_APK_PREFIX
 import org.koitharu.kotatsu.settings.work.WorkScheduleManager
+import org.nemuri.app.crash.GlobalExceptionHandler
+import org.nemuri.app.security.AppLockManager
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -70,6 +76,12 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 	@Inject
 	lateinit var lnPluginManager: Provider<LnPluginManager>
 
+	@Inject
+	lateinit var pageUpscaleEngine: Provider<PageUpscaleEngine>
+
+	@Inject
+	lateinit var appLockManager: Provider<AppLockManager>
+
 	private val extensionsInitStarted = AtomicBoolean(false)
 
 	override val workManagerConfiguration: Configuration
@@ -81,6 +93,10 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 
 	override fun onCreate() {
 		super.onCreate()
+		if (isCrashProcess()) {
+			return
+		}
+		GlobalExceptionHandler.install(this)
 		EngineRuntimeConfig.init(
 			applicationId = BuildConfig.APPLICATION_ID,
 			versionCode = BuildConfig.VERSION_CODE,
@@ -89,9 +105,17 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 		AppRouter.navigator = NemuriEngineNavigator()
 		PlatformRegistry.applicationContext = this
 		appLogger.setEnabled(settings.isVerboseLoggingEnabled)
+		runCatching { appLockManager.get() }
 		activityLifecycleCallbacks.forEach(::registerActivityLifecycleCallbacks)
 		cleanupDownloadedExtensionApks()
 		workScheduleManager.get().init()
+		processLifecycleScope.launch(Dispatchers.Default) {
+			runCatching {
+				pageUpscaleEngine.get().activeDelegateLabel.collect { label ->
+					GlobalExceptionHandler.activeDelegateHint = label
+				}
+			}
+		}
 		// Fallback safety net if a background worker or ReaderActivity launches before MainActivity's first frame.
 		processLifecycleScope.launch(Dispatchers.Default) {
 			delay(2_500L)
@@ -123,4 +147,15 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 			}
 		}
 	}
+
+	private fun isCrashProcess(): Boolean = runCatching {
+		val procName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+			Application.getProcessName()
+		} else {
+			val pid = Process.myPid()
+			val am = getSystemService(ACTIVITY_SERVICE) as? ActivityManager
+			am?.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName.orEmpty()
+		}
+		procName.endsWith(":crash")
+	}.getOrDefault(false)
 }

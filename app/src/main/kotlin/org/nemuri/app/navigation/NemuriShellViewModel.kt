@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -80,9 +81,21 @@ class NemuriShellViewModel @Inject constructor(
 ) : ViewModel() {
 
 	private val schemaVersionFlow = MutableStateFlow(0)
+	private val onboardingGuardResolved = MutableStateFlow(settings.hasOnboardingDecisionRecorded)
 
 	init {
 		viewModelScope.launch(Dispatchers.IO) {
+			if (!settings.hasOnboardingDecisionRecorded) {
+				val hasExistingUserLibraryOrHistory = runCatching {
+					val favCount = favouritesRepository.observeMangaCount().first()
+					val hasHistory = historyRepository.observeAll(1).first().isNotEmpty()
+					favCount > 0 || hasHistory
+				}.getOrDefault(false)
+				if (hasExistingUserLibraryOrHistory) {
+					settings.isOnboardingCompleted = true
+				}
+				onboardingGuardResolved.value = true
+			}
 			runCatching {
 				databaseProvider.get().openHelper.readableDatabase.version
 			}.onSuccess { version ->
@@ -91,26 +104,33 @@ class NemuriShellViewModel @Inject constructor(
 		}
 	}
 
-	private val prefStateFlow = settings.observeChanges()
-		.filter { key ->
-			key == null ||
-				key == AppSettings.KEY_THEME ||
-				key == AppSettings.KEY_THEME_AMOLED ||
-				key == AppSettings.KEY_COLOR_THEME ||
-				key == AppSettings.KEY_INCOGNITO_MODE ||
-				key == AppSettings.KEY_ONBOARDING_COMPLETED ||
-				key == AppSettings.KEY_ONBOARDING_INSTALL_ID
+	private val prefStateFlow = combine(
+		settings.observeChanges()
+			.filter { key ->
+				key == null ||
+					key == AppSettings.KEY_THEME ||
+					key == AppSettings.KEY_THEME_AMOLED ||
+					key == AppSettings.KEY_COLOR_THEME ||
+					key == AppSettings.KEY_INCOGNITO_MODE ||
+					key == AppSettings.KEY_ONBOARDING_COMPLETED ||
+					key == AppSettings.KEY_ONBOARDING_INSTALL_ID
+			}
+			.onStart { emit(null) },
+		onboardingGuardResolved,
+	) { _, guardResolved ->
+		val effectiveOnboardingCompleted = if (guardResolved || settings.hasOnboardingDecisionRecorded) {
+			settings.isOnboardingCompleted
+		} else {
+			true
 		}
-		.onStart { emit(null) }
-		.map {
-			ThemeAndBehaviorPrefs(
-				themeMode = settings.theme,
-				isAmoled = settings.isAmoledTheme,
-				colorScheme = settings.colorScheme,
-				isIncognito = settings.isIncognitoModeEnabled,
-				isOnboardingCompleted = settings.isOnboardingCompleted,
-			)
-		}
+		ThemeAndBehaviorPrefs(
+			themeMode = settings.theme,
+			isAmoled = settings.isAmoledTheme,
+			colorScheme = settings.colorScheme,
+			isIncognito = settings.isIncognitoModeEnabled,
+			isOnboardingCompleted = effectiveOnboardingCompleted,
+		)
+	}
 
 	private val extensionTelemetryFlow = combine(
 		sourcesRepository.observeEnabledSources(),
@@ -177,7 +197,11 @@ class NemuriShellViewModel @Inject constructor(
 				isAmoled = settings.isAmoledTheme,
 				colorScheme = settings.colorScheme,
 				isIncognito = settings.isIncognitoModeEnabled,
-				isOnboardingCompleted = settings.isOnboardingCompleted,
+				isOnboardingCompleted = if (settings.hasOnboardingDecisionRecorded) {
+					settings.isOnboardingCompleted
+				} else {
+					true
+				},
 			),
 		)
 

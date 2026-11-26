@@ -54,7 +54,10 @@
 -keep interface org.tensorflow.lite.** { *; }
 -dontwarn org.tensorflow.lite.**
 
-# --- App @Serializable Models, Enums & Room ---
+# --- App @Serializable Models, Enums, Biometric, Crash Handler & Room ---
+-keep class androidx.biometric.** { *; }
+-dontwarn androidx.biometric.**
+-keep class org.nemuri.app.crash.** { *; }
 -keep @kotlinx.serialization.Serializable class org.nemuri.app.** { *; }
 -keep enum org.nemuri.app.** { *; }
 -keep @androidx.room.Entity class * { *; }

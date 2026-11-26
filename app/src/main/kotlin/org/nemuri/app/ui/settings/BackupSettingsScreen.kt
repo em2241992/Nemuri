@@ -32,6 +32,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +46,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koitharu.kotatsu.backup.MihonBackupManager
 import org.koitharu.kotatsu.backup.local.domain.BackupSection
+import org.nemuri.app.navigation.BackupRestoreKind
+import org.nemuri.app.navigation.PendingBackupRestore
 import org.nemuri.app.navigation.SettingsSection
 import org.nemuri.app.ui.theme.NemuriTheme
 
@@ -54,8 +57,17 @@ fun BackupSettingsScreen(
 	viewModel: BackupSettingsViewModel = viewModel(),
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
+	val pendingExternalRestore by PendingBackupRestore.pending.collectAsStateWithLifecycle()
 	var showFreqDialog by remember { mutableStateOf(false) }
 	var showKeepCountDialog by remember { mutableStateOf(false) }
+
+	LaunchedEffect(pendingExternalRestore) {
+		val req = PendingBackupRestore.consume() ?: return@LaunchedEffect
+		when (req.kind) {
+			BackupRestoreKind.NEMURI_ZIP -> viewModel.beginNemuriRestore(req.uri)
+			BackupRestoreKind.MIHON_PROTO -> viewModel.analyzeMihonBackup(req.uri)
+		}
+	}
 
 	val createNemuriBackupLauncher = rememberLauncherForActivityResult(
 		ActivityResultContracts.CreateDocument("application/zip"),

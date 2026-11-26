@@ -180,6 +180,7 @@
     <string name="lock_timeout_10_seconds">10 seconds</string>
     <string name="lock_timeout_1_minute">1 minute</string>
     <string name="lock_timeout_5_minutes">5 minutes</string>
+    <string name="lock_timeout_15_minutes">15 minutes</string>
     <string name="about">About</string>
     <string name="app_version">Version %s</string>
     <string name="check_for_updates">Check for updates</string>

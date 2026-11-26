@@ -2,10 +2,10 @@ package org.nemuri.app
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -49,12 +49,18 @@ import org.koitharu.kotatsu.core.nav.ReaderIntent
 import org.koitharu.kotatsu.reader.ui.ReaderState
 import org.nemuri.app.navigation.AppDestination
 import org.nemuri.app.navigation.AppTab
+import org.nemuri.app.navigation.ExternalIntentOutcome
+import org.nemuri.app.navigation.ExternalIntentRouter
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.navigation.NemuriNavController
 import org.nemuri.app.navigation.NemuriShellUiState
 import org.nemuri.app.navigation.NemuriShellViewModel
+import org.nemuri.app.navigation.PendingBackupRestore
 import org.nemuri.app.navigation.SettingsSection
 import org.nemuri.app.reader.ReaderActivity
+import org.nemuri.app.security.AppLockManager
+import org.nemuri.app.security.AppLockShieldOverlay
+import org.nemuri.app.security.ObserveWindowSecurity
 import org.nemuri.app.ui.bookmarks.BookmarksScreen
 import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.NemuriCapsuleToastHost
@@ -91,7 +97,7 @@ import org.nemuri.app.ui.theme.nemuriEffectsSpring
 import org.nemuri.app.ui.theme.nemuriSpatialSpring
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
 	private var latestIntent by mutableStateOf<Intent?>(null)
 
@@ -103,6 +109,9 @@ class MainActivity : ComponentActivity() {
 			val shellViewModel: NemuriShellViewModel = viewModel()
 			val shellState by shellViewModel.uiState.collectAsStateWithLifecycle()
 			val navController = remember { NemuriNavController() }
+			val appLockManager = remember { AppLockManager.from(this@MainActivity) }
+			val isAppLocked by appLockManager.isLocked.collectAsStateWithLifecycle()
+			var isResolvingExternalLink by remember { mutableStateOf(false) }
 
 			LaunchedEffect(Unit) {
 				withFrameNanos { }
@@ -110,9 +119,49 @@ class MainActivity : ComponentActivity() {
 			}
 
 			LaunchedEffect(latestIntent) {
-				latestIntent?.let { incoming ->
+				val incoming = latestIntent ?: return@LaunchedEffect
+				latestIntent = null
+				if (ExternalIntentRouter.isExternalFileOrWebDeepLink(incoming)) {
+					isResolvingExternalLink = true
+					try {
+						(applicationContext as? NemuriApp)?.ensureExtensionsInitialized()
+						when (val outcome = ExternalIntentRouter.resolveExternalViewIntent(this@MainActivity, incoming)) {
+							is ExternalIntentOutcome.OpenBackupRestore -> {
+								PendingBackupRestore.post(outcome.request)
+								navController.navigate(AppDestination.Settings(SettingsSection.BACKUP_RESTORE))
+							}
+							is ExternalIntentOutcome.OpenReader -> {
+								MangaTransferCache.put(outcome.manga)
+								startActivity(
+									ReaderActivity.newIntent(
+										context = this@MainActivity,
+										manga = outcome.manga,
+										chapterId = outcome.chapterId,
+									),
+								)
+							}
+							is ExternalIntentOutcome.OpenDetails -> {
+								MangaTransferCache.put(outcome.manga)
+								navController.navigate(
+									AppDestination.MangaDetails(outcome.manga.id, outcome.manga.source.name),
+								)
+							}
+							is ExternalIntentOutcome.FallbackSearch -> {
+								shellViewModel.showToast("Searching installed sources for \"${outcome.query}\"…")
+								navController.navigate(AppDestination.GlobalSearch(outcome.query))
+							}
+							is ExternalIntentOutcome.Error -> {
+								shellViewModel.showToast(outcome.message)
+							}
+							ExternalIntentOutcome.NotHandled -> {
+								navController.consumeIntent(incoming)
+							}
+						}
+					} finally {
+						isResolvingExternalLink = false
+					}
+				} else {
 					navController.consumeIntent(incoming)
-					latestIntent = null
 				}
 			}
 
@@ -121,11 +170,28 @@ class MainActivity : ComponentActivity() {
 				amoled = shellState.isAmoled,
 				colorScheme = shellState.colorScheme,
 			) {
-				NemuriAppRoot(
-					navController = navController,
-					shellState = shellState,
-					shellViewModel = shellViewModel,
-				)
+				ObserveWindowSecurity(isAppLocked = isAppLocked)
+				Box(modifier = Modifier.fillMaxSize()) {
+					NemuriAppRoot(
+						navController = navController,
+						shellState = shellState,
+						shellViewModel = shellViewModel,
+					)
+					if (isResolvingExternalLink && !isAppLocked) {
+						Box(
+							modifier = Modifier
+								.fillMaxSize()
+								.background(NemuriTheme.colors.background.copy(alpha = 0.72f)),
+							contentAlignment = Alignment.Center,
+						) {
+							NemuriLoadingState(message = "Opening in Nemuri…")
+						}
+					}
+					AppLockShieldOverlay(
+						isLocked = isAppLocked,
+						onUnlocked = appLockManager::unlock,
+					)
+				}
 			}
 		}
 	}

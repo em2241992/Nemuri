@@ -1,10 +1,12 @@
 package org.koitharu.kotatsu.local.data.input
 
+import android.net.Uri
 import android.util.Xml
 import org.jetbrains.annotations.Blocking
 import org.koitharu.kotatsu.parsers.util.toTitleCase
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
+import java.nio.charset.Charset
 import java.util.zip.ZipFile
 
 class EpubBook(
@@ -37,7 +39,7 @@ object EpubParser {
 	private const val RELAXED = "http://xmlpull.org/v1/doc/features.html#relaxed"
 
 	@Blocking
-	fun parse(file: File): EpubBook = ZipFile(file).use { zip ->
+	fun parse(file: File): EpubBook = openEpubZip(file).use { zip ->
 		val containerXml = zip.readEntry("META-INF/container.xml")
 			?: error("Not an EPUB: missing META-INF/container.xml in ${file.name}")
 		val opfPath = parseContainer(containerXml) ?: error("No rootfile in container.xml")
@@ -104,8 +106,26 @@ object EpubParser {
 		)
 	}
 
+	private fun openEpubZip(file: File): ZipFile = try {
+		val zip = ZipFile(file)
+		// Force entry enumeration once to catch non-UTF-8 ZIP header MALFORMED errors up front
+		val entries = zip.entries()
+		while (entries.hasMoreElements()) {
+			entries.nextElement()
+		}
+		zip
+	} catch (_: IllegalArgumentException) {
+		ZipFile(file, Charset.forName("ISO-8859-1"))
+	}
+
 	private fun ZipFile.readEntry(name: String): String? {
-		val entry = getEntry(name) ?: getEntry(name.removePrefix("/")) ?: return null
+		val clean = name.substringBefore('#')
+		val decoded = Uri.decode(clean)
+		val entry = getEntry(clean)
+			?: getEntry(clean.removePrefix("/"))
+			?: getEntry(decoded)
+			?: getEntry(decoded.removePrefix("/"))
+			?: return null
 		return getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
 	}
 
