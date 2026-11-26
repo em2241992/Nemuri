@@ -108,6 +108,7 @@ fun SettingsLazyPage(
 	title: String,
 	onBack: () -> Unit,
 	subtitle: String? = null,
+	bottomPadding: androidx.compose.ui.unit.Dp = 28.dp,
 	actions: @Composable RowScope.() -> Unit = {},
 	content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
@@ -123,7 +124,7 @@ fun SettingsLazyPage(
 				start = 16.dp,
 				end = 16.dp,
 				top = innerPadding.calculateTopPadding(),
-				bottom = 28.dp,
+				bottom = bottomPadding,
 			),
 			verticalArrangement = Arrangement.spacedBy(16.dp),
 			content = content,

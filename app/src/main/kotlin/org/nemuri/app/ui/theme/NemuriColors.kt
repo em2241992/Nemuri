@@ -106,12 +106,147 @@ private data class AccentSpec(
 	val onDarkPrimary: Color = Color(0xFF041F22),
 )
 
+private val YorhaDarkExtended = ObsidianExtendedColors.copy(
+	background = Color(0xFF161512),
+	surface = Color(0xFF1E1D19),
+	surfaceElevated = Color(0xFF282620),
+	card = Color(0xFF21201B),
+	dock = Color(0xFF26241F),
+	sheet = Color(0xFF24221D),
+	toast = Color(0xFF2E2B24),
+	border = Color(0xFF3E3B31),
+	cyan = Color(0xFFD0C59B),
+	teal = Color(0xFFB5A97E),
+	tealContainer = Color(0xFF383428),
+	onCyan = Color(0xFF191813),
+	textPrimary = Color(0xFFEDE8D5),
+	textSecondary = Color(0xFFCFC8B0),
+	textMuted = Color(0xFF9C9580),
+	textDim = Color(0xFF716B59),
+)
+
+private val YorhaLightExtended = LightExtendedColors.copy(
+	background = Color(0xFFDAD4BE),
+	surface = Color(0xFFE4DEC8),
+	surfaceElevated = Color(0xFFCEC7AF),
+	card = Color(0xFFE7E1CC),
+	dock = Color(0xFFD5CEB7),
+	sheet = Color(0xFFEAE5D2),
+	toast = Color(0xFF3A372D),
+	border = Color(0xFFB0A88F),
+	cyan = Color(0xFF57523E),
+	teal = Color(0xFF6B654E),
+	tealContainer = Color(0xFFC6BF9E),
+	onCyan = Color(0xFFFDFBEF),
+	textPrimary = Color(0xFF25231C),
+	textSecondary = Color(0xFF423F34),
+	textMuted = Color(0xFF5B5748),
+	textDim = Color(0xFF7A7564),
+)
+
+private val KyotoWashiDarkExtended = ObsidianExtendedColors.copy(
+	background = Color(0xFF151210),
+	surface = Color(0xFF1D1916),
+	surfaceElevated = Color(0xFF27211D),
+	card = Color(0xFF201C18),
+	dock = Color(0xFF25201B),
+	sheet = Color(0xFF221D19),
+	toast = Color(0xFF2E2721),
+	border = Color(0xFF3F352E),
+	cyan = Color(0xFFE06D53),
+	teal = Color(0xFFC85840),
+	tealContainer = Color(0xFF422119),
+	onCyan = Color(0xFFFFFFFF),
+	textPrimary = Color(0xFFF6EFE6),
+	textSecondary = Color(0xFFD8CCC0),
+	textMuted = Color(0xFFA7998B),
+	textDim = Color(0xFF796B5E),
+)
+
+private val KyotoWashiLightExtended = LightExtendedColors.copy(
+	background = Color(0xFFF6F0E6),
+	surface = Color(0xFFFCF8F0),
+	surfaceElevated = Color(0xFFECE3D3),
+	card = Color(0xFFFCF8F1),
+	dock = Color(0xFFF2E9DA),
+	sheet = Color(0xFFFCF8F1),
+	toast = Color(0xFF2C231D),
+	border = Color(0xFFD7CBB8),
+	cyan = Color(0xFFC84B31),
+	teal = Color(0xFFB33E26),
+	tealContainer = Color(0xFFF9DCD4),
+	onCyan = Color(0xFFFFFFFF),
+	textPrimary = Color(0xFF241B15),
+	textSecondary = Color(0xFF473A30),
+	textMuted = Color(0xFF665649),
+	textDim = Color(0xFF877668),
+)
+
+private val SuibokugaDarkExtended = ObsidianExtendedColors.copy(
+	background = Color(0xFF0E1012),
+	surface = Color(0xFF14171A),
+	surfaceElevated = Color(0xFF1D2227),
+	card = Color(0xFF171B1F),
+	dock = Color(0xFF1B2025),
+	sheet = Color(0xFF181C21),
+	toast = Color(0xFF23282F),
+	border = Color(0xFF2C333B),
+	cyan = Color(0xFF8FB0C5),
+	teal = Color(0xFF7395AB),
+	tealContainer = Color(0xFF21313C),
+	onCyan = Color(0xFF0C1419),
+	textPrimary = Color(0xFFECEFF2),
+	textSecondary = Color(0xFFC6CFD7),
+	textMuted = Color(0xFF8D99A4),
+	textDim = Color(0xFF606B75),
+)
+
+private val SuibokugaLightExtended = LightExtendedColors.copy(
+	background = Color(0xFFF0F3F5),
+	surface = Color(0xFFF9FAFB),
+	surfaceElevated = Color(0xFFE3E8EC),
+	card = Color(0xFFF9FAFB),
+	dock = Color(0xFFE8EDF0),
+	sheet = Color(0xFFF8FAFB),
+	toast = Color(0xFF1B2126),
+	border = Color(0xFFC8D1D8),
+	cyan = Color(0xFF3E5B6E),
+	teal = Color(0xFF324B5B),
+	tealContainer = Color(0xFFD5E2EA),
+	onCyan = Color(0xFFFFFFFF),
+	textPrimary = Color(0xFF14191E),
+	textSecondary = Color(0xFF333D45),
+	textMuted = Color(0xFF54616C),
+	textDim = Color(0xFF74828E),
+)
+
 private fun ColorScheme.accentSpec(): AccentSpec = when (this) {
 	ColorScheme.DEFAULT, ColorScheme.EXPRESSIVE -> AccentSpec(
 		darkPrimary = Color(0xFF5CE1E6),
 		lightPrimary = Color(0xFF0D9488),
 		darkContainer = Color(0xFF0F363A),
 		lightContainer = Color(0xFFCCFBF1),
+	)
+	ColorScheme.YORHA -> AccentSpec(
+		darkPrimary = YorhaDarkExtended.cyan,
+		lightPrimary = YorhaLightExtended.cyan,
+		darkContainer = YorhaDarkExtended.tealContainer,
+		lightContainer = YorhaLightExtended.tealContainer,
+		onDarkPrimary = YorhaDarkExtended.onCyan,
+	)
+	ColorScheme.KYOTO_WASHI -> AccentSpec(
+		darkPrimary = KyotoWashiDarkExtended.cyan,
+		lightPrimary = KyotoWashiLightExtended.cyan,
+		darkContainer = KyotoWashiDarkExtended.tealContainer,
+		lightContainer = KyotoWashiLightExtended.tealContainer,
+		onDarkPrimary = KyotoWashiDarkExtended.onCyan,
+	)
+	ColorScheme.SUIBOKUGA -> AccentSpec(
+		darkPrimary = SuibokugaDarkExtended.cyan,
+		lightPrimary = SuibokugaLightExtended.cyan,
+		darkContainer = SuibokugaDarkExtended.tealContainer,
+		lightContainer = SuibokugaLightExtended.tealContainer,
+		onDarkPrimary = SuibokugaDarkExtended.onCyan,
 	)
 	ColorScheme.MIKU -> AccentSpec(
 		darkPrimary = Color(0xFF4CCAD0),
@@ -183,34 +318,69 @@ fun buildMaterialColorScheme(
 				background = Color.Black,
 				surface = Color(0xFF07080C),
 				surfaceVariant = Color(0xFF10131B),
+				surfaceContainerLowest = Color.Black,
+				surfaceContainerLow = Color(0xFF0A0C12),
+				surfaceContainer = Color(0xFF0C0E14),
+				surfaceContainerHigh = Color(0xFF0E1118),
+				surfaceContainerHighest = Color(0xFF141822),
 			)
 		} else {
 			base
 		}
-		return adjustedMaterial to extBase.copy(
+		val dynamicExt = extBase.copy(
+			background = adjustedMaterial.background,
+			surface = adjustedMaterial.surface,
+			surfaceElevated = adjustedMaterial.surfaceContainerHigh,
+			card = adjustedMaterial.surfaceContainer,
+			dock = adjustedMaterial.surfaceContainerHighest,
+			sheet = adjustedMaterial.surfaceContainerLow,
+			border = adjustedMaterial.outlineVariant,
 			cyan = adjustedMaterial.primary,
 			teal = adjustedMaterial.primary,
 			tealContainer = adjustedMaterial.primaryContainer,
 			onCyan = adjustedMaterial.onPrimary,
+			textPrimary = adjustedMaterial.onSurface,
+			textSecondary = adjustedMaterial.onSurfaceVariant,
+			textMuted = adjustedMaterial.onSurfaceVariant.copy(alpha = 0.78f),
 		)
+		return adjustedMaterial to dynamicExt
 	}
 
-	val accent = colorScheme.accentSpec()
-	val ext = if (isDark) {
-		val base = if (amoled) AmoledExtendedColors else ObsidianExtendedColors
-		base.copy(
-			cyan = accent.darkPrimary,
-			teal = accent.darkPrimary,
-			tealContainer = accent.darkContainer,
-			onCyan = accent.onDarkPrimary,
-		)
-	} else {
-		LightExtendedColors.copy(
-			cyan = accent.lightPrimary,
-			teal = accent.lightPrimary,
-			tealContainer = accent.lightContainer,
-			onCyan = Color.White,
-		)
+	val ext: NemuriExtendedColors = when (colorScheme) {
+		ColorScheme.YORHA -> if (isDark) {
+			if (amoled) YorhaDarkExtended.copy(background = Color.Black, surface = Color(0xFF0B0A08), sheet = Color(0xFF12110E)) else YorhaDarkExtended
+		} else {
+			YorhaLightExtended
+		}
+		ColorScheme.KYOTO_WASHI -> if (isDark) {
+			if (amoled) KyotoWashiDarkExtended.copy(background = Color.Black, surface = Color(0xFF0B0908), sheet = Color(0xFF13100E)) else KyotoWashiDarkExtended
+		} else {
+			KyotoWashiLightExtended
+		}
+		ColorScheme.SUIBOKUGA -> if (isDark) {
+			if (amoled) SuibokugaDarkExtended.copy(background = Color.Black, surface = Color(0xFF080A0C), sheet = Color(0xFF101316)) else SuibokugaDarkExtended
+		} else {
+			SuibokugaLightExtended
+		}
+		else -> {
+			val accent = colorScheme.accentSpec()
+			if (isDark) {
+				val base = if (amoled) AmoledExtendedColors else ObsidianExtendedColors
+				base.copy(
+					cyan = accent.darkPrimary,
+					teal = accent.darkPrimary,
+					tealContainer = accent.darkContainer,
+					onCyan = accent.onDarkPrimary,
+				)
+			} else {
+				LightExtendedColors.copy(
+					cyan = accent.lightPrimary,
+					teal = accent.lightPrimary,
+					tealContainer = accent.lightContainer,
+					onCyan = Color.White,
+				)
+			}
+		}
 	}
 
 	val material = if (isDark) {
@@ -218,7 +388,7 @@ fun buildMaterialColorScheme(
 			primary = ext.cyan,
 			onPrimary = ext.onCyan,
 			primaryContainer = ext.tealContainer,
-			onPrimaryContainer = Color(0xFFF1F5F9),
+			onPrimaryContainer = ext.textPrimary,
 			secondary = Color(0xFF2DD4BF),
 			onSecondary = Color(0xFF042220),
 			secondaryContainer = Color(0xFF132D33),
@@ -229,7 +399,12 @@ fun buildMaterialColorScheme(
 			surface = ext.surface,
 			onSurface = ext.textPrimary,
 			surfaceVariant = ext.surfaceElevated,
-			onSurfaceVariant = ext.textMuted,
+			onSurfaceVariant = ext.textSecondary,
+			surfaceContainerLowest = ext.background,
+			surfaceContainerLow = ext.sheet,
+			surfaceContainer = ext.card,
+			surfaceContainerHigh = ext.sheet,
+			surfaceContainerHighest = ext.surfaceElevated,
 			outline = ext.border,
 			outlineVariant = ext.border.copy(alpha = 0.65f),
 			error = ext.danger,
@@ -240,20 +415,25 @@ fun buildMaterialColorScheme(
 	} else {
 		lightColorScheme(
 			primary = ext.cyan,
-			onPrimary = Color.White,
+			onPrimary = ext.onCyan,
 			primaryContainer = ext.tealContainer,
-			onPrimaryContainer = Color(0xFF0F172A),
+			onPrimaryContainer = ext.textPrimary,
 			secondary = Color(0xFF0F766E),
 			onSecondary = Color.White,
 			secondaryContainer = Color(0xFFCCFBF1),
-			onSecondaryContainer = Color(0xFF0F172A),
+			onSecondaryContainer = ext.textPrimary,
 			tertiary = ext.healthy,
 			background = ext.background,
 			onBackground = ext.textPrimary,
 			surface = ext.surface,
 			onSurface = ext.textPrimary,
 			surfaceVariant = ext.surfaceElevated,
-			onSurfaceVariant = ext.textMuted,
+			onSurfaceVariant = ext.textSecondary,
+			surfaceContainerLowest = ext.background,
+			surfaceContainerLow = ext.sheet,
+			surfaceContainer = ext.card,
+			surfaceContainerHigh = ext.sheet,
+			surfaceContainerHighest = ext.surfaceElevated,
 			outline = ext.border,
 			outlineVariant = ext.border.copy(alpha = 0.65f),
 			error = ext.danger,

@@ -22,8 +22,13 @@ import org.koitharu.kotatsu.core.network.DoHProvider
 import org.koitharu.kotatsu.core.network.cookies.MutableCookieJar
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.ColorScheme
+import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
 import org.koitharu.kotatsu.core.prefs.DownloadFormat
+import org.koitharu.kotatsu.core.prefs.GridGutterDensity
+import org.koitharu.kotatsu.core.prefs.MangaCardStyle
+import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.ScreenshotsPolicy
 import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
@@ -67,12 +72,25 @@ data class StorageStats(
 }
 
 data class SettingsUiState(
-	// Appearance
+	// Appearance & Layout Studio
 	val themeMode: Int = AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM,
 	val isAmoled: Boolean = false,
 	val colorScheme: ColorScheme = ColorScheme.DEFAULT,
 	val uiScalePercent: Int = 100,
 	val isTitleOverCover: Boolean = true,
+	val mangaCardStyle: MangaCardStyle = MangaCardStyle.COMPACT,
+	val gridColumnsPortrait: Int = 3,
+	val gridColumnsLandscape: Int = 5,
+	val cardCornerRadiusDp: Int = 12,
+	val gridGutterDensity: GridGutterDensity = GridGutterDensity.STANDARD,
+	val coverAspectRatio: CoverAspectRatio = CoverAspectRatio.STANDARD_2_3,
+	val showUnreadBadge: Boolean = true,
+	val showDownloadedBadge: Boolean = true,
+	val showSourceBadge: Boolean = false,
+	val showBottomProgressBar: Boolean = true,
+	val isNavBarCompact: Boolean = false,
+	val navLabelVisibility: NavLabelVisibility = NavLabelVisibility.SELECTED_ONLY,
+	val isSwipeActionsEnabled: Boolean = true,
 	// Extensions
 	val isPrivateInstall: Boolean = false,
 	val isShizukuInstaller: Boolean = false,
@@ -87,6 +105,9 @@ data class SettingsUiState(
 	val isReaderVolumeButtonsEnabled: Boolean = false,
 	val is32BitColorsEnabled: Boolean = false,
 	val isPagesNumbersEnabled: Boolean = false,
+	val isReaderSeamlessStitchEnabled: Boolean = true,
+	val readerTapZoneMode: ReaderTapZoneMode = ReaderTapZoneMode.DEFAULT,
+	val isReaderDoubleTapFill: Boolean = false,
 	val readerShaderPreset: ReaderShaderPreset = ReaderShaderPreset.OFF,
 	val isReaderDescreenEnabled: Boolean = false,
 	val isReaderInkLevelsEnabled: Boolean = false,
@@ -94,6 +115,7 @@ data class SettingsUiState(
 	val isNeuralUpscaleSupported: Boolean = false,
 	val isNeuralUpscaleEnabled: Boolean = false,
 	val neuralAccelerator: NeuralAccelerator = NeuralAccelerator.AUTO,
+	val activeNeuralDelegateLabel: String = "Idle",
 	val isNeuralPreloadEnabled: Boolean = true,
 	val neuralCatalog: List<NeuralModelUiItem> = emptyList(),
 	val neuralDownloadState: NeuralModelDownloadState = NeuralModelDownloadState(),
@@ -178,8 +200,11 @@ class SettingsViewModel @Inject constructor(
 			upscaleModelManager.downloadState,
 			upscaleModelManager.inventoryVersion,
 			neuralCacheVersion,
-		) { dl, _, _ -> dl },
-	) { _, isTrackerRunning, storageStats, schemaVersion, neuralDl ->
+			pageUpscaleEngine.activeDelegateLabel,
+			pageUpscaleEngine.cacheBytesFlow,
+		) { dl, _, _, activeLabel, cacheBytes -> Triple(dl, activeLabel, cacheBytes) },
+	) { _, isTrackerRunning, storageStats, schemaVersion, neuralTriple ->
+		val (neuralDl, activeDelegateLabel, neuralCacheBytes) = neuralTriple
 		val selectedNeuralId = settings.neuralUpscaleModelId
 		val neuralItems = upscaleModelManager.catalog.map { entry ->
 			val file = upscaleModelManager.getModelFile(entry.id)
@@ -200,6 +225,19 @@ class SettingsViewModel @Inject constructor(
 			colorScheme = settings.colorScheme,
 			uiScalePercent = settings.uiScalePercent,
 			isTitleOverCover = settings.isTitleOverCover,
+			mangaCardStyle = settings.mangaCardStyle,
+			gridColumnsPortrait = settings.gridColumnsPortrait,
+			gridColumnsLandscape = settings.gridColumnsLandscape,
+			cardCornerRadiusDp = settings.cardCornerRadiusDp,
+			gridGutterDensity = settings.gridGutterDensity,
+			coverAspectRatio = settings.coverAspectRatio,
+			showUnreadBadge = settings.showUnreadBadge,
+			showDownloadedBadge = settings.showDownloadedBadge,
+			showSourceBadge = settings.showSourceBadge,
+			showBottomProgressBar = settings.showBottomProgressBar,
+			isNavBarCompact = settings.isNavBarCompact,
+			navLabelVisibility = settings.navLabelVisibility,
+			isSwipeActionsEnabled = settings.isSwipeActionsEnabled,
 			isPrivateInstall = settings.isPrivateInstallEnabled,
 			isShizukuInstaller = settings.isShizukuInstallerEnabled,
 			isAutoUpdateExtensions = settings.isAutoUpdateExtensionsEnabled,
@@ -212,6 +250,9 @@ class SettingsViewModel @Inject constructor(
 			isReaderVolumeButtonsEnabled = settings.isReaderVolumeButtonsEnabled,
 			is32BitColorsEnabled = settings.is32BitColorsEnabled,
 			isPagesNumbersEnabled = settings.isPagesNumbersEnabled,
+			isReaderSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
+			readerTapZoneMode = ReaderTapZoneMode.fromKey(settings.readerTapZoneMode),
+			isReaderDoubleTapFill = settings.isReaderDoubleTapFill,
 			readerShaderPreset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
 			isReaderDescreenEnabled = settings.isReaderDescreenEnabled,
 			isReaderInkLevelsEnabled = settings.isReaderInkLevelsEnabled,
@@ -219,10 +260,11 @@ class SettingsViewModel @Inject constructor(
 			isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
 			isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
 			neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
+			activeNeuralDelegateLabel = activeDelegateLabel,
 			isNeuralPreloadEnabled = settings.isNeuralPreloadEnabled,
 			neuralCatalog = neuralItems,
 			neuralDownloadState = neuralDl,
-			neuralCacheBytes = pageUpscaleEngine.computeCacheSizeBytes(),
+			neuralCacheBytes = neuralCacheBytes,
 			epubTheme = settings.epubTheme,
 			epubFontFamily = settings.epubFontFamily,
 			epubFontSize = settings.epubFontSize,
@@ -265,7 +307,7 @@ class SettingsViewModel @Inject constructor(
 		initialValue = SettingsUiState(),
 	)
 
-	// Appearance
+	// Appearance & Layout Studio
 	fun setThemeMode(mode: Int) = settings.setTheme(mode)
 	fun setAmoled(enabled: Boolean) = settings.setAmoledTheme(enabled)
 	fun setColorScheme(scheme: ColorScheme) = settings.setColorScheme(scheme)
@@ -274,6 +316,47 @@ class SettingsViewModel @Inject constructor(
 	}
 	fun setTitleOverCover(enabled: Boolean) {
 		settings.isTitleOverCover = enabled
+		settings.mangaCardStyle = if (enabled) MangaCardStyle.COMPACT else MangaCardStyle.COMFORTABLE
+	}
+	fun setMangaCardStyle(style: MangaCardStyle) {
+		settings.mangaCardStyle = style
+		settings.isTitleOverCover = style != MangaCardStyle.COMFORTABLE
+	}
+	fun setGridColumnsPortrait(columns: Int) {
+		settings.gridColumnsPortrait = columns.coerceIn(2, 6)
+	}
+	fun setGridColumnsLandscape(columns: Int) {
+		settings.gridColumnsLandscape = columns.coerceIn(4, 9)
+	}
+	fun setCardCornerRadiusDp(dp: Int) {
+		settings.cardCornerRadiusDp = dp.coerceIn(0, 24)
+	}
+	fun setGridGutterDensity(density: GridGutterDensity) {
+		settings.gridGutterDensity = density
+	}
+	fun setCoverAspectRatio(ratio: CoverAspectRatio) {
+		settings.coverAspectRatio = ratio
+	}
+	fun setShowUnreadBadge(show: Boolean) {
+		settings.showUnreadBadge = show
+	}
+	fun setShowDownloadedBadge(show: Boolean) {
+		settings.showDownloadedBadge = show
+	}
+	fun setShowSourceBadge(show: Boolean) {
+		settings.showSourceBadge = show
+	}
+	fun setShowBottomProgressBar(show: Boolean) {
+		settings.showBottomProgressBar = show
+	}
+	fun setNavBarCompact(compact: Boolean) {
+		settings.isNavBarCompact = compact
+	}
+	fun setNavLabelVisibility(visibility: NavLabelVisibility) {
+		settings.navLabelVisibility = visibility
+	}
+	fun setSwipeActionsEnabled(enabled: Boolean) {
+		settings.isSwipeActionsEnabled = enabled
 	}
 
 	// Extensions
@@ -304,6 +387,15 @@ class SettingsViewModel @Inject constructor(
 	fun setVolumeButtons(enabled: Boolean) = settings.setReaderVolumeButtonsEnabled(enabled)
 	fun set32BitColors(enabled: Boolean) = settings.set32BitColorsEnabled(enabled)
 	fun setPagesNumbers(enabled: Boolean) = settings.setPagesNumbersEnabled(enabled)
+	fun setReaderSeamlessStitchEnabled(enabled: Boolean) {
+		settings.isReaderSeamlessStitchEnabled = enabled
+	}
+	fun setReaderTapZoneMode(mode: ReaderTapZoneMode) {
+		settings.readerTapZoneMode = mode.key
+	}
+	fun setReaderDoubleTapFill(enabled: Boolean) {
+		settings.isReaderDoubleTapFill = enabled
+	}
 	fun setReaderShaderPreset(preset: ReaderShaderPreset) {
 		settings.readerShaderMode = preset.key
 		settings.setReaderUpscaleEnabled(

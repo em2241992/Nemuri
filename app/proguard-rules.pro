@@ -15,3 +15,9 @@
 # --- ONNX Runtime Android JNI & Native Bridge (github flavor only) ---
 -keep class ai.onnxruntime.** { *; }
 -dontwarn ai.onnxruntime.**
+
+# --- Qualcomm QNN NPU & LiteRT Delegates (github flavor only) ---
+-keep class com.qualcomm.qti.** { *; }
+-dontwarn com.qualcomm.qti.**
+-keep class com.google.ai.edge.litert.** { *; }
+-dontwarn com.google.ai.edge.litert.**

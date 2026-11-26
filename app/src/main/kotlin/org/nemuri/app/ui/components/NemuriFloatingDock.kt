@@ -1,8 +1,12 @@
 package org.nemuri.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -57,11 +61,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.navigation.AppTab
 import org.nemuri.app.ui.theme.NemuriTheme
+import org.nemuri.app.ui.theme.nemuriEffectsSpring
+import org.nemuri.app.ui.theme.nemuriFastSpatialSpring
 
 private fun AppTab.icon(): ImageVector = when (this) {
 	AppTab.LIBRARY -> Icons.Default.LocalLibrary
@@ -81,9 +89,18 @@ fun NemuriFloatingDockBar(
 	onSelectTab: (AppTab) -> Unit,
 	onContinueReading: (Manga?) -> Unit,
 	onToggleIncognito: () -> Unit,
+	isCompactHeight: Boolean = LocalLayoutStudioPrefs.current.isNavBarCompact,
+	labelVisibility: NavLabelVisibility = LocalLayoutStudioPrefs.current.navLabelVisibility,
 	modifier: Modifier = Modifier,
 ) {
 	var showContinuePeek by remember { mutableStateOf(false) }
+	val barHeight by animateDpAsState(
+		targetValue = if (isCompactHeight) 48.dp else 56.dp,
+		animationSpec = nemuriFastSpatialSpring(),
+		label = "dockBarHeight",
+	)
+	val pillHeight = if (isCompactHeight) 38.dp else 44.dp
+	val fabSize = if (isCompactHeight) 48.dp else 56.dp
 
 	Box(
 		modifier = modifier.fillMaxWidth(),
@@ -140,12 +157,12 @@ fun NemuriFloatingDockBar(
 					shadowElevation = 14.dp,
 					shape = RoundedCornerShape(32.dp),
 					modifier = Modifier
-						.height(56.dp)
+						.height(barHeight)
 						.border(1.dp, Color(0xFF364044), RoundedCornerShape(32.dp)),
 				) {
 					Row(
-						modifier = Modifier.padding(6.dp),
-						horizontalArrangement = Arrangement.spacedBy(4.dp),
+						modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
+						horizontalArrangement = Arrangement.spacedBy(3.dp),
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						AppTab.entries.forEach { tab ->
@@ -155,6 +172,8 @@ fun NemuriFloatingDockBar(
 								selected = selected,
 								badgeCount = if (tab == AppTab.FEED) unreadFeedCount else 0,
 								showDot = tab == AppTab.EXPLORE && hasExtensionUpdates,
+								pillHeight = pillHeight,
+								labelVisibility = labelVisibility,
 								onClick = {
 									showContinuePeek = false
 									onSelectTab(tab)
@@ -168,6 +187,7 @@ fun NemuriFloatingDockBar(
 
 				ContinueReadingFab(
 					isIncognito = isIncognito,
+					fabSize = fabSize,
 					onClick = {
 						showContinuePeek = false
 						onContinueReading(recentReads.firstOrNull())
@@ -185,34 +205,46 @@ private fun DockTabPill(
 	selected: Boolean,
 	badgeCount: Int,
 	showDot: Boolean,
+	pillHeight: Dp,
+	labelVisibility: NavLabelVisibility,
 	onClick: () -> Unit,
 ) {
-	val containerColor = if (selected) {
-		MaterialTheme.colorScheme.primary
-	} else {
-		Color.Transparent
+	val containerColor by animateColorAsState(
+		targetValue = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+		animationSpec = nemuriEffectsSpring(),
+		label = "dockPillContainer",
+	)
+	val contentTint by animateColorAsState(
+		targetValue = if (selected) MaterialTheme.colorScheme.onPrimary else Color(0xFFC4CDD0),
+		animationSpec = nemuriEffectsSpring(),
+		label = "dockPillTint",
+	)
+	val showLabel = when (labelVisibility) {
+		NavLabelVisibility.ALWAYS -> true
+		NavLabelVisibility.SELECTED_ONLY -> selected
+		NavLabelVisibility.HIDDEN -> false
 	}
-	val contentTint = if (selected) {
-		MaterialTheme.colorScheme.onPrimary
-	} else {
-		Color(0xFFC4CDD0)
+	val horizontalPad = when {
+		labelVisibility == NavLabelVisibility.ALWAYS -> 9.dp
+		showLabel -> 13.dp
+		else -> 11.dp
 	}
 
 	Surface(
 		color = containerColor,
 		shape = RoundedCornerShape(24.dp),
 		modifier = Modifier
-			.height(44.dp)
+			.height(pillHeight)
 			.clip(RoundedCornerShape(24.dp))
 			.clickable(onClick = onClick),
 	) {
 		Row(
 			modifier = Modifier.padding(
-				horizontal = if (selected) 13.dp else 10.dp,
-				vertical = 6.dp,
+				horizontal = horizontalPad,
+				vertical = 5.dp,
 			),
 			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(6.dp),
+			horizontalArrangement = Arrangement.spacedBy(5.dp),
 		) {
 			BadgedBox(
 				badge = {
@@ -242,11 +274,15 @@ private fun DockTabPill(
 					modifier = Modifier.size(20.dp),
 				)
 			}
-			if (selected) {
+			AnimatedVisibility(
+				visible = showLabel,
+				enter = fadeIn(nemuriEffectsSpring()) + expandHorizontally(nemuriFastSpatialSpring()),
+				exit = fadeOut(nemuriEffectsSpring()) + shrinkHorizontally(nemuriFastSpatialSpring()),
+			) {
 				Text(
 					text = tab.label,
 					color = contentTint,
-					fontSize = 13.sp,
+					fontSize = if (labelVisibility == NavLabelVisibility.ALWAYS) 11.sp else 13.sp,
 					fontWeight = FontWeight.SemiBold,
 					maxLines = 1,
 					softWrap = false,
@@ -260,6 +296,7 @@ private fun DockTabPill(
 @Composable
 private fun ContinueReadingFab(
 	isIncognito: Boolean,
+	fabSize: Dp,
 	onClick: () -> Unit,
 	onLongClick: () -> Unit,
 ) {
@@ -273,7 +310,7 @@ private fun ContinueReadingFab(
 			shape = RoundedCornerShape(32.dp),
 			shadowElevation = 12.dp,
 			modifier = Modifier
-				.size(56.dp)
+				.size(fabSize)
 				.border(if (isIncognito) 2.dp else 1.dp, borderColor, RoundedCornerShape(32.dp))
 				.clip(RoundedCornerShape(32.dp))
 				.combinedClickable(

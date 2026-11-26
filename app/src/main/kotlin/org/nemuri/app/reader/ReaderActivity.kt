@@ -10,7 +10,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
+import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.ImageView
 import androidx.activity.ComponentActivity
@@ -27,12 +29,18 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -102,8 +110,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -128,9 +138,11 @@ import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
 import org.koitharu.kotatsu.core.image.AvifCapableImageDecoder
 import org.koitharu.kotatsu.core.image.AvifCapableRegionDecoder
+import org.koitharu.kotatsu.core.model.UnknownMangaSource
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.nav.ReaderIntent
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.core.util.ext.isPdfUri
 import org.koitharu.kotatsu.parsers.model.Manga
@@ -140,8 +152,13 @@ import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.koitharu.kotatsu.reader.ui.ReaderState
 import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
+import org.nemuri.app.MainActivity
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
+import org.nemuri.app.browser.WebViewChallengeAction
+import org.nemuri.app.browser.toBrowserIntent
+import org.nemuri.app.browser.toWebViewChallengeAction
+import org.nemuri.app.navigation.EXTRA_OPEN_MIGRATE_MANGA_ID
 import org.nemuri.app.ui.components.NemuriCapsuleToastHost
 import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
@@ -190,6 +207,13 @@ class ReaderActivity : ComponentActivity() {
 	override fun onPause() {
 		viewModel.onPauseReading()
 		super.onPause()
+	}
+
+	override fun onDestroy() {
+		if (isFinishing) {
+			viewModel.releaseUpscalerOnClose()
+		}
+		super.onDestroy()
 	}
 
 	override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -272,9 +296,12 @@ private fun ReaderRootScreen(
 				ReaderChallengeScreen(
 					title = "Cloudflare check required",
 					message = uiState.errorMessage ?: "Verify in WebView to load this chapter.",
-					actionLabel = "Verify in Browser",
+					actionLabel = "Solve in WebView",
 					onAction = { cfLauncher.launch(cf) },
 					onRetry = viewModel::retry,
+					onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
+						{ openMigrateFromReader(context, id) }
+					},
 					onBack = onBack,
 				)
 			}
@@ -284,23 +311,52 @@ private fun ReaderRootScreen(
 				ReaderChallengeScreen(
 					title = "Sign-in required",
 					message = uiState.errorMessage ?: "Complete login or action in WebView, then retry.",
-					actionLabel = "Open Browser",
+					actionLabel = "Solve in WebView",
 					onAction = { browserLauncher.launch(interactive) },
 					onRetry = viewModel::retry,
+					onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
+						{ openMigrateFromReader(context, id) }
+					},
 					onBack = onBack,
 				)
 			}
 
 			uiState.errorMessage != null && !uiState.isChapterLoading &&
 				((!uiState.isTextMode && uiState.pages.isEmpty()) || (uiState.isTextMode && uiState.novelBlocks.isEmpty())) -> {
-				Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-					IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
-						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = NemuriTheme.colors.textPrimary)
-					}
-					NemuriErrorState(
+				val challengeUrl = uiState.pendingChallengeUrl
+				if (!challengeUrl.isNullOrBlank()) {
+					ReaderChallengeScreen(
+						title = "HTTP 403 / Verification required",
 						message = uiState.errorMessage,
+						actionLabel = "Solve in WebView",
+						onAction = {
+							runCatching {
+								context.startActivity(
+									AppRouter.browserIntent(
+										context,
+										challengeUrl,
+										uiState.manga?.source ?: UnknownMangaSource,
+										uiState.title,
+									),
+								)
+							}
+						},
 						onRetry = viewModel::retry,
+						onFindAlternative = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
+							{ openMigrateFromReader(context, id) }
+						},
+						onBack = onBack,
 					)
+				} else {
+					Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+						IconButton(onClick = onBack, modifier = Modifier.padding(8.dp)) {
+							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = NemuriTheme.colors.textPrimary)
+						}
+						NemuriErrorState(
+							message = uiState.errorMessage,
+							onRetry = viewModel::retry,
+						)
+					}
 				}
 			}
 
@@ -416,8 +472,19 @@ private fun ReaderRootScreen(
 						.navigationBarsPadding()
 						.padding(horizontal = 12.dp, vertical = 8.dp),
 				) {
-					val itemCount = if (uiState.isTextMode) uiState.novelBlocks.size else uiState.pages.size
-					val currentIdx = if (uiState.isTextMode) uiState.novelCurrentBlockIndex else uiState.currentPageIndex
+					val itemCount = if (uiState.isTextMode) uiState.novelBlocks.size else uiState.chapterLogicalCount.coerceAtLeast(uiState.pages.size)
+					val currentIdx = if (uiState.isTextMode) {
+						uiState.novelCurrentBlockIndex
+					} else {
+						(uiState.currentPageIndex - uiState.chapterStartGlobalIndex).coerceIn(0, (itemCount - 1).coerceAtLeast(0))
+					}
+					val pageCounterText = if (uiState.isTextMode) {
+						"${(currentIdx + 1).coerceAtMost(itemCount)} / $itemCount"
+					} else if (uiState.chapterEndPageNumber > uiState.chapterStartPageNumber) {
+						"${uiState.chapterStartPageNumber}–${uiState.chapterEndPageNumber} / ${uiState.chapterTotalPages.coerceAtLeast(1)}"
+					} else {
+						"${uiState.chapterStartPageNumber} / ${uiState.chapterTotalPages.coerceAtLeast(1)}"
+					}
 					if (itemCount > 1) {
 						Row(
 							modifier = Modifier.fillMaxWidth(),
@@ -425,7 +492,7 @@ private fun ReaderRootScreen(
 							horizontalArrangement = Arrangement.spacedBy(8.dp),
 						) {
 							Text(
-								text = "${(currentIdx + 1).coerceAtMost(itemCount)} / $itemCount",
+								text = pageCounterText,
 								style = MaterialTheme.typography.labelSmall,
 								color = NemuriTheme.colors.cyan,
 							)
@@ -435,7 +502,8 @@ private fun ReaderRootScreen(
 									if (uiState.isTextMode) {
 										viewModel.jumpToNovelBlock(value.roundToInt())
 									} else {
-										viewModel.jumpToMangaPage(value.roundToInt())
+										val targetGlobal = uiState.chapterStartGlobalIndex + value.roundToInt()
+										viewModel.jumpToMangaPage(targetGlobal)
 									}
 								},
 								valueRange = 0f..(itemCount - 1).toFloat(),
@@ -503,6 +571,29 @@ private fun ReaderRootScreen(
 						}
 					}
 				}
+			}
+		}
+
+		if (!showHud && !uiState.isLoading && !uiState.isTextMode && uiState.showPageNumbers && uiState.chapterTotalPages > 0) {
+			Surface(
+				color = Color.Black.copy(alpha = 0.56f),
+				shape = RoundedCornerShape(999.dp),
+				modifier = Modifier
+					.align(Alignment.BottomEnd)
+					.navigationBarsPadding()
+					.padding(end = 14.dp, bottom = 12.dp),
+			) {
+				val label = if (uiState.chapterEndPageNumber > uiState.chapterStartPageNumber) {
+					"${uiState.chapterStartPageNumber}–${uiState.chapterEndPageNumber} / ${uiState.chapterTotalPages}"
+				} else {
+					"${uiState.chapterStartPageNumber} / ${uiState.chapterTotalPages}"
+				}
+				Text(
+					text = label,
+					style = MaterialTheme.typography.labelSmall,
+					color = Color.White.copy(alpha = 0.9f),
+					modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+				)
 			}
 		}
 
@@ -576,6 +667,52 @@ private fun ReaderRootScreen(
 	}
 }
 
+private enum class TapZoneAction {
+	PREV,
+	NEXT,
+	TOGGLE_HUD,
+}
+
+private fun resolveTapZoneAction(
+	normX: Float,
+	normY: Float,
+	mode: ReaderTapZoneMode,
+	isRtl: Boolean,
+	isWebtoon: Boolean,
+): TapZoneAction {
+	val horizontalAction = when (mode) {
+		ReaderTapZoneMode.DEFAULT -> when {
+			normX < 0.33f -> -1
+			normX > 0.67f -> 1
+			else -> 0
+		}
+
+		ReaderTapZoneMode.L_SHAPED -> when {
+			normY < 0.25f -> -1
+			normY > 0.75f -> 1
+			normX < 0.33f -> -1
+			normX > 0.67f -> 1
+			else -> 0
+		}
+
+		ReaderTapZoneMode.KINDLE -> when {
+			normY < 0.18f -> 0
+			normX < 0.24f -> -1
+			else -> 1
+		}
+
+		ReaderTapZoneMode.EDGE_ONLY -> when {
+			normX < 0.16f -> -1
+			normX > 0.84f -> 1
+			else -> 0
+		}
+	}
+	if (horizontalAction == 0) return TapZoneAction.TOGGLE_HUD
+	val flip = isRtl && !isWebtoon
+	val effective = if (flip) -horizontalAction else horizontalAction
+	return if (effective < 0) TapZoneAction.PREV else TapZoneAction.NEXT
+}
+
 @Composable
 private fun MangaReaderViewport(
 	uiState: ReaderUiState,
@@ -591,11 +728,19 @@ private fun MangaReaderViewport(
 		return
 	}
 
+	val context = LocalContext.current
 	val coroutineScope = rememberCoroutineScope()
+	val migrateAction: (() -> Unit)? = uiState.manga?.id?.takeIf { it != 0L }?.let { id ->
+		{ openMigrateFromReader(context, id) }
+	}
 	val bitmapConfig = if (uiState.is32BitColors) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
+	val currentTapZoneMode by rememberUpdatedState(uiState.tapZoneMode)
+	val currentSmartZoom by rememberUpdatedState(uiState.isDoubleTapSmartZoom)
 
 	if (uiState.readerMode == ReaderMode.WEBTOON) {
 		val listState = rememberLazyListState()
+		var webtoonZoom by remember { mutableStateOf(1f) }
+		var webtoonPanX by remember { mutableStateOf(0f) }
 
 		LaunchedEffect(uiState.pageJumpToken) {
 			if (uiState.currentPageIndex in pages.indices) {
@@ -621,34 +766,103 @@ private fun MangaReaderViewport(
 			}
 		}
 
-		LazyColumn(
-			state = listState,
+		fun handleWebtoonTap(normX: Float, normY: Float) {
+			when (resolveTapZoneAction(normX, normY, currentTapZoneMode, isRtl = false, isWebtoon = true)) {
+				TapZoneAction.TOGGLE_HUD -> onToggleHud()
+				TapZoneAction.PREV -> {
+					val target = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
+					coroutineScope.launch { listState.animateScrollToItem(target) }
+				}
+				TapZoneAction.NEXT -> {
+					val target = (listState.firstVisibleItemIndex + 1).coerceAtMost(pages.lastIndex)
+					coroutineScope.launch { listState.animateScrollToItem(target) }
+				}
+			}
+		}
+
+		BoxWithConstraints(
 			modifier = Modifier
 				.fillMaxSize()
-				.clickable(
-					interactionSource = remember { MutableInteractionSource() },
-					indication = null,
-					onClick = onToggleHud,
-				),
+				.pointerInput(Unit) {
+					awaitEachGesture {
+						do {
+							val event = awaitPointerEvent()
+							if (event.changes.size >= 2) {
+								val zoomChange = event.calculateZoom()
+								val pan = event.calculatePan()
+								val nextZoom = (webtoonZoom * zoomChange).coerceIn(1f, 2.8f)
+								val maxPan = ((nextZoom - 1f) * size.width * 0.5f).coerceAtLeast(0f)
+								webtoonZoom = nextZoom
+								webtoonPanX = if (nextZoom <= 1.02f) 0f else (webtoonPanX + pan.x).coerceIn(-maxPan, maxPan)
+								event.changes.forEach { it.consume() }
+							} else if (webtoonZoom > 1.04f) {
+								val pan = event.calculatePan()
+								if (kotlin.math.abs(pan.x) > kotlin.math.abs(pan.y) * 1.15f) {
+									val maxPan = ((webtoonZoom - 1f) * size.width * 0.5f).coerceAtLeast(0f)
+									webtoonPanX = (webtoonPanX + pan.x).coerceIn(-maxPan, maxPan)
+									event.changes.forEach { it.consume() }
+								}
+							}
+						} while (event.changes.any { it.pressed })
+					}
+				}
+				.pointerInput(currentTapZoneMode) {
+					detectTapGestures(
+						onDoubleTap = { offset ->
+							if (currentSmartZoom) {
+								if (webtoonZoom > 1.15f) {
+									webtoonZoom = 1f
+									webtoonPanX = 0f
+								} else {
+									val targetZoom = 2.0f
+									val maxPan = ((targetZoom - 1f) * size.width * 0.5f).coerceAtLeast(0f)
+									val focalPan = (size.width * 0.5f - offset.x) * (targetZoom - 1f)
+									webtoonZoom = targetZoom
+									webtoonPanX = focalPan.coerceIn(-maxPan, maxPan)
+								}
+							}
+						},
+						onTap = { offset ->
+							val nx = if (size.width > 0) offset.x / size.width.toFloat() else 0.5f
+							val ny = if (size.height > 0) offset.y / size.height.toFloat() else 0.5f
+							handleWebtoonTap(nx, ny)
+						},
+					)
+				},
 		) {
-			items(pages, key = { it.id }) { page ->
-				SsivPageView(
-					page = page,
-					bitmapConfig = bitmapConfig,
-					isWebtoon = true,
-					shaderConfig = uiState.shaderConfig,
-					neuralRevision = uiState.neuralRevision,
-					loadPage = viewModel::loadPageImage,
-					onTap = onToggleHud,
-					modifier = Modifier.fillMaxWidth(),
-				)
-			}
+			LazyColumn(
+				state = listState,
+				verticalArrangement = Arrangement.spacedBy(0.dp),
+				modifier = Modifier
+					.fillMaxSize()
+					.graphicsLayer {
+						scaleX = webtoonZoom
+						scaleY = webtoonZoom
+						translationX = webtoonPanX
+					},
+			) {
+				items(pages, key = { it.id }) { page ->
+					SsivPageView(
+						page = page,
+						bitmapConfig = bitmapConfig,
+						isWebtoon = true,
+						isDoubleTapSmartZoom = currentSmartZoom,
+						shaderConfig = uiState.shaderConfig,
+						neuralRevision = uiState.neuralRevision,
+						loadPage = viewModel::loadPageImage,
+						onTapNormalized = ::handleWebtoonTap,
+						fallbackUrl = uiState.manga?.publicUrl,
+						onFindAlternative = migrateAction,
+						modifier = Modifier.fillMaxWidth(),
+					)
+				}
 
-			item(key = "webtoon_footer") {
-				ChapterTransitionFooter(
-					hasNext = uiState.hasNextChapter,
-					onNext = { viewModel.goToAdjacentChapter(isNext = true) },
-				)
+				item(key = "webtoon_footer") {
+					ChapterTransitionFooter(
+						hasNext = uiState.hasNextChapter,
+						onNext = { viewModel.goToAdjacentChapter(isNext = true) },
+					)
+				}
 			}
 		}
 	} else {
@@ -656,6 +870,7 @@ private fun MangaReaderViewport(
 			initialPage = uiState.currentPageIndex.coerceIn(0, pages.lastIndex),
 			pageCount = { pages.size },
 		)
+		val isRtl = uiState.readerMode == ReaderMode.REVERSED
 
 		LaunchedEffect(uiState.pageJumpToken) {
 			val target = uiState.currentPageIndex.coerceIn(0, pages.lastIndex)
@@ -682,6 +897,32 @@ private fun MangaReaderViewport(
 			}
 		}
 
+		fun handlePagedTap(normX: Float, normY: Float) {
+			when (resolveTapZoneAction(normX, normY, currentTapZoneMode, isRtl = isRtl, isWebtoon = false)) {
+				TapZoneAction.TOGGLE_HUD -> onToggleHud()
+				TapZoneAction.PREV -> {
+					val target = pagerState.currentPage - 1
+					if (target >= 0) {
+						coroutineScope.launch { pagerState.animateScrollToPage(target) }
+					} else if (uiState.hasPrevChapter) {
+						viewModel.goToAdjacentChapter(isNext = false)
+					} else {
+						onToggleHud()
+					}
+				}
+				TapZoneAction.NEXT -> {
+					val target = pagerState.currentPage + 1
+					if (target <= pages.lastIndex) {
+						coroutineScope.launch { pagerState.animateScrollToPage(target) }
+					} else if (uiState.hasNextChapter) {
+						viewModel.goToAdjacentChapter(isNext = true)
+					} else {
+						onToggleHud()
+					}
+				}
+			}
+		}
+
 		when (uiState.readerMode) {
 			ReaderMode.VERTICAL -> {
 				VerticalPager(
@@ -693,10 +934,13 @@ private fun MangaReaderViewport(
 						page = page,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
-						onTap = onToggleHud,
+						onTapNormalized = ::handlePagedTap,
+						fallbackUrl = uiState.manga?.publicUrl,
+						onFindAlternative = migrateAction,
 						modifier = Modifier.fillMaxSize(),
 					)
 				}
@@ -713,10 +957,13 @@ private fun MangaReaderViewport(
 						page = page,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
-						onTap = onToggleHud,
+						onTapNormalized = ::handlePagedTap,
+						fallbackUrl = uiState.manga?.publicUrl,
+						onFindAlternative = migrateAction,
 						modifier = Modifier.fillMaxSize(),
 					)
 				}
@@ -732,10 +979,13 @@ private fun MangaReaderViewport(
 						page = page,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						neuralRevision = uiState.neuralRevision,
 						loadPage = viewModel::loadPageImage,
-						onTap = onToggleHud,
+						onTapNormalized = ::handlePagedTap,
+						fallbackUrl = uiState.manga?.publicUrl,
+						onFindAlternative = migrateAction,
 						modifier = Modifier.fillMaxSize(),
 					)
 				}
@@ -744,47 +994,67 @@ private fun MangaReaderViewport(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SsivPageView(
 	page: ReaderPage,
 	bitmapConfig: Bitmap.Config,
 	isWebtoon: Boolean,
+	isDoubleTapSmartZoom: Boolean,
 	shaderConfig: ReaderShaderConfig,
 	neuralRevision: Int,
 	loadPage: suspend (ReaderPage, Boolean) -> Result<Pair<Uri, Rect?>>,
-	onTap: () -> Unit,
+	onTapNormalized: (Float, Float) -> Unit,
+	fallbackUrl: String? = null,
+	onFindAlternative: (() -> Unit)? = null,
 	modifier: Modifier = Modifier,
 ) {
 	val context = LocalContext.current
 	val latestShaderConfig by rememberUpdatedState(shaderConfig)
+	val latestOnTap by rememberUpdatedState(onTapNormalized)
+	val latestSmartZoom by rememberUpdatedState(isDoubleTapSmartZoom)
 	var retryToken by remember(page.id) { mutableStateOf(0) }
 	var resolved by remember(page.id) { mutableStateOf<Pair<Uri, Rect?>?>(null) }
 	var errorText by remember(page.id) { mutableStateOf<String?>(null) }
+	var errorThrowable by remember(page.id) { mutableStateOf<Throwable?>(null) }
 	var imageReady by remember(page.id) { mutableStateOf(false) }
+
+	val cfPageLauncher = rememberLauncherForActivityResult(CloudFlareActivity.Contract()) { solved ->
+		if (solved) retryToken++
+	}
+	val browserPageLauncher = rememberLauncherForActivityResult(NemuriBrowserActivity.Contract()) { solved ->
+		if (solved) retryToken++
+	}
 
 	LaunchedEffect(page.id, retryToken, neuralRevision) {
 		errorText = null
+		errorThrowable = null
 		if (resolved == null) {
 			imageReady = false
 		}
 		loadPage(page, retryToken > 0)
 			.onSuccess { resolved = it }
-			.onFailure { err -> errorText = err.getDisplayMessage(context.resources) }
+			.onFailure { err ->
+				errorThrowable = err
+				errorText = err.getDisplayMessage(context.resources)
+			}
 	}
 
-	val aspectRatio = remember(resolved) {
-		val bounds = resolved?.second
-		if (bounds != null && bounds.width() > 0 && bounds.height() > 0) {
-			(bounds.width().toFloat() / bounds.height().toFloat()).coerceIn(0.25f, 3.5f)
-		} else {
-			0.7f
-		}
-	}
-
+	// Webtoon strips use exact integer pixel heights without aspect clamping so consecutive slices join with 0px seam.
 	val boxModifier = if (isWebtoon) {
 		modifier
 			.fillMaxWidth()
-			.aspectRatio(aspectRatio)
+			.layout { measurable, constraints ->
+				val w = constraints.maxWidth
+				val bounds = resolved?.second
+				val h = if (bounds != null && bounds.width() > 0 && bounds.height() > 0) {
+					((w.toLong() * bounds.height()) / bounds.width()).toInt().coerceAtLeast(1)
+				} else {
+					(w * 1.42f).roundToInt().coerceAtLeast(1)
+				}
+				val placeable = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+				layout(w, h) { placeable.place(0, 0) }
+			}
 	} else {
 		modifier.fillMaxSize()
 	}
@@ -803,17 +1073,36 @@ private fun SsivPageView(
 					SubsamplingScaleImageView(ctx).apply {
 						isEagerLoadingEnabled = !isLowRam
 						panLimit = SubsamplingScaleImageView.PAN_LIMIT_INSIDE
-						minimumScaleType = SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
+						minimumScaleType = if (isWebtoon) {
+							SubsamplingScaleImageView.SCALE_TYPE_CENTER_CROP
+						} else {
+							SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
+						}
 						maxScale = 4f
 						isZoomEnabled = !isWebtoon
 						isPanEnabled = !isWebtoon
 						bitmapDecoderFactory = AvifCapableImageDecoder.Factory(bitmapConfig)
 						regionDecoderFactory = AvifCapableRegionDecoder.Factory(bitmapConfig, isLowRam)
-						setOnClickListener { onTap() }
+						val tapDetector = GestureDetector(
+							ctx,
+							object : GestureDetector.SimpleOnGestureListener() {
+								override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+									val nx = if (width > 0) (e.x / width.toFloat()).coerceIn(0f, 1f) else 0.5f
+									val ny = if (height > 0) (e.y / height.toFloat()).coerceIn(0f, 1f) else 0.5f
+									latestOnTap(nx, ny)
+									return false
+								}
+							},
+						)
+						setOnTouchListener { _, event ->
+							tapDetector.onTouchEvent(event)
+							false
+						}
 						addOnImageEventListener(
 							object : DefaultOnImageEventListener {
 								override fun onReady() {
 									imageReady = true
+									configureSsivScaleAndZoom(this@apply, isWebtoon, latestSmartZoom)
 									applyShaderToSsiv(this@apply, latestShaderConfig)
 								}
 
@@ -838,6 +1127,9 @@ private fun SsivPageView(
 						}
 						ssiv.setImage(source)
 					}
+					if (ssiv.isReady) {
+						configureSsivScaleAndZoom(ssiv, isWebtoon, isDoubleTapSmartZoom)
+					}
 					applyShaderToSsiv(ssiv, shaderConfig)
 				},
 				onRelease = { it.recycle() },
@@ -846,9 +1138,13 @@ private fun SsivPageView(
 		}
 
 		if (errorText != null) {
+			val challenge = errorThrowable?.toWebViewChallengeAction(
+				fallbackUrl = page.url.takeIf { it.startsWith("http", ignoreCase = true) } ?: fallbackUrl,
+				fallbackSource = page.source,
+			)
 			Column(
 				horizontalAlignment = Alignment.CenterHorizontally,
-				verticalArrangement = Arrangement.spacedBy(8.dp),
+				verticalArrangement = Arrangement.spacedBy(10.dp),
 				modifier = Modifier.padding(24.dp),
 			) {
 				Text(
@@ -857,14 +1153,43 @@ private fun SsivPageView(
 					color = NemuriTheme.colors.textSecondary,
 					textAlign = TextAlign.Center,
 				)
-				Button(
-					onClick = { retryToken++ },
-					colors = ButtonDefaults.buttonColors(
-						containerColor = NemuriTheme.colors.cyan,
-						contentColor = NemuriTheme.colors.onCyan,
-					),
+				FlowRow(
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+					verticalArrangement = Arrangement.spacedBy(6.dp),
 				) {
-					Text("Retry")
+					if (challenge != null) {
+						Button(
+							onClick = {
+								when (challenge) {
+									is WebViewChallengeAction.CloudFlare -> cfPageLauncher.launch(challenge.exception)
+									is WebViewChallengeAction.Interactive -> browserPageLauncher.launch(challenge.exception)
+									is WebViewChallengeAction.BrowserUrl -> runCatching {
+										context.startActivity(challenge.toBrowserIntent(context))
+									}
+								}
+							},
+							colors = ButtonDefaults.buttonColors(
+								containerColor = NemuriTheme.colors.cyan,
+								contentColor = NemuriTheme.colors.onCyan,
+							),
+						) {
+							Text("Solve in WebView")
+						}
+					}
+					Button(
+						onClick = { retryToken++ },
+						colors = ButtonDefaults.buttonColors(
+							containerColor = if (challenge == null) NemuriTheme.colors.cyan else NemuriTheme.colors.surfaceElevated,
+							contentColor = if (challenge == null) NemuriTheme.colors.onCyan else NemuriTheme.colors.textPrimary,
+						),
+					) {
+						Text("Retry")
+					}
+					if (challenge != null && onFindAlternative != null) {
+						TextButton(onClick = onFindAlternative) {
+							Text("Find Alternative", color = NemuriTheme.colors.cyan)
+						}
+					}
 				}
 			}
 		} else if (!imageReady) {
@@ -874,6 +1199,36 @@ private fun SsivPageView(
 				modifier = Modifier.size(28.dp),
 			)
 		}
+	}
+}
+
+private fun configureSsivScaleAndZoom(
+	ssiv: SubsamplingScaleImageView,
+	isWebtoon: Boolean,
+	smartDoubleTapFill: Boolean,
+) {
+	val vW = ssiv.width.toFloat()
+	val vH = ssiv.height.toFloat()
+	val sW = ssiv.sWidth.toFloat()
+	val sH = ssiv.sHeight.toFloat()
+	if (vW <= 0f || vH <= 0f || sW <= 0f || sH <= 0f) return
+
+	val fitScale = minOf(vW / sW, vH / sH)
+	val fillScale = maxOf(vW / sW, vH / sH)
+	if (isWebtoon) {
+		ssiv.minimumScaleType = SubsamplingScaleImageView.SCALE_TYPE_CUSTOM
+		ssiv.minScale = fillScale
+		ssiv.maxScale = fillScale
+	} else {
+		ssiv.minimumScaleType = SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
+		ssiv.maxScale = maxOf(fillScale * 2.5f, fitScale * 4.0f, 4.0f)
+		val targetDoubleTap = if (smartDoubleTapFill && fillScale > fitScale * 1.12f) {
+			fillScale
+		} else {
+			fitScale * 2.0f
+		}
+		ssiv.doubleTapZoomScale = targetDoubleTap
+		ssiv.doubleTapZoomStyle = SubsamplingScaleImageView.ZOOM_FOCUS_FIXED
 	}
 }
 
@@ -928,6 +1283,9 @@ private fun NovelReaderViewport(
 		}
 	}
 
+	val currentTapZoneMode by rememberUpdatedState(uiState.tapZoneMode)
+	val latestBlocksSize by rememberUpdatedState(uiState.novelBlocks.size)
+
 	SelectionContainer {
 		LazyColumn(
 			state = listState,
@@ -942,11 +1300,26 @@ private fun NovelReaderViewport(
 				.fillMaxSize()
 				.background(bgColor)
 				.statusBarsPadding()
-				.clickable(
-					interactionSource = remember { MutableInteractionSource() },
-					indication = null,
-					onClick = onToggleHud,
-				),
+				.pointerInput(Unit) {
+					detectTapGestures(
+						onTap = { offset ->
+							val nx = if (size.width > 0) offset.x / size.width.toFloat() else 0.5f
+							val ny = if (size.height > 0) offset.y / size.height.toFloat() else 0.5f
+							when (resolveTapZoneAction(nx, ny, currentTapZoneMode, isRtl = false, isWebtoon = true)) {
+								TapZoneAction.TOGGLE_HUD -> onToggleHud()
+								TapZoneAction.PREV -> {
+									val target = (listState.firstVisibleItemIndex - 4).coerceAtLeast(0)
+									coroutineScope.launch { listState.animateScrollToItem(target) }
+								}
+								TapZoneAction.NEXT -> {
+									val maxIdx = (latestBlocksSize - 1).coerceAtLeast(0)
+									val target = (listState.firstVisibleItemIndex + 4).coerceAtMost(maxIdx)
+									coroutineScope.launch { listState.animateScrollToItem(target) }
+								}
+							}
+						},
+					)
+				},
 		) {
 			item(key = "novel_chapter_header") {
 				Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1161,34 +1534,122 @@ private fun ReaderSettingsModalSheet(
 					style = MaterialTheme.typography.labelLarge,
 					color = NemuriTheme.colors.cyan,
 				)
-				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					ReaderShaderPreset.entries.forEach { preset ->
-						val selected = uiState.shaderConfig.preset == preset
-						Surface(
-							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(10.dp),
-							modifier = Modifier
-								.weight(1f)
-								.border(
-									1.dp,
-									if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-									RoundedCornerShape(10.dp),
-								)
-								.clip(RoundedCornerShape(10.dp))
-								.clickable(enabled = UpscaleEffect.isSupported) {
-									viewModel.setShaderPreset(preset)
-								},
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					ReaderShaderPreset.entries.chunked(2).forEach { rowPresets ->
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
 						) {
-							Text(
-								text = preset.label,
-								style = MaterialTheme.typography.labelSmall,
-								color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-								textAlign = TextAlign.Center,
-								maxLines = 1,
-								modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
-							)
+							rowPresets.forEach { preset ->
+								val selected = uiState.shaderConfig.preset == preset
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(10.dp),
+									modifier = Modifier
+										.weight(1f)
+										.border(
+											1.dp,
+											if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+											RoundedCornerShape(10.dp),
+										)
+										.clip(RoundedCornerShape(10.dp))
+										.clickable(enabled = UpscaleEffect.isSupported) {
+											viewModel.setShaderPreset(preset)
+										},
+								) {
+									Text(
+										text = preset.label,
+										style = MaterialTheme.typography.labelSmall,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										textAlign = TextAlign.Center,
+										maxLines = 1,
+										modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+									)
+								}
+							}
 						}
 					}
+				}
+
+				HorizontalDivider(color = NemuriTheme.colors.border, modifier = Modifier.padding(vertical = 2.dp))
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Text("Seamless Slice Stitching", style = MaterialTheme.typography.bodyMedium, color = NemuriTheme.colors.textPrimary)
+						Text("Merges uneven sliver slices into single pages with 0px seams", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+					}
+					Switch(
+						checked = uiState.isSeamlessStitchEnabled,
+						onCheckedChange = viewModel::setSeamlessStitchEnabled,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.cyan,
+						),
+					)
+				}
+
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Text("Smart Double-Tap Zoom", style = MaterialTheme.typography.bodyMedium, color = NemuriTheme.colors.textPrimary)
+						Text("Snaps pillarboxed/stitched pages edge-to-edge or 2x focal zoom", style = MaterialTheme.typography.labelSmall, color = NemuriTheme.colors.textMuted)
+					}
+					Switch(
+						checked = uiState.isDoubleTapSmartZoom,
+						onCheckedChange = viewModel::setDoubleTapSmartZoom,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.cyan,
+						),
+					)
+				}
+
+				Text("Tap-Zone Layout", style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.cyan)
+				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+					ReaderTapZoneMode.entries.chunked(2).forEach { rowModes ->
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							rowModes.forEach { tz ->
+								val selected = uiState.tapZoneMode == tz
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(10.dp),
+									modifier = Modifier
+										.weight(1f)
+										.border(
+											1.dp,
+											if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+											RoundedCornerShape(10.dp),
+										)
+										.clip(RoundedCornerShape(10.dp))
+										.clickable { viewModel.setTapZoneMode(tz) },
+								) {
+									Text(
+										text = tz.label,
+										style = MaterialTheme.typography.labelSmall,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										textAlign = TextAlign.Center,
+										maxLines = 1,
+										modifier = Modifier.padding(vertical = 9.dp, horizontal = 6.dp),
+									)
+								}
+							}
+						}
+					}
+					Text(
+						text = uiState.tapZoneMode.description,
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
+					)
 				}
 
 				Row(
@@ -1261,9 +1722,9 @@ private fun ReaderSettingsModalSheet(
 						}
 						Text(
 							text = if (!uiState.isNeuralUpscaleSupported) {
-								"Available in GitHub builds with ONNX Runtime"
+								"Available in GitHub builds with native NPU/GPU/ONNX runtimes"
 							} else {
-								"256px tiled ONNX • Skips tall webtoons & Battery Saver • Hybrid with GPU Shaders"
+								"${uiState.activeNeuralDelegate} • Adaptive 256/512px tiled NPU/GPU/CPU • Skips >4096px webtoons & Battery Saver"
 							},
 							style = MaterialTheme.typography.labelSmall,
 							color = NemuriTheme.colors.textMuted,
@@ -1300,8 +1761,9 @@ private fun ReaderSettingsModalSheet(
 								Text(
 									text = when (accel) {
 										NeuralAccelerator.AUTO -> "Auto"
-										NeuralAccelerator.NNAPI -> "NPU / GPU"
-										NeuralAccelerator.XNNPACK -> "CPU"
+										NeuralAccelerator.NPU -> "NPU"
+										NeuralAccelerator.GPU -> "GPU"
+										NeuralAccelerator.CPU -> "CPU"
 									},
 									style = MaterialTheme.typography.labelSmall,
 									color = if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textSecondary,
@@ -1379,20 +1841,24 @@ private fun ReaderSettingsModalSheet(
 						}
 					}
 
-					if (uiState.neuralCacheBytes > 0L) {
-						Row(
-							modifier = Modifier.fillMaxWidth(),
-							horizontalArrangement = Arrangement.SpaceBetween,
-							verticalAlignment = Alignment.CenterVertically,
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.SpaceBetween,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Text(
+							text = "Upscale cache: ${String.format(java.util.Locale.US, "%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))} / 250 MB",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+						TextButton(
+							onClick = viewModel::clearNeuralCache,
+							enabled = uiState.neuralCacheBytes > 0L,
 						) {
 							Text(
-								text = "Upscale cache: ${String.format("%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))}",
-								style = MaterialTheme.typography.labelSmall,
-								color = NemuriTheme.colors.textMuted,
+								text = "Clear Upscale Cache",
+								color = if (uiState.neuralCacheBytes > 0L) NemuriTheme.colors.cyan else NemuriTheme.colors.textDim,
 							)
-							TextButton(onClick = viewModel::clearNeuralCache) {
-								Text("Clear Cache", color = NemuriTheme.colors.cyan)
-							}
 						}
 					}
 				}
@@ -1519,6 +1985,7 @@ private fun ReaderSettingsModalSheet(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderChallengeScreen(
 	title: String,
@@ -1526,6 +1993,7 @@ private fun ReaderChallengeScreen(
 	actionLabel: String,
 	onAction: () -> Unit,
 	onRetry: () -> Unit,
+	onFindAlternative: (() -> Unit)? = null,
 	onBack: () -> Unit,
 ) {
 	Column(
@@ -1540,17 +2008,34 @@ private fun ReaderChallengeScreen(
 		Spacer(modifier = Modifier.height(8.dp))
 		Text(message, style = MaterialTheme.typography.bodyMedium, color = NemuriTheme.colors.textMuted, textAlign = TextAlign.Center)
 		Spacer(modifier = Modifier.height(16.dp))
-		Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+		FlowRow(
+			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
 			Button(
 				onClick = onAction,
 				colors = ButtonDefaults.buttonColors(containerColor = NemuriTheme.colors.cyan, contentColor = NemuriTheme.colors.onCyan),
 			) {
 				Text(actionLabel)
 			}
-					TextButton(onClick = onRetry) { Text("Retry", color = NemuriTheme.colors.cyan) }
+			TextButton(onClick = onRetry) { Text("Retry", color = NemuriTheme.colors.cyan) }
+			if (onFindAlternative != null) {
+				TextButton(onClick = onFindAlternative) {
+					Text("Find Alternative", color = NemuriTheme.colors.textPrimary)
+				}
+			}
 			TextButton(onClick = onBack) { Text("Close", color = NemuriTheme.colors.textSecondary) }
 		}
 	}
+}
+
+private fun openMigrateFromReader(context: Context, mangaId: Long) {
+	if (mangaId == 0L) return
+	val intent = Intent(context, MainActivity::class.java)
+		.putExtra(EXTRA_OPEN_MIGRATE_MANGA_ID, mangaId)
+		.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+	context.startActivity(intent)
+	(context as? android.app.Activity)?.finish()
 }
 
 private data class AppliedShaderState(val key: Pair<ReaderShaderConfig, Float>?)

@@ -268,8 +268,26 @@ class LibraryViewModel @Inject constructor(
 		selectedIdsFlow.value = uiState.value.items.mapTo(HashSet()) { it.manga.id }
 	}
 
+	fun invertSelection() {
+		val allIds = uiState.value.items.map { it.manga.id }
+		val current = selectedIdsFlow.value
+		selectedIdsFlow.value = allIds.filterTo(HashSet()) { it !in current }
+	}
+
+	fun setSelection(ids: Set<Long>) {
+		selectedIdsFlow.value = ids
+	}
+
 	fun clearSelection() {
 		selectedIdsFlow.value = emptySet()
+	}
+
+	fun setPortraitColumns(columns: Int) {
+		settings.gridColumnsPortrait = columns.coerceIn(2, 6)
+	}
+
+	fun setLandscapeColumns(columns: Int) {
+		settings.gridColumnsLandscape = columns.coerceIn(4, 9)
 	}
 
 	fun createCategory(title: String) {
@@ -361,7 +379,17 @@ class LibraryViewModel @Inject constructor(
 		selectedIdsFlow.value = emptySet()
 		viewModelScope.launch(Dispatchers.IO) {
 			trackingRepository.clearUpdates(ids)
-			toastManager.show("Cleared new chapter badges")
+			toastManager.show("Marked ${ids.size} title(s) read")
+		}
+	}
+
+	fun markSelectedUnread() {
+		val ids = selectedIdsFlow.value.toSet()
+		if (ids.isEmpty()) return
+		selectedIdsFlow.value = emptySet()
+		viewModelScope.launch(Dispatchers.IO) {
+			historyRepository.delete(ids)
+			toastManager.show("Reset reading progress for ${ids.size} title(s)")
 		}
 	}
 

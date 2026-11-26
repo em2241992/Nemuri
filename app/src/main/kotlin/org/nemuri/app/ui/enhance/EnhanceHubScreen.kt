@@ -42,7 +42,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import org.nemuri.app.BuildConfig
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
+import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.settings.SettingsGroupCard
 import org.nemuri.app.ui.settings.SettingsRowDivider
 import org.nemuri.app.ui.settings.SettingsToggleRow
@@ -60,6 +62,7 @@ fun EnhanceHubScreen(
 	viewModel: EnhanceHubViewModel = viewModel(),
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val bottomPadding = rememberRootTabBottomPadding()
 
 	Column(modifier = Modifier.fillMaxSize()) {
 		NemuriTopSearchHeader(
@@ -71,7 +74,7 @@ fun EnhanceHubScreen(
 
 		LazyColumn(
 			modifier = Modifier.fillMaxSize(),
-			contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
+			contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
 			verticalArrangement = Arrangement.spacedBy(14.dp),
 		) {
 			item {
@@ -81,12 +84,32 @@ fun EnhanceHubScreen(
 					horizontalArrangement = Arrangement.SpaceBetween,
 				) {
 					Column {
-						Text(
-							text = "LIBRARY HEALTH & INSIGHTS",
-							style = MaterialTheme.typography.labelSmall,
-							fontWeight = FontWeight.Bold,
-							color = NemuriTheme.colors.cyan,
-						)
+						Row(
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							Text(
+								text = "LIBRARY HEALTH & INSIGHTS",
+								style = MaterialTheme.typography.labelSmall,
+								fontWeight = FontWeight.Bold,
+								color = NemuriTheme.colors.cyan,
+							)
+							if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("beta", ignoreCase = true)) {
+								Surface(
+									color = NemuriTheme.colors.amber.copy(alpha = 0.16f),
+									shape = RoundedCornerShape(999.dp),
+									border = BorderStroke(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.6f)),
+								) {
+									Text(
+										text = "BETA",
+										style = MaterialTheme.typography.labelSmall,
+										fontWeight = FontWeight.Bold,
+										color = NemuriTheme.colors.amber,
+										modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
+									)
+								}
+							}
+						}
 						Text(
 							text = "${uiState.libraryCount} saved titles monitored",
 							style = MaterialTheme.typography.bodySmall,
@@ -204,9 +227,48 @@ fun EnhanceHubScreen(
 					EnhanceToolCard(
 						icon = Icons.Default.GraphicEq,
 						title = "GPU Shaders & Neural 2x Upscaler",
-						subtitle = "Active: ${uiState.activeShaderLabel} (Anime4K, FSR 1.0, Waifu2x / Real-ESRGAN)",
+						subtitle = buildString {
+							append("Active: ${uiState.activeShaderLabel} (Anime4K, ArtCNN, FSR 1.0, SPAN / LiteRT)")
+							if (uiState.isNeuralUpscaleEnabled && uiState.activeNeuralDelegateLabel.isNotBlank()) {
+								append(" • ${uiState.activeNeuralDelegateLabel}")
+							}
+						},
 						onClick = onOpenReadingSettings,
 					)
+					Surface(
+						color = NemuriTheme.colors.card,
+						shape = RoundedCornerShape(14.dp),
+						border = BorderStroke(1.dp, NemuriTheme.colors.border),
+						modifier = Modifier.fillMaxWidth(),
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+								Text(
+									text = "Upscale Disk Cache (WebP)",
+									style = MaterialTheme.typography.labelLarge,
+									color = NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = "${String.format(java.util.Locale.US, "%.1f MB", uiState.neuralCacheBytes / (1024f * 1024f))} / 250.0 MB used",
+									style = MaterialTheme.typography.bodySmall,
+									color = NemuriTheme.colors.textMuted,
+								)
+							}
+							androidx.compose.material3.TextButton(
+								onClick = viewModel::clearUpscaleCache,
+								enabled = uiState.neuralCacheBytes > 0L,
+							) {
+								Text(
+									text = "Clear Upscale Cache",
+									color = if (uiState.neuralCacheBytes > 0L) NemuriTheme.colors.cyan else NemuriTheme.colors.textDim,
+								)
+							}
+						}
+					}
 				}
 			}
 

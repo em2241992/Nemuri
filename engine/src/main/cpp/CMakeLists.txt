@@ -9,7 +9,7 @@ add_compile_options(
 	-ffile-prefix-map=${CMAKE_BINARY_DIR}=.
 	-ffile-prefix-map=${ANDROID_NDK}=ndk
 )
-add_link_options(-Wl,--build-id=none)
+add_link_options(-Wl,--build-id=none -Wl,-z,max-page-size=16384)
 
 # libjxl only takes its fast NEON sRGB path for HWY_NEON, which is turned off below; enable it for
 # NEON_WITHOUT_AES too. The patched copy goes in the build folder (the submodule stays untouched) and
@@ -50,4 +50,4 @@ endforeach()
 add_library(jxldec SHARED jxl_jni.cpp)
 target_compile_options(jxldec PRIVATE -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables -fomit-frame-pointer)
 target_link_libraries(jxldec PRIVATE jxl_dec jxl_threads jxl_cms jnigraphics)
-target_link_options(jxldec PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--strip-all)
+target_link_options(jxldec PRIVATE -Wl,-z,max-page-size=16384 -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--strip-all)

@@ -3,6 +3,7 @@ package org.nemuri.app.reader
 import android.content.Context
 import android.graphics.Rect
 import android.net.Uri
+import android.util.Size
 import androidx.compose.runtime.Immutable
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import org.koitharu.kotatsu.ai.domain.LocalLlmClient
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
 import org.koitharu.kotatsu.bookmarks.domain.BookmarksRepository
 import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
@@ -46,6 +48,7 @@ import org.koitharu.kotatsu.core.parser.MangaDataRepository
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
 import org.koitharu.kotatsu.core.util.ext.isZipUri
 import org.koitharu.kotatsu.details.data.MangaDetails
@@ -54,6 +57,7 @@ import org.koitharu.kotatsu.history.data.HistoryRepository
 import org.koitharu.kotatsu.local.data.isEpub
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaChapter
+import org.koitharu.kotatsu.parsers.model.MangaPage
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
 import org.koitharu.kotatsu.reader.domain.ChaptersLoader
 import org.koitharu.kotatsu.reader.domain.DetectReaderModeUseCase
@@ -61,12 +65,15 @@ import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
 import org.koitharu.kotatsu.reader.domain.NeuralModelDownloadState
 import org.koitharu.kotatsu.reader.domain.NeuralUpscaleModelManager
 import org.koitharu.kotatsu.reader.domain.PageLoader
+import org.koitharu.kotatsu.reader.domain.PageStitcher
 import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.ui.ReaderState
 import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
 import org.koitharu.kotatsu.stats.domain.StatsCollector
+import org.nemuri.app.browser.WebViewChallengeAction
+import org.nemuri.app.browser.toWebViewChallengeAction
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
 import org.nemuri.app.ui.settings.NeuralModelUiItem
@@ -130,10 +137,20 @@ data class ReaderUiState(
 	val selectedNeuralModelId: String = "",
 	val hasReadyNeuralModel: Boolean = false,
 	val activeNeuralModelLabel: String = "",
+	val activeNeuralDelegate: String = "Idle (Ready)",
 	val neuralCatalog: List<NeuralModelUiItem> = emptyList(),
 	val neuralDownloadState: NeuralModelDownloadState = NeuralModelDownloadState(),
 	val neuralCacheBytes: Long = 0L,
 	val neuralRevision: Int = 0,
+	val isSeamlessStitchEnabled: Boolean = true,
+	val tapZoneMode: ReaderTapZoneMode = ReaderTapZoneMode.DEFAULT,
+	val isDoubleTapSmartZoom: Boolean = true,
+	val showPageNumbers: Boolean = false,
+	val chapterStartPageNumber: Int = 1,
+	val chapterEndPageNumber: Int = 1,
+	val chapterTotalPages: Int = 0,
+	val chapterStartGlobalIndex: Int = 0,
+	val chapterLogicalCount: Int = 0,
 	val epubTheme: String = "system",
 	val epubFontSize: Int = 100,
 	val epubLineHeight: Int = 160,
@@ -144,6 +161,7 @@ data class ReaderUiState(
 	val errorMessage: String? = null,
 	val pendingCloudFlare: CloudFlareProtectedException? = null,
 	val pendingInteractive: InteractiveActionRequiredException? = null,
+	val pendingChallengeUrl: String? = null,
 )
 
 @HiltViewModel
@@ -156,11 +174,13 @@ class ReaderViewModel @Inject constructor(
 	private val bookmarksRepository: BookmarksRepository,
 	private val chaptersLoader: ChaptersLoader,
 	private val pageLoader: PageLoader,
+	private val pageStitcher: PageStitcher,
 	private val pageUpscaleEngine: PageUpscaleEngine,
 	private val upscaleModelManager: NeuralUpscaleModelManager,
 	private val detectReaderModeUseCase: DetectReaderModeUseCase,
 	private val mangaRepositoryFactory: MangaRepository.Factory,
 	private val statsCollector: StatsCollector,
+	private val localLlmClient: LocalLlmClient,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
@@ -186,6 +206,10 @@ class ReaderViewModel @Inject constructor(
 			isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
 			neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
 			selectedNeuralModelId = settings.neuralUpscaleModelId,
+			isSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
+			tapZoneMode = ReaderTapZoneMode.fromKey(settings.readerTapZoneMode),
+			isDoubleTapSmartZoom = settings.isReaderDoubleTapFill,
+			showPageNumbers = settings.isPagesNumbersEnabled,
 			epubTheme = settings.epubTheme,
 			epubFontSize = settings.epubFontSize,
 			epubLineHeight = settings.epubLineHeight,
@@ -205,9 +229,26 @@ class ReaderViewModel @Inject constructor(
 	private val bookmarkTargetFlow = MutableStateFlow<Triple<Manga, Long, Int>?>(null)
 	private var effectiveIncognito: Boolean = extraIncognito || settings.isIncognitoModeEnabled
 	private var latestChapterPageIndex: Int = 0
+	private var latestChapterEndPageIndex: Int = 0
 	private var latestScrollOffset: Int = 0
+	private val rawPagesByChapter = java.util.concurrent.ConcurrentHashMap<Long, List<MangaPage>>()
+	private val pageBoundsCache = java.util.concurrent.ConcurrentHashMap<Long, Size>()
 
 	init {
+		// RAM/GPU Mutex Handoff: release any resident ~1.5 GB LiteRT-LM model immediately on Reader start.
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching { localLlmClient.unloadNow() }
+		}
+		viewModelScope.launch {
+			pageUpscaleEngine.activeDelegateLabel.collect { label ->
+				_uiState.update { it.copy(activeNeuralDelegate = label) }
+			}
+		}
+		viewModelScope.launch {
+			pageUpscaleEngine.cacheBytesFlow.collect { bytes ->
+				_uiState.update { it.copy(neuralCacheBytes = bytes) }
+			}
+		}
 		viewModelScope.launch {
 			combine(
 				upscaleModelManager.downloadState,
@@ -264,10 +305,36 @@ class ReaderViewModel @Inject constructor(
 
 	fun setReaderMode(mode: ReaderMode) {
 		val manga = _uiState.value.manga ?: return
+		val anchorRawIndex = _uiState.value.pages.getOrNull(_uiState.value.currentPageIndex)?.index ?: latestChapterPageIndex
 		_uiState.update { it.copy(readerMode = mode) }
 		viewModelScope.launch(Dispatchers.IO) {
 			mangaDataRepository.saveReaderMode(manga, mode)
+			regroupAllLoadedChapters(isWebtoon = mode == ReaderMode.WEBTOON, anchorChapterId = _uiState.value.currentChapterId, anchorRawIndex = anchorRawIndex)
 		}
+	}
+
+	fun setSeamlessStitchEnabled(enabled: Boolean) {
+		settings.isReaderSeamlessStitchEnabled = enabled
+		val anchorChapterId = _uiState.value.currentChapterId
+		val anchorRawIndex = _uiState.value.pages.getOrNull(_uiState.value.currentPageIndex)?.index ?: latestChapterPageIndex
+		_uiState.update { it.copy(isSeamlessStitchEnabled = enabled) }
+		viewModelScope.launch(Dispatchers.IO) {
+			regroupAllLoadedChapters(
+				isWebtoon = _uiState.value.readerMode == ReaderMode.WEBTOON,
+				anchorChapterId = anchorChapterId,
+				anchorRawIndex = anchorRawIndex,
+			)
+		}
+	}
+
+	fun setTapZoneMode(mode: ReaderTapZoneMode) {
+		settings.readerTapZoneMode = mode.key
+		_uiState.update { it.copy(tapZoneMode = mode) }
+	}
+
+	fun setDoubleTapSmartZoom(enabled: Boolean) {
+		settings.isReaderDoubleTapFill = enabled
+		_uiState.update { it.copy(isDoubleTapSmartZoom = enabled) }
 	}
 
 	fun onMangaPageSelected(globalIndex: Int) {
@@ -275,8 +342,10 @@ class ReaderViewModel @Inject constructor(
 		val page = pages.getOrNull(globalIndex) ?: return
 		val details = activeDetails ?: return
 		val chapterPages = pages.filter { it.chapterId == page.chapterId }
-		val inChapterIdx = chapterPages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)
-		latestChapterPageIndex = inChapterIdx
+		val chFirstGlobal = pages.indexOfFirst { it.chapterId == page.chapterId }.coerceAtLeast(0)
+		val rawTotal = rawPagesByChapter[page.chapterId]?.size ?: chapterPages.size
+		latestChapterPageIndex = page.index
+		latestChapterEndPageIndex = page.endIndex
 		latestScrollOffset = 0
 
 		val switchedChapter = page.chapterId != activeChapter?.id
@@ -287,6 +356,12 @@ class ReaderViewModel @Inject constructor(
 				activeChapter = ch
 			}
 		}
+
+		// Cancel stale neural lookahead jobs behind or far ahead of the current page immediately.
+		pageUpscaleEngine.cancelStaleLookahead(
+			activeIndex = globalIndex,
+			keepRange = (globalIndex - 1)..(globalIndex + 2),
+		)
 
 		val chIdx = activeBranchChapters.indexOfFirst { it.id == page.chapterId }
 		_uiState.update { state ->
@@ -300,6 +375,11 @@ class ReaderViewModel @Inject constructor(
 				},
 				hasPrevChapter = chIdx > 0,
 				hasNextChapter = chIdx in 0 until activeBranchChapters.lastIndex,
+				chapterStartPageNumber = (page.index + 1).coerceIn(1, rawTotal.coerceAtLeast(1)),
+				chapterEndPageNumber = (page.endIndex + 1).coerceIn(1, rawTotal.coerceAtLeast(1)),
+				chapterTotalPages = rawTotal,
+				chapterStartGlobalIndex = chFirstGlobal,
+				chapterLogicalCount = chapterPages.size,
 			)
 		}
 		observeCurrentBookmark()
@@ -312,23 +392,34 @@ class ReaderViewModel @Inject constructor(
 		if (!stateHasChapterAfter(pages, globalIndex) && chIdx in 0 until activeBranchChapters.lastIndex) {
 			viewModelScope.launch(Dispatchers.IO) {
 				if (chaptersLoader.loadPrevNextChapter(details, page.chapterId, isNext = true)) {
-					val updated = chaptersLoader.snapshot().distinctBy { it.id }
-					_uiState.update { it.copy(pages = updated) }
+					val rawNext = chaptersLoader.snapshot().distinctBy { it.id }
+					val isWebtoonNow = _uiState.value.readerMode == ReaderMode.WEBTOON
+					val grouped = buildAllLoadedChaptersGrouped(rawNext, isWebtoonNow)
+					_uiState.update { cur ->
+						val curChId = cur.currentChapterId
+						val curChCount = grouped.count { it.chapterId == curChId }
+						val curChStart = grouped.indexOfFirst { it.chapterId == curChId }.coerceAtLeast(0)
+						cur.copy(
+							pages = grouped,
+							chapterStartGlobalIndex = curChStart,
+							chapterLogicalCount = curChCount,
+						)
+					}
 				}
 			}
 		}
 
 		scheduleProgressSave(
 			chapterId = page.chapterId,
-			page = inChapterIdx,
+			page = page.index,
 			scroll = 0,
-			inChapterFraction = if (chapterPages.isNotEmpty()) (inChapterIdx + 1f) / chapterPages.size else 0f,
+			inChapterFraction = if (rawTotal > 0) (page.endIndex + 1f) / rawTotal else 0f,
 		)
 		statsCollector.onMangaPageChanged(
 			mangaId = details.id,
 			chapterId = page.chapterId,
-			pageIndex = inChapterIdx,
-			totalPages = chapterPages.size,
+			pageIndex = page.endIndex,
+			totalPages = rawTotal.coerceAtLeast(1),
 			isIncognito = effectiveIncognito || isPeek,
 		)
 	}
@@ -502,11 +593,18 @@ class ReaderViewModel @Inject constructor(
 		}
 		if (nextPages.isEmpty()) return
 		neuralPreloadJob = viewModelScope.launch(Dispatchers.IO) {
-			for (nextPage in nextPages) {
+			for (offset in 1..2) {
+				val targetIdx = globalIndex + offset
+				val nextPage = pages.getOrNull(targetIdx) ?: continue
+				if (nextPage.chapterId != currentChapterId) continue
 				runCatchingCancellable {
-					val uri = pageLoader.loadPage(nextPage.toMangaPage(), false)
-					val bounds = pageLoader.getImageBounds(uri)
-					pageUpscaleEngine.upscalePageIfEnabled(uri, bounds, isWebtoon = false)
+					val (resolvedUri, resolvedBounds) = resolveLogicalPageUri(nextPage, force = false)
+					pageUpscaleEngine.upscalePageIfEnabled(
+						sourceUri = resolvedUri,
+						cropBounds = resolvedBounds,
+						isWebtoon = false,
+						pageIndex = targetIdx,
+					)
 				}
 			}
 		}
@@ -526,6 +624,13 @@ class ReaderViewModel @Inject constructor(
 			if (mangaId != null) {
 				statsCollector.flushSessionNow(mangaId)
 			}
+		}
+	}
+
+	fun releaseUpscalerOnClose() {
+		neuralPreloadJob?.cancel()
+		CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+			pageUpscaleEngine.releaseSession()
 		}
 	}
 
@@ -617,19 +722,19 @@ class ReaderViewModel @Inject constructor(
 	suspend fun loadRawPageImage(page: ReaderPage): Result<Pair<Uri, Rect?>> =
 		withContext(Dispatchers.IO) {
 			runCatchingCancellable {
-				val uri = pageLoader.loadPage(page.toMangaPage(), false)
-				val bounds = pageLoader.getImageBounds(uri)
-				uri to bounds
+				resolveLogicalPageUri(page, force = false)
 			}
 		}
 
 	suspend fun loadPageImage(page: ReaderPage, force: Boolean = false): Result<Pair<Uri, Rect?>> =
 		withContext(Dispatchers.IO) {
 			runCatchingCancellable {
-				val uri = pageLoader.loadPage(page.toMangaPage(), force)
-				val bounds = pageLoader.getImageBounds(uri)
+				val (uri, bounds) = resolveLogicalPageUri(page, force = force)
 				val isWebtoon = _uiState.value.readerMode == ReaderMode.WEBTOON
-				val result = pageUpscaleEngine.upscalePageIfEnabled(uri, bounds, isWebtoon)
+				val pageIdx = _uiState.value.pages.indexOfFirst { it.id == page.id }.let {
+					if (it >= 0) it else page.index
+				}
+				val result = pageUpscaleEngine.upscalePageIfEnabled(uri, bounds, isWebtoon, pageIndex = pageIdx)
 				_uiState.update { it.copy(neuralCacheBytes = pageUpscaleEngine.computeCacheSizeBytes()) }
 				result
 			}.onFailure { err ->
@@ -639,6 +744,123 @@ class ReaderViewModel @Inject constructor(
 				}
 			}
 		}
+
+	private suspend fun resolveLogicalPageUri(
+		page: ReaderPage,
+		force: Boolean,
+	): Pair<Uri, Rect?> {
+		if (page.isStitched && settings.isReaderSeamlessStitchEnabled) {
+			val sliceUris = page.stitchedPages.map { slice ->
+				val u = pageLoader.loadPage(slice, force)
+				pageLoader.getImageBounds(u)?.let { r ->
+					pageBoundsCache[slice.id] = Size(r.width(), r.height())
+				}
+				u
+			}
+			val stitched = pageStitcher.compositeSlices(
+				sliceUris = sliceUris,
+				cacheKeySeed = "${page.chapterId}_${page.index}_${page.endIndex}",
+			)
+			if (stitched != null) {
+				val (stitchedUri, size) = stitched
+				return stitchedUri to Rect(0, 0, size.width, size.height)
+			}
+		}
+		val uri = pageLoader.loadPage(page.toMangaPage(), force)
+		val bounds = pageLoader.getImageBounds(uri)
+		if (bounds != null && !bounds.isEmpty) {
+			val size = Size(bounds.width(), bounds.height())
+			val prevSize = pageBoundsCache.put(page.id, size)
+			if (prevSize == null && settings.isReaderSeamlessStitchEnabled) {
+				maybeStitchDiscoveredSliver(page.chapterId, size)
+			}
+		}
+		return uri to bounds
+	}
+
+	private fun maybeStitchDiscoveredSliver(chapterId: Long, newlyDiscoveredSize: Size) {
+		val isSliverOrSplit = newlyDiscoveredSize.height < newlyDiscoveredSize.width * 1.15f
+		if (!isSliverOrSplit) return
+		val rawList = rawPagesByChapter[chapterId] ?: return
+		// Re-group asynchronously only when all adjacent slices around a sliver now have cached bounds
+		viewModelScope.launch(Dispatchers.IO) {
+			val isWebtoonNow = _uiState.value.readerMode == ReaderMode.WEBTOON
+			val newChapterPages = groupChapterFromCachedBounds(chapterId, rawList, isWebtoonNow)
+			val currentPages = _uiState.value.pages
+			val currentChapterSlice = currentPages.filter { it.chapterId == chapterId }
+			if (newChapterPages.size < currentChapterSlice.size) {
+				val anchorCh = _uiState.value.currentChapterId
+				val anchorRaw = _uiState.value.pages.getOrNull(_uiState.value.currentPageIndex)?.index ?: latestChapterPageIndex
+				regroupAllLoadedChapters(isWebtoonNow, anchorCh, anchorRaw)
+			}
+		}
+	}
+
+	private suspend fun groupChapterFromCachedBounds(
+		chapterId: Long,
+		rawPages: List<MangaPage>,
+		isWebtoon: Boolean,
+	): List<ReaderPage> {
+		if (!settings.isReaderSeamlessStitchEnabled || rawPages.size <= 1) {
+			return rawPages.mapIndexed { idx, p -> ReaderPage(p, idx, chapterId) }
+		}
+		return pageStitcher.groupChapterSlices(
+			chapterId = chapterId,
+			rawPages = rawPages,
+			isWebtoon = isWebtoon,
+		) { slice ->
+			pageBoundsCache[slice.id]?.let { return@groupChapterSlices it }
+			val peeked = pageLoader.peekLocalOrCachedUri(slice) ?: return@groupChapterSlices null
+			val r = pageLoader.getImageBounds(peeked) ?: return@groupChapterSlices null
+			Size(r.width(), r.height()).also { pageBoundsCache[slice.id] = it }
+		}
+	}
+
+	private suspend fun buildAllLoadedChaptersGrouped(
+		rawSnapshot: List<ReaderPage>,
+		isWebtoon: Boolean,
+	): List<ReaderPage> {
+		val result = ArrayList<ReaderPage>(rawSnapshot.size)
+		val byChapter = rawSnapshot.groupBy { it.chapterId }
+		for ((chId, pages) in byChapter) {
+			val rawList = rawPagesByChapter.getOrPut(chId) { pages.map { it.toMangaPage() } }
+			result += groupChapterFromCachedBounds(chId, rawList, isWebtoon)
+		}
+		return result
+	}
+
+	private suspend fun regroupAllLoadedChapters(
+		isWebtoon: Boolean,
+		anchorChapterId: Long,
+		anchorRawIndex: Int,
+	) {
+		val snapshot = chaptersLoader.snapshot().distinctBy { it.id }
+		if (snapshot.isEmpty()) return
+		val grouped = buildAllLoadedChaptersGrouped(snapshot, isWebtoon)
+		val newGlobalIdx = grouped.indexOfFirst {
+			it.chapterId == anchorChapterId && it.containsRawIndex(anchorRawIndex)
+		}.let { found ->
+			if (found >= 0) found else grouped.indexOfFirst { it.chapterId == anchorChapterId }.coerceAtLeast(0)
+		}
+		val activePage = grouped.getOrNull(newGlobalIdx)
+		val rawTotal = rawPagesByChapter[anchorChapterId]?.size ?: grouped.count { it.chapterId == anchorChapterId }
+		val chStartGlobal = grouped.indexOfFirst { it.chapterId == anchorChapterId }.coerceAtLeast(0)
+		val chLogicalCount = grouped.count { it.chapterId == anchorChapterId }
+		latestChapterPageIndex = activePage?.index ?: anchorRawIndex
+		latestChapterEndPageIndex = activePage?.endIndex ?: anchorRawIndex
+		_uiState.update { state ->
+			state.copy(
+				pages = grouped,
+				currentPageIndex = newGlobalIdx,
+				pageJumpToken = state.pageJumpToken + 1,
+				chapterStartPageNumber = ((activePage?.index ?: 0) + 1).coerceIn(1, rawTotal.coerceAtLeast(1)),
+				chapterEndPageNumber = ((activePage?.endIndex ?: 0) + 1).coerceIn(1, rawTotal.coerceAtLeast(1)),
+				chapterTotalPages = rawTotal,
+				chapterStartGlobalIndex = chStartGlobal,
+				chapterLogicalCount = chLogicalCount,
+			)
+		}
+	}
 
 	fun flushProgress() {
 		viewModelScope.launch(Dispatchers.IO + NonCancellable) {
@@ -655,8 +877,8 @@ class ReaderViewModel @Inject constructor(
 			val total = state.novelBlocks.size.coerceAtLeast(1)
 			(state.novelCurrentBlockIndex + 1f) / total
 		} else {
-			val chPages = state.pages.filter { it.chapterId == chapterId }
-			if (chPages.isNotEmpty()) (latestChapterPageIndex + 1f) / chPages.size else 0f
+			val rawTotal = rawPagesByChapter[chapterId]?.size ?: state.pages.count { it.chapterId == chapterId }
+			if (rawTotal > 0) (latestChapterEndPageIndex + 1f) / rawTotal else 0f
 		}
 		val percent = computeOverallPercent(chapterId, fraction)
 		runCatching {
@@ -691,6 +913,7 @@ class ReaderViewModel @Inject constructor(
 					errorMessage = null,
 					pendingCloudFlare = null,
 					pendingInteractive = null,
+					pendingChallengeUrl = null,
 				)
 			}
 
@@ -758,9 +981,17 @@ class ReaderViewModel @Inject constructor(
 					)
 				}
 			} catch (e: Throwable) {
+				val challenge = e.toWebViewChallengeAction(
+					fallbackUrl = cachedManga?.publicUrl ?: activeDetails?.sourceManga?.publicUrl,
+					fallbackSource = cachedManga?.source ?: activeDetails?.sourceManga?.source ?: org.koitharu.kotatsu.core.model.UnknownMangaSource,
+					title = cachedManga?.title ?: activeDetails?.toManga()?.title,
+				)
 				_uiState.update {
 					it.copy(
 						isLoading = false,
+						pendingCloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
+						pendingInteractive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
+						pendingChallengeUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
 						errorMessage = e.getDisplayMessage(context.resources),
 					)
 				}
@@ -801,6 +1032,7 @@ class ReaderViewModel @Inject constructor(
 					errorMessage = null,
 					pendingCloudFlare = null,
 					pendingInteractive = null,
+					pendingChallengeUrl = null,
 				)
 			}
 
@@ -833,15 +1065,26 @@ class ReaderViewModel @Inject constructor(
 						?: detectReaderModeUseCase(manga, initialState)
 					chaptersLoader.init(details)
 					val loadedOk = chaptersLoader.loadSingleChapter(chapter.id)
-					val snapshot = chaptersLoader.snapshot().distinctBy { it.id }
-					if (!loadedOk || snapshot.isEmpty()) {
+					val rawSnapshot = chaptersLoader.snapshot().distinctBy { it.id }
+					if (!loadedOk || rawSnapshot.isEmpty()) {
 						error("This chapter has no readable pages.")
 					}
+					val rawChapterList = rawSnapshot.filter { it.chapterId == chapter.id }.map { it.toMangaPage() }
+					rawPagesByChapter[chapter.id] = rawChapterList
+					val snapshot = buildAllLoadedChaptersGrouped(rawSnapshot, isWebtoon = resolvedMode == ReaderMode.WEBTOON)
+
 					val firstIndexOfChapter = snapshot.indexOfFirst { it.chapterId == chapter.id }.coerceAtLeast(0)
-					val chapterPagesCount = snapshot.count { it.chapterId == chapter.id }.coerceAtLeast(1)
-					val clampedInChapter = targetPage.coerceIn(0, chapterPagesCount - 1)
-					val globalIndex = (firstIndexOfChapter + clampedInChapter).coerceIn(0, snapshot.lastIndex)
-					latestChapterPageIndex = clampedInChapter
+					val chapterLogicalCount = snapshot.count { it.chapterId == chapter.id }.coerceAtLeast(1)
+					val rawTotal = rawChapterList.size.coerceAtLeast(1)
+					val clampedRawTarget = targetPage.coerceIn(0, rawTotal - 1)
+					val globalIndex = snapshot.indexOfFirst {
+						it.chapterId == chapter.id && it.containsRawIndex(clampedRawTarget)
+					}.let { found ->
+						if (found >= 0) found else firstIndexOfChapter
+					}.coerceIn(0, snapshot.lastIndex)
+					val activePage = snapshot[globalIndex]
+					latestChapterPageIndex = activePage.index
+					latestChapterEndPageIndex = activePage.endIndex
 					latestScrollOffset = targetScroll
 
 					_uiState.update {
@@ -850,6 +1093,11 @@ class ReaderViewModel @Inject constructor(
 							pages = snapshot,
 							currentPageIndex = globalIndex,
 							pageJumpToken = it.pageJumpToken + 1,
+							chapterStartPageNumber = (activePage.index + 1).coerceIn(1, rawTotal),
+							chapterEndPageNumber = (activePage.endIndex + 1).coerceIn(1, rawTotal),
+							chapterTotalPages = rawTotal,
+							chapterStartGlobalIndex = firstIndexOfChapter,
+							chapterLogicalCount = chapterLogicalCount,
 							isLoading = false,
 							isChapterLoading = false,
 						)
@@ -880,10 +1128,18 @@ class ReaderViewModel @Inject constructor(
 					)
 				}
 			} catch (e: Throwable) {
+				val challenge = e.toWebViewChallengeAction(
+					fallbackUrl = manga.publicUrl,
+					fallbackSource = manga.source,
+					title = manga.title,
+				)
 				_uiState.update {
 					it.copy(
 						isLoading = false,
 						isChapterLoading = false,
+						pendingCloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
+						pendingInteractive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
+						pendingChallengeUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
 						errorMessage = e.getDisplayMessage(context.resources),
 					)
 				}

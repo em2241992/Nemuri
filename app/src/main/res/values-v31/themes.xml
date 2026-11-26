@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<style name="Theme.Nemuri" parent="Theme.Material3.Dark.NoActionBar">
+		<item name="android:windowBackground">#0B0F17</item>
+		<item name="android:statusBarColor">#0B0F17</item>
+		<item name="android:navigationBarColor">#0B0F17</item>
+		<item name="android:windowSplashScreenBackground">#0B0F17</item>
+		<item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_emblem</item>
+		<item name="android:windowSplashScreenIconBackgroundColor">#0B0F17</item>
+	</style>
+</resources>

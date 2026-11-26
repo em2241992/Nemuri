@@ -12,6 +12,9 @@ enum class ColorScheme(
 
 	DEFAULT(R.string.theme_name_totoro),
 	EXPRESSIVE(R.string.theme_name_expressive),
+	YORHA(R.string.theme_name_yorha),
+	KYOTO_WASHI(R.string.theme_name_kyoto_washi),
+	SUIBOKUGA(R.string.theme_name_suibokuga),
 	MIKU(R.string.theme_name_miku),
 	RENA(R.string.theme_name_asuka),
 	FROG(R.string.theme_name_mion),

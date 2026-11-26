@@ -1,6 +1,7 @@
 package org.koitharu.kotatsu.favourites.data
 
 import android.database.DatabaseUtils.sqlEscapeString
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -61,6 +62,25 @@ abstract class FavouritesDao : MangaQueryBuilder.ConditionCallback {
 	@Transaction
 	@Query("SELECT * FROM favourites WHERE deleted_at = 0 AND manga_id IN (:ids)")
 	abstract suspend fun findByIds(ids: Collection<Long>): List<FavouriteManga>
+
+	@Query(
+		"SELECT manga.manga_id AS manga_id, manga.title AS title, manga.alt_title AS alt_title, " +
+			"manga.url AS url, manga.source AS source, manga.source_title AS source_title " +
+			"FROM favourites INNER JOIN manga ON manga.manga_id = favourites.manga_id " +
+			"WHERE favourites.deleted_at = 0 " +
+			"GROUP BY favourites.manga_id " +
+			"ORDER BY MAX(favourites.created_at) DESC",
+	)
+	abstract suspend fun findDuplicateSeeds(): List<DuplicateMangaSeed>
+
+	data class DuplicateMangaSeed(
+		@ColumnInfo(name = "manga_id") val mangaId: Long,
+		@ColumnInfo(name = "title") val title: String,
+		@ColumnInfo(name = "alt_title") val altTitle: String?,
+		@ColumnInfo(name = "url") val url: String,
+		@ColumnInfo(name = "source") val source: String,
+		@ColumnInfo(name = "source_title") val sourceTitle: String?,
+	)
 
 	@Transaction
 	@Query("SELECT DISTINCT manga.* FROM favourites LEFT JOIN manga ON manga.manga_id = favourites.manga_id WHERE favourites.deleted_at = 0 AND (manga.author LIKE :query) LIMIT :limit")

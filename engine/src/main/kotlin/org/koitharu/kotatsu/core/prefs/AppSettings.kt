@@ -197,6 +197,85 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getInt(KEY_GRID_SIZE, 100)
 		set(value) = prefs.edit { putInt(KEY_GRID_SIZE, value) }
 
+	var mangaCardStyle: MangaCardStyle
+		get() {
+			val raw = prefs.getString(KEY_MANGA_CARD_STYLE, null)
+			if (raw != null) return MangaCardStyle.fromKey(raw)
+			return if (isTitleOverCover) MangaCardStyle.COMPACT else MangaCardStyle.COMFORTABLE
+		}
+		set(value) = prefs.edit {
+			putString(KEY_MANGA_CARD_STYLE, value.key)
+			putBoolean(KEY_TITLE_OVER_COVER, value == MangaCardStyle.COMPACT)
+		}
+
+	var gridColumnsPortrait: Int
+		get() {
+			if (prefs.contains(KEY_GRID_COLUMNS_PORTRAIT)) {
+				return prefs.getInt(KEY_GRID_COLUMNS_PORTRAIT, 3).coerceIn(2, 6)
+			}
+			val fallback = when {
+				gridSize <= 75 -> 4
+				gridSize >= 125 -> 2
+				else -> 3
+			}
+			return fallback.coerceIn(2, 6)
+		}
+		set(value) = prefs.edit { putInt(KEY_GRID_COLUMNS_PORTRAIT, value.coerceIn(2, 6)) }
+
+	var gridColumnsLandscape: Int
+		get() = prefs.getInt(KEY_GRID_COLUMNS_LANDSCAPE, 5).coerceIn(4, 9)
+		set(value) = prefs.edit { putInt(KEY_GRID_COLUMNS_LANDSCAPE, value.coerceIn(4, 9)) }
+
+	var cardCornerRadiusDp: Int
+		get() = prefs.getInt(KEY_CARD_CORNER_RADIUS_DP, 14).coerceIn(0, 24)
+		set(value) = prefs.edit { putInt(KEY_CARD_CORNER_RADIUS_DP, value.coerceIn(0, 24)) }
+
+	var gridGutterDensity: GridGutterDensity
+		get() = GridGutterDensity.fromKey(prefs.getString(KEY_GRID_GUTTER_DENSITY, null))
+		set(value) = prefs.edit {
+			putString(KEY_GRID_GUTTER_DENSITY, value.key)
+			putBoolean(KEY_GRID_SPACING_INCREASED, value == GridGutterDensity.RELAXED)
+		}
+
+	var coverAspectRatio: CoverAspectRatio
+		get() = CoverAspectRatio.fromKey(prefs.getString(KEY_COVER_ASPECT_RATIO, null))
+		set(value) = prefs.edit { putString(KEY_COVER_ASPECT_RATIO, value.key) }
+
+	var showUnreadBadge: Boolean
+		get() = prefs.getBoolean(KEY_BADGE_UNREAD, true)
+		set(value) = prefs.edit { putBoolean(KEY_BADGE_UNREAD, value) }
+
+	var showDownloadedBadge: Boolean
+		get() = prefs.getBoolean(KEY_BADGE_DOWNLOADED, true)
+		set(value) = prefs.edit { putBoolean(KEY_BADGE_DOWNLOADED, value) }
+
+	var showSourceBadge: Boolean
+		get() = prefs.getBoolean(KEY_BADGE_SOURCE, true)
+		set(value) = prefs.edit { putBoolean(KEY_BADGE_SOURCE, value) }
+
+	var showBottomProgressBar: Boolean
+		get() = prefs.getBoolean(KEY_BADGE_PROGRESS_BAR, true)
+		set(value) = prefs.edit { putBoolean(KEY_BADGE_PROGRESS_BAR, value) }
+
+	var isNavBarCompact: Boolean
+		get() = prefs.getBoolean(KEY_NAV_COMPACT_HEIGHT, false)
+		set(value) = prefs.edit { putBoolean(KEY_NAV_COMPACT_HEIGHT, value) }
+
+	var navLabelVisibility: NavLabelVisibility
+		get() {
+			val raw = prefs.getString(KEY_NAV_LABEL_VISIBILITY, null)
+			if (raw != null) return NavLabelVisibility.fromKey(raw)
+			return if (isNavLabelsVisible) NavLabelVisibility.ALWAYS else NavLabelVisibility.HIDDEN
+		}
+		set(value) = prefs.edit {
+			putString(KEY_NAV_LABEL_VISIBILITY, value.key)
+			putBoolean(KEY_NAV_LABELS, value != NavLabelVisibility.HIDDEN)
+		}
+
+	var isSwipeActionsEnabled: Boolean
+		get() = prefs.getBoolean(KEY_SWIPE_ACTIONS_ENABLED, true)
+		set(value) = prefs.edit { putBoolean(KEY_SWIPE_ACTIONS_ENABLED, value) }
+
 	// Global UI scale as a percent (85 = smaller, 100 = default, 115 = larger). Applied by overriding
 	// densityDpi in BaseActivity.attachBaseContext, so it scales everything. It sits on top of the
 	// automatic per-screen baseline there, so 100 means "the reference look" on every device.
@@ -478,8 +557,18 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 	val isReaderWideSplitManual: Boolean
 		get() = prefs.getBoolean(KEY_READER_WIDE_SPLIT_MANUAL, true)
 
-	val isReaderDoubleTapFill: Boolean
-		get() = prefs.getBoolean(KEY_READER_DOUBLE_TAP_FILL, false)
+	var isReaderDoubleTapFill: Boolean
+		get() = prefs.getBoolean(KEY_READER_DOUBLE_TAP_FILL, true)
+		set(value) = prefs.edit { putBoolean(KEY_READER_DOUBLE_TAP_FILL, value) }
+
+	var isReaderSeamlessStitchEnabled: Boolean
+		get() = prefs.getBoolean(KEY_READER_SEAMLESS_STITCH, true)
+		set(value) = prefs.edit { putBoolean(KEY_READER_SEAMLESS_STITCH, value) }
+
+	var readerTapZoneMode: String
+		get() = prefs.getString(KEY_READER_TAP_ZONE_MODE, ReaderTapZoneMode.DEFAULT.key)
+			?: ReaderTapZoneMode.DEFAULT.key
+		set(value) = prefs.edit { putString(KEY_READER_TAP_ZONE_MODE, value) }
 
 	val isReaderZoomButtonsEnabled: Boolean
 		get() = prefs.getBoolean(KEY_READER_ZOOM_BUTTONS, false)
@@ -1474,6 +1563,10 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			.ifEmpty { "http://127.0.0.1:11434/v1" }
 		set(value) = prefs.edit { putString(KEY_AI_REMOTE_URL, value.trim()) }
 
+	var isAiRemoteConfiguredByUser: Boolean
+		get() = prefs.getBoolean(KEY_AI_REMOTE_ENABLED, false)
+		set(value) = prefs.edit { putBoolean(KEY_AI_REMOTE_ENABLED, value) }
+
 	var aiRemoteModel: String
 		get() = prefs.getString(KEY_AI_REMOTE_MODEL, "llama3.2")?.trim().orEmpty()
 			.ifEmpty { "llama3.2" }
@@ -1492,6 +1585,10 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getBoolean(KEY_AI_INCLUDE_NOVEL_EXCERPT, true)
 		set(value) = prefs.edit { putBoolean(KEY_AI_INCLUDE_NOVEL_EXCERPT, value) }
 
+	var aiRecapDepth: String
+		get() = prefs.getString(KEY_AI_RECAP_DEPTH, "DETAILED")?.takeIf { it.isNotBlank() } ?: "DETAILED"
+		set(value) = prefs.edit { putString(KEY_AI_RECAP_DEPTH, value) }
+
 	var aiLocalModelId: String
 		get() = prefs.getString(KEY_AI_LOCAL_MODEL_ID, "qwen2_5_coder_1_5b_int4")?.takeIf { it.isNotBlank() }
 			?: "qwen2_5_coder_1_5b_int4"
@@ -1506,8 +1603,8 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		set(value) = prefs.edit { putBoolean(KEY_NEURAL_UPSCALE_ENABLED, value) }
 
 	var neuralUpscaleModelId: String
-		get() = prefs.getString(KEY_NEURAL_UPSCALE_MODEL_ID, "waifu2x_upconv7_2x")?.takeIf { it.isNotBlank() }
-			?: "waifu2x_upconv7_2x"
+		get() = prefs.getString(KEY_NEURAL_UPSCALE_MODEL_ID, "span_2x_manga")?.takeIf { it.isNotBlank() }
+			?: "span_2x_manga"
 		set(value) = prefs.edit { putString(KEY_NEURAL_UPSCALE_MODEL_ID, value) }
 
 	var neuralUpscaleAccelerator: String
@@ -1700,6 +1797,21 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_READER_WIDE_SPLIT = "reader_wide_split"
 		const val KEY_READER_WIDE_SPLIT_MANUAL = "reader_wide_split_manual"
 		const val KEY_READER_DOUBLE_TAP_FILL = "reader_double_tap_fill"
+		const val KEY_READER_SEAMLESS_STITCH = "reader_seamless_stitch"
+		const val KEY_READER_TAP_ZONE_MODE = "reader_tap_zone_mode"
+		const val KEY_MANGA_CARD_STYLE = "ui_manga_card_style"
+		const val KEY_GRID_COLUMNS_PORTRAIT = "ui_grid_cols_portrait"
+		const val KEY_GRID_COLUMNS_LANDSCAPE = "ui_grid_cols_landscape"
+		const val KEY_CARD_CORNER_RADIUS_DP = "ui_card_corner_radius_dp"
+		const val KEY_GRID_GUTTER_DENSITY = "ui_grid_gutter_density"
+		const val KEY_COVER_ASPECT_RATIO = "ui_cover_aspect_ratio"
+		const val KEY_BADGE_UNREAD = "ui_badge_unread"
+		const val KEY_BADGE_DOWNLOADED = "ui_badge_downloaded"
+		const val KEY_BADGE_SOURCE = "ui_badge_source"
+		const val KEY_BADGE_PROGRESS_BAR = "ui_badge_progress_bar"
+		const val KEY_NAV_COMPACT_HEIGHT = "ui_nav_compact_height"
+		const val KEY_NAV_LABEL_VISIBILITY = "ui_nav_label_visibility"
+		const val KEY_SWIPE_ACTIONS_ENABLED = "ui_swipe_actions_enabled"
 		const val KEY_PROTECT_APP = "protect_app"
 		const val KEY_PROTECT_APP_TIMEOUT = "protect_app_timeout"
 		const val KEY_APP_PASSWORD = "app_password"
@@ -1748,10 +1860,12 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_EXPLORE_HOME_SOURCE = "explore_home_source"
 		const val KEY_AI_MODE = "ai_mode"
 		const val KEY_AI_REMOTE_URL = "ai_remote_url"
+		const val KEY_AI_REMOTE_ENABLED = "ai_remote_enabled"
 		const val KEY_AI_REMOTE_MODEL = "ai_remote_model"
 		const val KEY_AI_GEMINI_MODEL = "ai_gemini_model"
 		const val KEY_AI_SHOW_RECAP_CARD = "ai_show_recap_card"
 		const val KEY_AI_INCLUDE_NOVEL_EXCERPT = "ai_include_novel_excerpt"
+		const val KEY_AI_RECAP_DEPTH = "ai_recap_depth"
 		const val KEY_AI_LOCAL_MODEL_ID = "ai_local_model_id"
 		const val KEY_AI_LOCAL_ACCELERATOR = "ai_local_accelerator"
 		const val KEY_NEURAL_UPSCALE_ENABLED = "neural_upscale_enabled"
@@ -1898,6 +2012,9 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			KEY_APP_VERSION,
 			KEY_AI_LOCAL_MODEL_ID,
 			KEY_AI_LOCAL_ACCELERATOR,
+			KEY_GRID_COLUMNS_PORTRAIT,
+			KEY_GRID_COLUMNS_LANDSCAPE,
+			KEY_UI_SCALE,
 			KEY_NEURAL_UPSCALE_ENABLED,
 			KEY_NEURAL_UPSCALE_MODEL_ID,
 			KEY_NEURAL_UPSCALE_ACCELERATOR,
@@ -1947,6 +2064,9 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			KEY_AI_GEMINI_MODEL,
 			KEY_AI_LOCAL_MODEL_ID,
 			KEY_AI_LOCAL_ACCELERATOR,
+			KEY_GRID_COLUMNS_PORTRAIT,
+			KEY_GRID_COLUMNS_LANDSCAPE,
+			KEY_UI_SCALE,
 			KEY_NEURAL_UPSCALE_ENABLED,
 			KEY_NEURAL_UPSCALE_MODEL_ID,
 			KEY_NEURAL_UPSCALE_ACCELERATOR,

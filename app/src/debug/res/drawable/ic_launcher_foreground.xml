@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:aapt="http://schemas.android.com/aapt"
+	android:width="108dp"
+	android:height="108dp"
+	android:viewportWidth="512"
+	android:viewportHeight="512">
+	<!-- Emblem scaled cleanly to fit above the safe-inset BETA badge -->
+	<group
+		android:pivotX="256"
+		android:pivotY="256"
+		android:scaleX="0.58"
+		android:scaleY="0.58"
+		android:translateY="-22">
+		<path
+			android:fillColor="#FF5CE1E6"
+			android:pathData="M 188 98 A 56 56 0 1 0 242 168 A 46 46 0 1 1 188 98 Z" />
+
+		<path
+			android:fillColor="#FF1E2638"
+			android:strokeLineJoin="round"
+			android:strokeWidth="8"
+			android:pathData="M 168 292 C 168 228, 224 196, 286 204 L 304 168 L 328 202 L 354 172 L 366 218 C 386 242, 382 278, 358 292 Z">
+			<aapt:attr name="android:strokeColor">
+				<gradient
+					android:startX="168"
+					android:startY="168"
+					android:endX="386"
+					android:endY="292"
+					android:type="linear">
+					<item android:offset="0.0" android:color="#FF5CE1E6" />
+					<item android:offset="1.0" android:color="#FF7F7FD5" />
+				</gradient>
+			</aapt:attr>
+		</path>
+
+		<path
+			android:fillColor="#00000000"
+			android:strokeColor="#FF5CE1E6"
+			android:strokeLineCap="round"
+			android:strokeWidth="5"
+			android:pathData="M 292 244 Q 306 256 320 244" />
+		<path
+			android:fillColor="#00000000"
+			android:strokeColor="#FF5CE1E6"
+			android:strokeLineCap="round"
+			android:strokeWidth="5"
+			android:pathData="M 332 244 Q 346 256 360 244" />
+
+		<path android:pathData="M 96 312 Q 176 284 256 318 Q 336 284 416 312 L 402 384 Q 330 358 256 392 Q 182 358 110 384 Z">
+			<aapt:attr name="android:fillColor">
+				<gradient
+					android:startX="96"
+					android:startY="284"
+					android:endX="416"
+					android:endY="392"
+					android:type="linear">
+					<item android:offset="0.0" android:color="#FF5CE1E6" />
+					<item android:offset="1.0" android:color="#FF7F7FD5" />
+				</gradient>
+			</aapt:attr>
+		</path>
+		<path
+			android:strokeColor="#FF0B0F17"
+			android:strokeLineCap="round"
+			android:strokeWidth="8"
+			android:pathData="M 256 318 L 256 392" />
+	</group>
+
+	<!-- High-contrast BETA pill badge safely inside all circle/squircle adaptive icon masks -->
+	<path
+		android:fillColor="#FFF59E0B"
+		android:strokeColor="#FF0B0F17"
+		android:strokeWidth="4"
+		android:pathData="M 214,330 L 298,330 A 22,22 0 0 1 298,374 L 214,374 A 22,22 0 0 1 214,330 Z" />
+
+	<!-- B E T A crisp vector glyph strokes -->
+	<path
+		android:fillColor="#00000000"
+		android:strokeColor="#FF0B0F17"
+		android:strokeLineCap="round"
+		android:strokeLineJoin="round"
+		android:strokeWidth="4.8"
+		android:pathData="M 218,362 L 218,342 L 226,342 C 230,342 231.5,344 231.5,346.8 C 231.5,349.5 229.5,351.5 226,351.5 L 218,351.5 M 226,351.5 C 230.5,351.5 232,354 232,356.8 C 232,359.8 230,362 226,362 L 218,362" />
+	<path
+		android:fillColor="#00000000"
+		android:strokeColor="#FF0B0F17"
+		android:strokeLineCap="round"
+		android:strokeLineJoin="round"
+		android:strokeWidth="4.8"
+		android:pathData="M 252,342 L 240,342 L 240,362 L 252,362 M 240,352 L 250,352" />
+	<path
+		android:fillColor="#00000000"
+		android:strokeColor="#FF0B0F17"
+		android:strokeLineCap="round"
+		android:strokeLineJoin="round"
+		android:strokeWidth="4.8"
+		android:pathData="M 259,342 L 273,342 M 266,342 L 266,362" />
+	<path
+		android:fillColor="#00000000"
+		android:strokeColor="#FF0B0F17"
+		android:strokeLineCap="round"
+		android:strokeLineJoin="round"
+		android:strokeWidth="4.8"
+		android:pathData="M 279,362 L 286.5,342 L 294,362 M 281.5,355.5 L 291.5,355.5" />
+</vector>

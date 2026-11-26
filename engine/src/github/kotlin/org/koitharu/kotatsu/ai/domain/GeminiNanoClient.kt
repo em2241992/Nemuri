@@ -1,7 +1,9 @@
 package org.koitharu.kotatsu.ai.domain
 
 import android.content.Context
-import androidx.core.content.pm.PackageInfoCompat
+import android.os.Build
+import android.os.Process
+import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
@@ -11,8 +13,13 @@ import com.google.mlkit.genai.prompt.GenerativeModel
 import com.google.mlkit.genai.prompt.ModelConfig
 import com.google.mlkit.genai.prompt.ModelPreference
 import com.google.mlkit.genai.prompt.ModelReleaseStage
+import com.google.mlkit.genai.summarization.Summarization
+import com.google.mlkit.genai.summarization.SummarizationRequest
+import com.google.mlkit.genai.summarization.Summarizer
+import com.google.mlkit.genai.summarization.SummarizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -20,9 +27,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Gemini Nano client backed by Google ML Kit GenAI Prompt (`1.0.0-beta5`), probing all
- * AICore feature profiles (Stable/Preview × Full/Fast) and keeping the active client warm
- * so Samsung One UI / S25 devices with Fast or Preview provisioning are detected properly.
+ * Gemini Nano client (GitHub flavor) probing Google ML Kit GenAI Prompt profiles AND falling back
+ * cleanly to task-specific ML Kit GenAI Summarization (`genai-summarization`) on Galaxy S25 (`SM8750`)
+ * devices where AICore blocks open-ended prompt profiles.
  */
 @Singleton
 class GeminiNanoClient @Inject constructor(
@@ -38,10 +45,21 @@ class GeminiNanoClient @Inject constructor(
 	private val clientMutex = Mutex()
 	private var cachedProfile: NanoProfile? = null
 	private var cachedClient: GenerativeModel? = null
+	private var cachedBriefSummarizer: Summarizer? = null
+	private var cachedDetailedSummarizer: Summarizer? = null
+	private var lastDiagSupportsOpenPrompt: Boolean = false
+	private var lastDiagSupportsSummarization: Boolean = false
 
 	suspend fun checkAvailability(): NanoAvailability = checkDiagnostics().availability
 
 	suspend fun checkDiagnostics(): NanoDiagnostics = withContext(Dispatchers.IO) {
+		if (Build.SUPPORTED_64_BIT_ABIS.isEmpty() || !Process.is64Bit()) {
+			return@withContext NanoDiagnostics(
+				availability = NanoAvailability.UNAVAILABLE,
+				detailMessage = "Gemini Nano / AICore requires a 64-bit Android device.",
+			)
+		}
+
 		val pkgInfo = runCatching {
 			context.packageManager.getPackageInfo(AICORE_PACKAGE, 0)
 		}.getOrNull()
@@ -50,12 +68,12 @@ class GeminiNanoClient @Inject constructor(
 				detailMessage = "Android AICore ($AICORE_PACKAGE) is not installed on this device.",
 			)
 
-		val versionCode = PackageInfoCompat.getLongVersionCode(pkgInfo)
+		val versionCode = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pkgInfo)
 		val versionName = pkgInfo.versionName ?: versionCode.toString()
 		if (versionName.contains("stub", ignoreCase = true) || versionCode < MIN_AICORE_VERSION_CODE) {
 			return@withContext NanoDiagnostics(
 				availability = NanoAvailability.UNAVAILABLE,
-				detailMessage = "Android AICore is still a factory stub ($versionName). Update 'Android AICore' via Google Play / Settings → Google → System services, then reboot.",
+				detailMessage = "Android AICore is still a factory stub ($versionName). Update 'Android AICore' via Google Play, then reboot.",
 				aiCoreVersionName = versionName,
 			)
 		}
@@ -72,34 +90,33 @@ class GeminiNanoClient @Inject constructor(
 				}
 			}
 
+			// 1. Check open-ended GenAI Prompt profiles
 			for (profile in order) {
 				val existing = if (profile == cachedProfile) cachedClient else null
-				val model = existing ?: runCatching { createClient(profile) }.getOrNull() ?: continue
+				val model = existing ?: runCatching { createPromptClient(profile) }.getOrNull() ?: continue
 				val statusRes = runCatching { model.checkStatus() }
 				if (statusRes.isFailure) {
-					val err = statusRes.exceptionOrNull()
-					lastGenAiError = formatGenAiError(err)
+					lastGenAiError = formatGenAiError(statusRes.exceptionOrNull())
 					if (existing == null) runCatching { model.close() }
 					continue
 				}
 				when (statusRes.getOrThrow()) {
 					FeatureStatus.AVAILABLE -> {
 						if (existing == null) {
-							closeOtherClientLocked(keep = model)
+							closeOtherPromptLocked(keep = model)
 							cachedClient = model
 							cachedProfile = profile
 						}
-						if (downloadableCandidate != null && downloadableCandidate.second !== model) {
-							runCatching { downloadableCandidate.second.close() }
-						}
-						if (downloadingCandidate != null && downloadingCandidate.second !== model) {
-							runCatching { downloadingCandidate.second.close() }
-						}
+						closeNonMatching(downloadableCandidate?.second, downloadingCandidate?.second, keep = model)
+						lastDiagSupportsOpenPrompt = true
+						lastDiagSupportsSummarization = true
 						return@withContext NanoDiagnostics(
 							availability = NanoAvailability.AVAILABLE,
 							detailMessage = "AICore $versionName • ${profile.label} ready",
 							activeProfileLabel = profile.label,
 							aiCoreVersionName = versionName,
+							supportsOpenPrompt = true,
+							supportsSummarization = true,
 						)
 					}
 
@@ -125,37 +142,111 @@ class GeminiNanoClient @Inject constructor(
 				}
 			}
 
+			// 2. Galaxy S25 (SM8750) fallback: probe task-specific ML Kit GenAI Summarization API
+			val summarizer = getOrCreateSummarizerLocked(RecapDepth.DETAILED)
+			val sumStatusRes = if (summarizer != null) {
+				runCatching { summarizer.checkFeatureStatus().await() }
+			} else {
+				null
+			}
+			val sumStatus = sumStatusRes?.getOrNull()
+			if (sumStatusRes != null && sumStatusRes.isFailure && lastGenAiError.isNullOrBlank()) {
+				lastGenAiError = formatGenAiError(sumStatusRes.exceptionOrNull())
+			}
+
+			when (sumStatus) {
+				FeatureStatus.AVAILABLE -> {
+					closeNonMatching(downloadableCandidate?.second, downloadingCandidate?.second, keep = null)
+					lastDiagSupportsOpenPrompt = false
+					lastDiagSupportsSummarization = true
+					return@withContext NanoDiagnostics(
+						availability = NanoAvailability.AVAILABLE,
+						detailMessage = "AICore $versionName • Gemini Nano Summarizer ready (Recaps)",
+						activeProfileLabel = "Summarizer (Brief 1-Bullet / Detailed 3-Bullets)",
+						aiCoreVersionName = versionName,
+						supportsOpenPrompt = false,
+						supportsSummarization = true,
+					)
+				}
+
+				FeatureStatus.DOWNLOADING -> {
+					closeNonMatching(downloadableCandidate?.second, downloadingCandidate?.second, keep = null)
+					lastDiagSupportsOpenPrompt = false
+					lastDiagSupportsSummarization = true
+					return@withContext NanoDiagnostics(
+						availability = NanoAvailability.DOWNLOADING,
+						detailMessage = "AICore $versionName • Downloading Gemini Nano Summarizer weights…",
+						activeProfileLabel = "Summarizer (Brief 1-Bullet / Detailed 3-Bullets)",
+						aiCoreVersionName = versionName,
+						supportsOpenPrompt = false,
+						supportsSummarization = true,
+					)
+				}
+
+				FeatureStatus.DOWNLOADABLE -> {
+					closeNonMatching(downloadableCandidate?.second, downloadingCandidate?.second, keep = null)
+					lastDiagSupportsOpenPrompt = false
+					lastDiagSupportsSummarization = true
+					return@withContext NanoDiagnostics(
+						availability = NanoAvailability.DOWNLOADABLE,
+						detailMessage = "AICore $versionName • Gemini Nano Summarizer weights ready to download",
+						activeProfileLabel = "Summarizer (Brief 1-Bullet / Detailed 3-Bullets)",
+						aiCoreVersionName = versionName,
+						supportsOpenPrompt = false,
+						supportsSummarization = true,
+					)
+				}
+
+				else -> Unit
+			}
+
 			downloadingCandidate?.let { (profile, model) ->
-				closeOtherClientLocked(keep = model)
+				closeOtherPromptLocked(keep = model)
 				cachedClient = model
 				cachedProfile = profile
 				if (downloadableCandidate != null && downloadableCandidate.second !== model) {
 					runCatching { downloadableCandidate.second.close() }
 				}
+				lastDiagSupportsOpenPrompt = true
+				lastDiagSupportsSummarization = true
 				return@withContext NanoDiagnostics(
 					availability = NanoAvailability.DOWNLOADING,
 					detailMessage = "AICore $versionName • Downloading ${profile.label} model weights…",
 					activeProfileLabel = profile.label,
 					aiCoreVersionName = versionName,
+					supportsOpenPrompt = true,
+					supportsSummarization = true,
 				)
 			}
 
 			downloadableCandidate?.let { (profile, model) ->
-				closeOtherClientLocked(keep = model)
+				closeOtherPromptLocked(keep = model)
 				cachedClient = model
 				cachedProfile = profile
+				lastDiagSupportsOpenPrompt = true
+				lastDiagSupportsSummarization = true
 				return@withContext NanoDiagnostics(
 					availability = NanoAvailability.DOWNLOADABLE,
 					detailMessage = "AICore $versionName • ${profile.label} weights can be downloaded",
 					activeProfileLabel = profile.label,
 					aiCoreVersionName = versionName,
+					supportsOpenPrompt = true,
+					supportsSummarization = true,
 				)
 			}
 
+			lastDiagSupportsOpenPrompt = false
+			lastDiagSupportsSummarization = false
 			val errorPart = if (!lastGenAiError.isNullOrBlank()) " ($lastGenAiError)" else ""
+			val isSamsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
+			val guidance = if (isSamsung) {
+				"Update 'Android AICore' in Google Play and ensure Galaxy AI / system AI services are up to date, or download the universal Gemma local model below."
+			} else {
+				"Update 'Android AICore' in Google Play (on Pixel, verify Developer options → AICore Settings)."
+			}
 			NanoDiagnostics(
 				availability = NanoAvailability.UNAVAILABLE,
-				detailMessage = "AICore $versionName reported no active prompt profile$errorPart. On Galaxy S25: update Android AICore in Play Store and enable Developer options → AICore Settings → Enable on-device GenAI features.",
+				detailMessage = "AICore $versionName reported no active Gemini Nano profile$errorPart. $guidance",
 				aiCoreVersionName = versionName,
 			)
 		}
@@ -167,11 +258,38 @@ class GeminiNanoClient @Inject constructor(
 			return@withContext Result.failure(IllegalStateException(diag.detailMessage))
 		}
 		clientMutex.withLock {
-			val model = cachedClient ?: runCatching { createClient(PROFILES.first()) }.getOrElse {
+			if (!diag.supportsOpenPrompt && diag.supportsSummarization) {
+				val summarizer = getOrCreateSummarizerLocked(RecapDepth.DETAILED)
+					?: return@withContext Result.failure(IllegalStateException("Unable to initialize Gemini Nano Summarizer"))
+				return@withContext try {
+					var failedError: Throwable? = null
+					summarizer.downloadFeature(
+						object : DownloadCallback {
+							override fun onDownloadStarted(bytesToDownload: Long) = Unit
+
+							override fun onDownloadProgress(totalBytesDownloaded: Long) {
+								onProgress(totalBytesDownloaded)
+							}
+
+							override fun onDownloadFailed(e: GenAiException) {
+								failedError = e
+							}
+
+							override fun onDownloadCompleted() = Unit
+						},
+					).await()
+					val err = failedError
+					if (err != null) Result.failure(err) else Result.success(Unit)
+				} catch (t: Throwable) {
+					Result.failure(t)
+				}
+			}
+
+			val model = cachedClient ?: runCatching { createPromptClient(cachedProfile ?: PROFILES.first()) }.getOrElse {
 				return@withContext Result.failure(it)
 			}.also {
 				cachedClient = it
-				cachedProfile = PROFILES.first()
+				cachedProfile = cachedProfile ?: PROFILES.first()
 			}
 			try {
 				var failedError: Throwable? = null
@@ -195,23 +313,52 @@ class GeminiNanoClient @Inject constructor(
 		if (diag.availability != NanoAvailability.AVAILABLE) {
 			return@withContext Result.failure(IllegalStateException(diag.detailMessage))
 		}
-		clientMutex.withLock {
-			val model = cachedClient ?: runCatching { createClient(cachedProfile ?: PROFILES.first()) }.getOrElse {
-				return@withContext Result.failure(it)
+		if (!diag.supportsOpenPrompt) {
+			return@withContext Result.failure(
+				IllegalStateException("AICore open-ended prompt is not provisioned on this device (Summarizer-only)."),
+			)
+		}
+		generateWithPromptLocked(prompt)
+	}
+
+	/**
+	 * Generates a "Where Was I?" recap using open-ended `genai-prompt` when available,
+	 * automatically falling back to task-specific `genai-summarization` on Samsung S25 (`SM8750`).
+	 */
+	suspend fun summarize(
+		articleText: String,
+		fallbackPrompt: String,
+		recapDepth: RecapDepth = RecapDepth.DETAILED,
+	): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+		val diag = checkDiagnostics()
+		if (diag.availability != NanoAvailability.AVAILABLE) {
+			return@withContext Result.failure(IllegalStateException(diag.detailMessage))
+		}
+		if (diag.supportsOpenPrompt) {
+			val promptRes = generateWithPromptLocked(fallbackPrompt)
+			if (promptRes.isSuccess) {
+				return@withContext Result.success(promptRes.getOrThrow() to "Gemini Nano (On-Device)")
 			}
+		}
+		if (!diag.supportsSummarization) {
+			return@withContext Result.failure(IllegalStateException(diag.detailMessage))
+		}
+		clientMutex.withLock {
+			val summarizer = getOrCreateSummarizerLocked(recapDepth)
+				?: return@withContext Result.failure(IllegalStateException("Unable to initialize Gemini Nano Summarizer"))
 			try {
-				val status = model.checkStatus()
+				val status = summarizer.checkFeatureStatus().await()
 				if (status != FeatureStatus.AVAILABLE) {
 					return@withContext Result.failure(
-						IllegalStateException("Gemini Nano is ${if (status == FeatureStatus.DOWNLOADABLE) "not downloaded yet" else "unavailable"}"),
+						IllegalStateException("Gemini Nano Summarizer is ${if (status == FeatureStatus.DOWNLOADABLE) "not downloaded yet" else "unavailable"}"),
 					)
 				}
-				val response = model.generateContent(prompt)
-				val text = response.candidates.firstOrNull()?.text?.trim().orEmpty()
-				if (text.isEmpty()) {
-					Result.failure(IllegalStateException("Gemini Nano returned an empty response"))
+				val request = SummarizationRequest.builder(articleText).build()
+				val summary = summarizer.runInference(request).await().summary.trim()
+				if (summary.isEmpty()) {
+					Result.failure(IllegalStateException("Gemini Nano Summarizer returned an empty summary"))
 				} else {
-					Result.success(text)
+					Result.success(summary to "Gemini Nano (Summarizer)")
 				}
 			} catch (t: Throwable) {
 				Result.failure(t)
@@ -219,7 +366,40 @@ class GeminiNanoClient @Inject constructor(
 		}
 	}
 
-	private fun createClient(profile: NanoProfile): GenerativeModel {
+	private fun getOrCreateSummarizerLocked(depth: RecapDepth): Summarizer? = when (depth) {
+		RecapDepth.BRIEF -> cachedBriefSummarizer ?: runCatching {
+			createSummarizerClient(SummarizerOptions.OutputType.ONE_BULLET)
+		}.getOrNull()?.also { cachedBriefSummarizer = it }
+
+		RecapDepth.DETAILED -> cachedDetailedSummarizer ?: runCatching {
+			createSummarizerClient(SummarizerOptions.OutputType.THREE_BULLETS)
+		}.getOrNull()?.also { cachedDetailedSummarizer = it }
+	}
+
+	private suspend fun generateWithPromptLocked(prompt: String): Result<String> = clientMutex.withLock {
+		val model = cachedClient ?: runCatching { createPromptClient(cachedProfile ?: PROFILES.first()) }.getOrElse {
+			return Result.failure(it)
+		}
+		try {
+			val status = model.checkStatus()
+			if (status != FeatureStatus.AVAILABLE) {
+				return Result.failure(
+					IllegalStateException("Gemini Nano is ${if (status == FeatureStatus.DOWNLOADABLE) "not downloaded yet" else "unavailable"}"),
+				)
+			}
+			val response = model.generateContent(prompt)
+			val text = response.candidates.firstOrNull()?.text?.trim().orEmpty()
+			if (text.isEmpty()) {
+				Result.failure(IllegalStateException("Gemini Nano returned an empty response"))
+			} else {
+				Result.success(text)
+			}
+		} catch (t: Throwable) {
+			Result.failure(t)
+		}
+	}
+
+	private fun createPromptClient(profile: NanoProfile): GenerativeModel {
 		val modelCfg = ModelConfig.builder().apply {
 			releaseStage = profile.releaseStage
 			preference = profile.preference
@@ -230,11 +410,26 @@ class GeminiNanoClient @Inject constructor(
 		return Generation.getClient(genCfg)
 	}
 
-	private fun closeOtherClientLocked(keep: GenerativeModel?) {
+	private fun createSummarizerClient(outputType: Int): Summarizer {
+		val options = SummarizerOptions.builder(context)
+			.setInputType(SummarizerOptions.InputType.ARTICLE)
+			.setOutputType(outputType)
+			.setLanguage(SummarizerOptions.Language.ENGLISH)
+			.setLongInputAutoTruncationEnabled(true)
+			.build()
+		return Summarization.getClient(options)
+	}
+
+	private fun closeOtherPromptLocked(keep: GenerativeModel?) {
 		val old = cachedClient
 		if (old != null && old !== keep) {
 			runCatching { old.close() }
 		}
+	}
+
+	private fun closeNonMatching(a: GenerativeModel?, b: GenerativeModel?, keep: GenerativeModel?) {
+		if (a != null && a !== keep && a !== cachedClient) runCatching { a.close() }
+		if (b != null && b !== keep && b !== cachedClient) runCatching { b.close() }
 	}
 
 	private fun formatGenAiError(err: Throwable?): String? = when (err) {

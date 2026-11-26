@@ -74,9 +74,9 @@ fun DuplicateScannerScreen(
 		actions = {
 			IconButton(
 				onClick = viewModel::scanLibrary,
-				enabled = !uiState.isScanning && !uiState.isMerging,
+				enabled = !uiState.isScanning && !uiState.isScanningTier2 && !uiState.isMerging,
 			) {
-				if (uiState.isScanning || uiState.isMerging) {
+				if (uiState.isScanning || uiState.isScanningTier2 || uiState.isMerging) {
 					CircularProgressIndicator(
 						color = NemuriTheme.colors.cyan,
 						strokeWidth = 2.dp,
@@ -113,15 +113,19 @@ fun DuplicateScannerScreen(
 			when {
 				uiState.isScanning -> NemuriLoadingState(message = "Scanning library for duplicates…")
 
-				shownPairs.isEmpty() -> NemuriEmptyState(
-					icon = Icons.Default.ContentCopy,
-					title = "No ${uiState.activeBucket.label} duplicates",
-					subtitle = if (uiState.activeBucket == DuplicateConfidenceBucket.HIGH_CONFIDENCE) {
-						"No identical titles or shared tracker IDs found in your library."
-					} else {
-						"No ambiguous subtitle/sequel matches to review."
-					},
-				)
+				shownPairs.isEmpty() -> if (uiState.isScanningTier2 && uiState.activeBucket == DuplicateConfidenceBucket.REVIEW_CAREFULLY) {
+					NemuriLoadingState(message = "Checking fuzzy & partial matches…")
+				} else {
+					NemuriEmptyState(
+						icon = Icons.Default.ContentCopy,
+						title = "No ${uiState.activeBucket.label} duplicates",
+						subtitle = if (uiState.activeBucket == DuplicateConfidenceBucket.HIGH_CONFIDENCE) {
+							"No identical titles or shared tracker IDs found in your library."
+						} else {
+							"No ambiguous subtitle/sequel matches to review."
+						},
+					)
+				}
 
 				else -> LazyColumn(
 					modifier = Modifier.fillMaxSize(),

@@ -9,9 +9,11 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import okhttp3.internal.platform.PlatformRegistry
+import java.util.concurrent.atomic.AtomicBoolean
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.logs.AppLogger
 import org.koitharu.kotatsu.core.nav.AppRouter
@@ -68,6 +70,8 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 	@Inject
 	lateinit var lnPluginManager: Provider<LnPluginManager>
 
+	private val extensionsInitStarted = AtomicBoolean(false)
+
 	override val workManagerConfiguration: Configuration
 		get() = Configuration.Builder()
 			.setWorkerFactory(workerFactory)
@@ -88,14 +92,25 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 		activityLifecycleCallbacks.forEach(::registerActivityLifecycleCallbacks)
 		cleanupDownloadedExtensionApks()
 		workScheduleManager.get().init()
-		processLifecycleScope.launch(Dispatchers.IO) {
-			mihonExtensionManager.get().initialize()
-			lnPluginManager.get().initialize()
+		// Fallback safety net if a background worker or ReaderActivity launches before MainActivity's first frame.
+		processLifecycleScope.launch(Dispatchers.Default) {
+			delay(2_500L)
+			ensureExtensionsInitialized()
 		}
 		processLifecycleScope.launch(Dispatchers.Default) {
 			val tracker = database.get().invalidationTracker
 			databaseObserversProvider.get().forEach(tracker::addObserver)
 			localStorageChanges.collect(localMangaIndexProvider.get())
+		}
+	}
+
+	fun ensureExtensionsInitialized() {
+		if (!extensionsInitStarted.compareAndSet(false, true)) return
+		processLifecycleScope.launch(Dispatchers.IO) {
+			runCatching { mihonExtensionManager.get().initialize() }
+		}
+		processLifecycleScope.launch(Dispatchers.IO) {
+			runCatching { lnPluginManager.get().initialize() }
 		}
 	}
 

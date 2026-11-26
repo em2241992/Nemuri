@@ -295,6 +295,22 @@ class PageLoader @Inject constructor(
 	}
 
 	/**
+	 * Non-blocking peek returning a local or already-cached [Uri] for [page] without issuing
+	 * network calls, so smart slice stitching can group local/cached chapters immediately.
+	 */
+	suspend fun peekLocalOrCachedUri(page: MangaPage): Uri? {
+		synchronized(tasks) {
+			val completed = tasks[page.id]?.getCompletionResultOrNull()?.getOrNull()
+			if (completed != null) return completed
+		}
+		val rawUrl = page.url
+		if (rawUrl.isBlank()) return null
+		val uri = rawUrl.toUri()
+		if (uri.isPdfUri() || uri.isZipUri() || uri.isFileUri()) return uri
+		return cache.get(rawUrl)?.toUri()
+	}
+
+	/**
 	 * Mihon's launchLoadOnce: starts preloading [page] unless it's loaded or already loading. Failed pages retry.
 	 * [checkDisk] also reloads a page whose file left the cache; only for nearby pages, so a chapter bigger than
 	 * the cache can't keep evicting and refetching itself.

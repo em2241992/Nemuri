@@ -55,6 +55,7 @@ import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.rememberPushScreenBottomPadding
 import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
@@ -65,6 +66,7 @@ fun LocalStorageScreen(
 	viewModel: LocalStorageViewModel = viewModel(),
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val bottomPadding = rememberPushScreenBottomPadding(24.dp)
 	var pendingDelete by remember { mutableStateOf<Manga?>(null) }
 
 	val importPicker = rememberLauncherForActivityResult(
@@ -205,7 +207,7 @@ fun LocalStorageScreen(
 			else -> {
 				LazyColumn(
 					modifier = Modifier.fillMaxSize(),
-					contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomPadding),
 					verticalArrangement = Arrangement.spacedBy(8.dp),
 				) {
 					items(uiState.items, key = { it.manga.id }) { entry ->
@@ -218,7 +220,6 @@ fun LocalStorageScreen(
 							onDelete = { pendingDelete = entry.manga },
 						)
 					}
-					item { Spacer(modifier = Modifier.height(64.dp)) }
 				}
 			}
 		}

@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
+import org.koitharu.kotatsu.core.exceptions.InteractiveActionRequiredException
 import org.koitharu.kotatsu.core.model.MangaSourceInfo
 import org.koitharu.kotatsu.core.model.getSummary
 import org.koitharu.kotatsu.core.model.getTitle
@@ -31,6 +33,9 @@ import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.observeAsFlow
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
+import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
+import org.nemuri.app.browser.WebViewChallengeAction
+import org.nemuri.app.browser.toWebViewChallengeAction
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.explore.data.SourceLanguage
 import org.koitharu.kotatsu.explore.data.SourceLanguageVariant
@@ -100,6 +105,9 @@ data class ExploreUiState(
 	val homeSource: ExploreSourceTile? = null,
 	val isHomeHubLoading: Boolean = false,
 	val homeHubError: String? = null,
+	val homeHubCloudFlare: CloudFlareProtectedException? = null,
+	val homeHubInteractive: InteractiveActionRequiredException? = null,
+	val homeHubBrowserUrl: String? = null,
 	val homeCarousels: List<HomeHubCarousel> = emptyList(),
 	val visibilityFilter: LibraryVisibilityFilter = LibraryVisibilityFilter.ALL,
 	val libraryMangaIds: Set<Long> = emptySet(),
@@ -110,6 +118,9 @@ private data class HomeHubRawState(
 	val sourceName: String? = null,
 	val isLoading: Boolean = false,
 	val error: String? = null,
+	val cloudFlare: CloudFlareProtectedException? = null,
+	val interactive: InteractiveActionRequiredException? = null,
+	val browserUrl: String? = null,
 	val carousels: List<HomeHubCarousel> = emptyList(),
 )
 
@@ -281,6 +292,9 @@ class ExploreViewModel @Inject constructor(
 			homeSource = resolvedHome,
 			isHomeHubLoading = matchingHub?.isLoading == true,
 			homeHubError = matchingHub?.error,
+			homeHubCloudFlare = matchingHub?.cloudFlare,
+			homeHubInteractive = matchingHub?.interactive,
+			homeHubBrowserUrl = matchingHub?.browserUrl,
 			homeCarousels = rawCarousels,
 			visibilityFilter = controls.visibility,
 			libraryMangaIds = libIds,
@@ -318,6 +332,7 @@ class ExploreViewModel @Inject constructor(
 		homeHubJob?.cancel()
 		homeHubJob = viewModelScope.launch(Dispatchers.IO) {
 			homeHubRawFlow.value = HomeHubRawState(sourceName = tile.sourceName, isLoading = true)
+			var capturedError: Throwable? = null
 			val result = runCatchingCancellable {
 				val repo = mangaRepositoryFactoryProvider.get().create(tile.sourceInfo.mangaSource)
 				val sortOrders = repo.sortOrders
@@ -326,7 +341,7 @@ class ExploreViewModel @Inject constructor(
 						async {
 							runCatchingCancellable {
 								repo.getList(0, SortOrder.POPULARITY, MangaListFilter()).distinctBy { it.id }.take(15)
-							}.getOrDefault(emptyList())
+							}
 						}
 					} else null
 
@@ -334,7 +349,7 @@ class ExploreViewModel @Inject constructor(
 						async {
 							runCatchingCancellable {
 								repo.getList(0, SortOrder.UPDATED, MangaListFilter()).distinctBy { it.id }.take(15)
-							}.getOrDefault(emptyList())
+							}
 						}
 					} else null
 
@@ -347,7 +362,7 @@ class ExploreViewModel @Inject constructor(
 						async {
 							runCatchingCancellable {
 								repo.getList(0, ord, MangaListFilter()).distinctBy { it.id }.take(15)
-							}.getOrDefault(emptyList())
+							}
 						}
 					}
 
@@ -355,14 +370,21 @@ class ExploreViewModel @Inject constructor(
 						loadGenreRecommendation(repo)
 					}
 
+					val popRes = popularJob?.await()
+					val updRes = updatedJob?.await()
+					val secRes = secondaryJob?.await()
+					capturedError = popRes?.exceptionOrNull()
+						?: updRes?.exceptionOrNull()
+						?: secRes?.exceptionOrNull()
+
 					val list = ArrayList<HomeHubCarousel>(4)
-					popularJob?.await()?.takeIf { it.isNotEmpty() }?.let { items ->
+					popRes?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { items ->
 						list += HomeHubCarousel("popular", "Popular on ${tile.title}", items, SortOrder.POPULARITY)
 					}
-					updatedJob?.await()?.takeIf { it.isNotEmpty() }?.let { items ->
+					updRes?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { items ->
 						list += HomeHubCarousel("updated", "Latest Updates", items, SortOrder.UPDATED)
 					}
-					secondaryJob?.await()?.takeIf { it.isNotEmpty() }?.let { items ->
+					secRes?.getOrNull()?.takeIf { it.isNotEmpty() }?.let { items ->
 						val label = if (secondaryOrder == SortOrder.RATING) "Top Rated" else "Newly Added"
 						list += HomeHubCarousel("secondary", label, items, secondaryOrder)
 					}
@@ -381,17 +403,38 @@ class ExploreViewModel @Inject constructor(
 			}
 			if (loadedHomeSourceName != tile.sourceName) return@launch
 			result.onSuccess { carousels ->
+				val err = if (carousels.isEmpty()) capturedError else null
+				val challenge = err?.toWebViewChallengeAction(
+					fallbackUrl = tile.homeUrl,
+					fallbackSource = tile.sourceInfo.mangaSource,
+					title = tile.title,
+				)
 				homeHubRawFlow.value = HomeHubRawState(
 					sourceName = tile.sourceName,
 					isLoading = false,
-					error = if (carousels.isEmpty()) "No feeds returned by ${tile.title}" else null,
+					error = when {
+						carousels.isNotEmpty() -> null
+						err != null -> err.getDisplayMessage(context.resources)
+						else -> "No feeds returned by ${tile.title}"
+					},
+					cloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
+					interactive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
+					browserUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
 					carousels = carousels,
 				)
 			}.onFailure { err ->
+				val challenge = err.toWebViewChallengeAction(
+					fallbackUrl = tile.homeUrl,
+					fallbackSource = tile.sourceInfo.mangaSource,
+					title = tile.title,
+				)
 				homeHubRawFlow.value = HomeHubRawState(
 					sourceName = tile.sourceName,
 					isLoading = false,
-					error = err.localizedMessage ?: "Failed to load ${tile.title}",
+					error = err.getDisplayMessage(context.resources),
+					cloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
+					interactive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
+					browserUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
 				)
 			}
 		}

@@ -18,4 +18,11 @@ class GeminiNanoClient @Inject constructor() {
 
 	suspend fun generate(prompt: String): Result<String> =
 		Result.failure(UnsupportedOperationException("Gemini Nano requires AICore (GitHub build)"))
+
+	suspend fun summarize(
+		articleText: String,
+		fallbackPrompt: String,
+		recapDepth: RecapDepth = RecapDepth.DETAILED,
+	): Result<Pair<String, String>> =
+		Result.failure(UnsupportedOperationException("Gemini Nano requires AICore (GitHub build)"))
 }

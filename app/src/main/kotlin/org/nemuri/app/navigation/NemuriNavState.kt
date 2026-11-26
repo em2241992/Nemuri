@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import org.koitharu.kotatsu.core.nav.AppRouter
 
+const val EXTRA_OPEN_MIGRATE_MANGA_ID = "nemuri.extra.OPEN_MIGRATE_MANGA_ID"
+
 @Stable
 class NemuriNavController(initialTab: AppTab = AppTab.LIBRARY) {
 
@@ -55,6 +57,12 @@ class NemuriNavController(initialTab: AppTab = AppTab.LIBRARY) {
 
 	fun consumeIntent(intent: Intent?) {
 		if (intent == null) return
+		val migrateMangaId = intent.getLongExtra(EXTRA_OPEN_MIGRATE_MANGA_ID, 0L)
+		if (migrateMangaId != 0L) {
+			intent.removeExtra(EXTRA_OPEN_MIGRATE_MANGA_ID)
+			navigate(AppDestination.MigrateManga(migrateMangaId))
+			return
+		}
 		val data = intent.data
 		if (intent.action == Intent.ACTION_VIEW && data != null) {
 			val scheme = data.scheme?.lowercase()

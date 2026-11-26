@@ -21,6 +21,15 @@ abstract class ScrobblingDao {
 	@Query("SELECT * FROM scrobblings WHERE manga_id = :mangaId")
 	abstract suspend fun findAll(mangaId: Long): List<ScrobblingEntity>
 
+	@Query("SELECT scrobbler, manga_id, target_id FROM scrobblings WHERE target_id != 0")
+	abstract suspend fun findAllKeys(): List<ScrobblingKeyTuple>
+
+	data class ScrobblingKeyTuple(
+		@ColumnInfo(name = "scrobbler") val scrobbler: Int,
+		@ColumnInfo(name = "manga_id") val mangaId: Long,
+		@ColumnInfo(name = "target_id") val targetId: Long,
+	)
+
 	/**
 	 * Other manga linked to the very same remote entry on the same tracker — a definite duplicate,
 	 * whatever the titles happen to look like. Mirrors mihon's `track_dupes` CTE.

@@ -102,12 +102,14 @@ import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SourceBrowseScreen(
 	sourceName: String,
 	initialQuery: String? = null,
 	onBack: () -> Unit,
 	onOpenDetails: (Manga) -> Unit,
+	onFindAlternative: (String) -> Unit = {},
 	viewModel: SourceBrowseViewModel = viewModel(key = "browse:$sourceName:${initialQuery.orEmpty()}"),
 ) {
 	val context = LocalContext.current
@@ -414,9 +416,10 @@ fun SourceBrowseScreen(
 				ChallengeActionView(
 					title = "Cloudflare verification required",
 					message = uiState.errorMessage ?: "Solve the challenge in WebView to continue browsing.",
-					buttonLabel = "Verify in Browser",
+					buttonLabel = "Solve in WebView",
 					onAction = { cfLauncher.launch(cf) },
 					onRetry = viewModel::retry,
+					onFindAlternative = { onFindAlternative(uiState.query.ifBlank { uiState.sourceTitle }) },
 				)
 			}
 
@@ -424,10 +427,29 @@ fun SourceBrowseScreen(
 				val interactive = uiState.pendingInteractive!!
 				ChallengeActionView(
 					title = "Login or action required",
-					message = uiState.errorMessage ?: "Complete login or verification in browser, then close the page.",
-					buttonLabel = "Open Browser",
+					message = uiState.errorMessage ?: "Complete login or verification in WebView, then close the page.",
+					buttonLabel = "Solve in WebView",
 					onAction = { browserLauncher.launch(interactive) },
 					onRetry = viewModel::retry,
+					onFindAlternative = { onFindAlternative(uiState.query.ifBlank { uiState.sourceTitle }) },
+				)
+			}
+
+			uiState.items.isEmpty() && uiState.pendingChallengeUrl != null -> {
+				val url = uiState.pendingChallengeUrl!!
+				ChallengeActionView(
+					title = "HTTP 403 / Verification required",
+					message = uiState.errorMessage ?: "Solve verification in WebView, retry, or search another source.",
+					buttonLabel = "Solve in WebView",
+					onAction = {
+						runCatching {
+							context.startActivity(
+								AppRouter.browserIntent(context, url, uiState.resolvedSource, uiState.sourceTitle),
+							)
+						}
+					},
+					onRetry = viewModel::retry,
+					onFindAlternative = { onFindAlternative(uiState.query.ifBlank { uiState.sourceTitle }) },
 				)
 			}
 
@@ -1019,6 +1041,7 @@ private fun StaticFilterChip(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChallengeActionView(
 	title: String,
@@ -1026,6 +1049,7 @@ private fun ChallengeActionView(
 	buttonLabel: String,
 	onAction: () -> Unit,
 	onRetry: () -> Unit,
+	onFindAlternative: () -> Unit,
 ) {
 	Box(
 		modifier = Modifier
@@ -1053,7 +1077,10 @@ private fun ChallengeActionView(
 				style = MaterialTheme.typography.bodyMedium,
 				color = NemuriTheme.colors.textMuted,
 			)
-			Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+			FlowRow(
+				horizontalArrangement = Arrangement.spacedBy(10.dp),
+				verticalArrangement = Arrangement.spacedBy(8.dp),
+			) {
 				Button(
 					onClick = onAction,
 					colors = ButtonDefaults.buttonColors(
@@ -1069,6 +1096,12 @@ private fun ChallengeActionView(
 					shape = RoundedCornerShape(12.dp),
 				) {
 					Text("Retry")
+				}
+				OutlinedButton(
+					onClick = onFindAlternative,
+					shape = RoundedCornerShape(12.dp),
+				) {
+					Text("Find Alternative")
 				}
 			}
 		}

@@ -2,6 +2,7 @@ package org.koitharu.kotatsu.ai.data
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.StatFs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +40,36 @@ class LocalModelManager @Inject constructor(
 	private val modelsDir: File
 		get() = File(context.filesDir, "ai_models").apply { mkdirs() }
 
-	val catalog: List<LocalLlmCatalogEntry> = listOf(
+	private val allCatalogEntries: List<LocalLlmCatalogEntry> = listOf(
+		LocalLlmCatalogEntry(
+			id = "gemma4_e2b_it",
+			title = "Gemma 4 E2B Instruct",
+			subtitle = "Recommended universal GPU/CPU • ~2.41 GB • 8 GB+ RAM",
+			fileName = "gemma-4-E2B-it.litertlm",
+			downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+			approxSizeBytes = 2_588_147_712L,
+			minRamMb = 2200,
+			isRecommended = true,
+		),
+		LocalLlmCatalogEntry(
+			id = "gemma3_1b_it_int4",
+			title = "Gemma 3 1B Instruct INT4",
+			subtitle = "Compact universal GPU/CPU • ~557 MB • 6 GB+ RAM",
+			fileName = "gemma3-1b-it-int4.litertlm",
+			downloadUrl = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.litertlm",
+			approxSizeBytes = 584_417_280L,
+			minRamMb = 1100,
+		),
+		LocalLlmCatalogEntry(
+			id = "gemma3_1b_q4_sm8750",
+			title = "Gemma 3 1B NPU (Snapdragon 8 Elite)",
+			subtitle = "Qualcomm SM8750 Hexagon NPU • ~657 MB • S25 series",
+			fileName = "Gemma3-1B-IT_q4_ekv1280_sm8750.litertlm",
+			downloadUrl = "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_q4_ekv1280_sm8750.litertlm",
+			approxSizeBytes = 689_291_264L,
+			minRamMb = 1000,
+			requiredSocModel = "SM8750",
+		),
 		LocalLlmCatalogEntry(
 			id = "smollm2_360m_it",
 			title = "SmolLM2 360M Instruct",
@@ -86,6 +116,15 @@ class LocalModelManager @Inject constructor(
 			minRamMb = 1100,
 		),
 	)
+
+	val catalog: List<LocalLlmCatalogEntry>
+		get() = allCatalogEntries.filter { isSocCompatible(it.requiredSocModel) }
+
+	private fun isSocCompatible(requiredSoc: String?): Boolean {
+		if (requiredSoc.isNullOrBlank()) return true
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+		return Build.SOC_MODEL.equals(requiredSoc, ignoreCase = true)
+	}
 
 	private val _downloadState = MutableStateFlow(LocalModelDownloadState())
 	val downloadState: StateFlow<LocalModelDownloadState> = _downloadState.asStateFlow()

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name" translatable="false">Nemuri</string>
     <string name="local_storage">Local storage</string>
@@ -500,7 +500,10 @@
     <string name="language">Language</string>
     <string name="filter_by_language">Filter by language</string>
     <string name="no_extensions_installed">No extensions installed</string>
-    <string name="theme_name_expressive">Expressive</string>
+    <string name="theme_name_expressive">Dynamic M3</string>
+    <string name="theme_name_yorha">YoRHa Tactical</string>
+    <string name="theme_name_kyoto_washi">Kyoto Washi</string>
+    <string name="theme_name_suibokuga">Suibokuga</string>
     <string name="app_icon">App icon</string>
     <string name="app_icon_summary">The app will close to change the icon</string>
     <string name="app_icon_follows_theme">Icons follow light and dark mode. Themed also matches your app color, Static never changes</string>

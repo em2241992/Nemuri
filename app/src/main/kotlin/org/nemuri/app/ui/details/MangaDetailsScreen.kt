@@ -2,6 +2,7 @@ package org.nemuri.app.ui.details
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,6 +59,8 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.VerticalAlignBottom
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -97,6 +101,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
@@ -108,6 +113,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
+import org.nemuri.app.browser.isLikelyChallengeErrorMessage
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.MangaCompactGridCard
 import org.nemuri.app.ui.components.MangaCoverImage
@@ -115,8 +121,13 @@ import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.SnappingSwipeRow
+import org.nemuri.app.ui.components.listDragRangeSelect
+import org.nemuri.app.ui.components.rememberPushScreenBottomPadding
 import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
+import org.nemuri.app.ui.theme.nemuriSharedCover
+import org.nemuri.app.ui.theme.nemuriSpatialSpring
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -129,6 +140,7 @@ fun MangaDetailsScreen(
 	onOpenSourceBrowse: (String, String?) -> Unit,
 	onOpenMigrate: (Long) -> Unit = {},
 	onOpenAiSettings: () -> Unit = {},
+	sharedCoverKey: String? = null,
 	viewModel: MangaDetailsViewModel = viewModel(),
 ) {
 	val context = LocalContext.current
@@ -184,9 +196,10 @@ fun MangaDetailsScreen(
 					DetailsChallengeView(
 						title = "Cloudflare verification required",
 						message = uiState.errorMessage ?: "Verify in WebView to load this title.",
-						actionLabel = "Verify in Browser",
+						actionLabel = "Solve in WebView",
 						onAction = { cfLauncher.launch(cf) },
 						onRetry = { viewModel.retry(force = true) },
+						onMigrate = { onOpenMigrate(mangaId) },
 					)
 				}
 			}
@@ -201,33 +214,63 @@ fun MangaDetailsScreen(
 					}
 					DetailsChallengeView(
 						title = "Source action required",
-						message = uiState.errorMessage ?: "Complete login or prompt in the browser, then retry.",
-						actionLabel = "Open Browser",
+						message = uiState.errorMessage ?: "Complete login or prompt in WebView, then retry.",
+						actionLabel = "Solve in WebView",
 						onAction = { browserLauncher.launch(interactive) },
 						onRetry = { viewModel.retry(force = true) },
+						onMigrate = { onOpenMigrate(mangaId) },
 					)
 				}
 			}
 
 			uiState.manga == null -> {
+				val challengeUrl = uiState.publicUrl.takeIf {
+					it.isNotBlank() && uiState.errorMessage.isLikelyChallengeErrorMessage()
+				}
 				Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
 					Row(modifier = Modifier.padding(6.dp)) {
 						IconButton(onClick = onBack) {
 							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = NemuriTheme.colors.textPrimary)
 						}
 					}
-					NemuriErrorState(
-						message = uiState.errorMessage ?: "Title unavailable.",
-						onRetry = { viewModel.retry(force = true) },
-					)
+					if (challengeUrl != null) {
+						DetailsChallengeView(
+							title = "Access blocked or verification required",
+							message = uiState.errorMessage ?: "Solve verification in WebView, retry, or migrate.",
+							actionLabel = "Solve in WebView",
+							onAction = {
+								context.startActivity(AppRouter.browserIntent(context, challengeUrl, null, uiState.title))
+							},
+							onRetry = { viewModel.retry(force = true) },
+							onMigrate = { onOpenMigrate(mangaId) },
+						)
+					} else {
+						NemuriErrorState(
+							message = uiState.errorMessage ?: "Title unavailable.",
+							onRetry = { viewModel.retry(force = true) },
+						)
+					}
 				}
 			}
 
 			else -> {
 				val manga = uiState.manga!!
+				val chapterListState = rememberLazyListState()
+				val chapterIds = remember(uiState.chapters) { uiState.chapters.map { it.chapter.id } }
+				val detailsBottomPadding = rememberPushScreenBottomPadding(if (isSelectionMode) 98.dp else 28.dp)
 				LazyColumn(
-					modifier = Modifier.fillMaxSize(),
-					contentPadding = PaddingValues(bottom = if (isSelectionMode) 110.dp else 44.dp),
+					state = chapterListState,
+					modifier = Modifier
+						.fillMaxSize()
+						.listDragRangeSelect(
+							listState = chapterListState,
+							orderedIds = chapterIds,
+							selectedIds = uiState.selectedChapterIds,
+							enabled = true,
+							keyMapper = { it as? Long },
+							onSelectionChange = viewModel::selectChapterRange,
+						),
+					contentPadding = PaddingValues(bottom = detailsBottomPadding),
 				) {
 					// Top Hero Backdrop + Poster Header
 					item(key = "details_hero") {
@@ -361,7 +404,8 @@ fun MangaDetailsScreen(
 										modifier = Modifier
 											.size(width = 114.dp, height = 166.dp)
 											.clip(RoundedCornerShape(14.dp))
-											.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp)),
+											.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
+											.nemuriSharedCover(sharedCoverKey ?: "details-${manga.id}", 14.dp),
 									)
 
 									Column(
@@ -572,9 +616,11 @@ fun MangaDetailsScreen(
 							val cf = uiState.pendingCloudFlare!!
 							DetailsInlineChallengeBanner(
 								title = "Cloudflare protection active",
-								message = uiState.errorMessage ?: "Verify in WebView to refresh chapters.",
-								actionLabel = "Verify",
+								message = uiState.errorMessage ?: "Solve verification in WebView to refresh chapters.",
+								actionLabel = "Solve in WebView",
 								onAction = { cfLauncher.launch(cf) },
+								onRetry = { viewModel.retry(force = true) },
+								onMigrate = { onOpenMigrate(manga.id) },
 							)
 						}
 					} else if (uiState.pendingInteractive != null) {
@@ -582,18 +628,31 @@ fun MangaDetailsScreen(
 						item(key = "details_interactive_banner") {
 							DetailsInlineChallengeBanner(
 								title = "Sign-in required",
-								message = uiState.errorMessage ?: "Open browser to sign in and refresh.",
-								actionLabel = "Open Browser",
+								message = uiState.errorMessage ?: "Complete verification in WebView and refresh.",
+								actionLabel = "Solve in WebView",
 								onAction = { browserLauncher.launch(interactive) },
+								onRetry = { viewModel.retry(force = true) },
+								onMigrate = { onOpenMigrate(manga.id) },
 							)
 						}
 					} else if (uiState.errorMessage != null) {
+						val challengeUrl = uiState.publicUrl.takeIf {
+							it.isNotBlank() && uiState.errorMessage.isLikelyChallengeErrorMessage()
+						}
 						item(key = "details_err_banner") {
 							DetailsInlineChallengeBanner(
-								title = "Refresh failed",
+								title = if (challengeUrl != null) "HTTP 403 / Verification required" else "Refresh failed",
 								message = uiState.errorMessage!!,
-								actionLabel = "Retry",
-								onAction = { viewModel.retry(force = true) },
+								actionLabel = if (challengeUrl != null) "Solve in WebView" else "Retry",
+								onAction = {
+									if (challengeUrl != null) {
+										context.startActivity(AppRouter.browserIntent(context, challengeUrl, manga.source, manga.title))
+									} else {
+										viewModel.retry(force = true)
+									}
+								},
+								onRetry = if (challengeUrl != null) ({ viewModel.retry(force = true) }) else null,
+								onMigrate = { onOpenMigrate(manga.id) },
 							)
 						}
 					}
@@ -611,6 +670,7 @@ fun MangaDetailsScreen(
 									Column(
 										modifier = Modifier
 											.fillMaxWidth()
+											.animateContentSize(nemuriSpatialSpring())
 											.clip(RoundedCornerShape(12.dp))
 											.clickable { descriptionExpanded = !descriptionExpanded },
 									) {
@@ -667,6 +727,8 @@ fun MangaDetailsScreen(
 								recap = uiState.aiRecap,
 								isGenerating = uiState.isGeneratingRecap,
 								aiModeLabel = uiState.aiModeLabel,
+								recapDepth = uiState.recapDepth,
+								onSelectDepth = viewModel::selectRecapDepth,
 								onGenerate = { viewModel.generateRecap(forceRefresh = uiState.aiRecap != null) },
 								onOpenSettings = onOpenAiSettings,
 							)
@@ -810,29 +872,51 @@ fun MangaDetailsScreen(
 					} else {
 						items(uiState.chapters, key = { it.chapter.id }) { row ->
 							val isSelected = row.chapter.id in uiState.selectedChapterIds
-							ChapterRowView(
-								row = row,
-								isSelectionMode = isSelectionMode,
-								isSelected = isSelected,
-								showDownloadButton = !uiState.isLocalOnly,
-								onClick = {
-									if (isSelectionMode) {
-										viewModel.toggleChapterSelection(row.chapter.id)
-									} else {
-										MangaTransferCache.put(manga)
-										onStartReader(manga, row.chapter.id, uiState.selectedBranch)
+							SnappingSwipeRow(
+								modifier = Modifier.animateItem(),
+								enabled = !isSelectionMode,
+								rightLabel = if (row.isRead || row.isCurrent) "Unread" else "Read",
+								rightIcon = if (row.isRead || row.isCurrent) Icons.Default.Undo else Icons.Default.DoneAll,
+								onSwipeRight = { viewModel.toggleChapterRead(row) },
+								leftLabel = if (row.isDownloaded) "Delete" else "Download",
+								leftIcon = if (row.isDownloaded) Icons.Default.DeleteOutline else Icons.Default.Download,
+								leftTint = if (row.isDownloaded) NemuriTheme.colors.danger else NemuriTheme.colors.healthy,
+								onSwipeLeft = if (uiState.isLocalOnly && !row.isDownloaded) {
+									null
+								} else {
+									{
+										if (row.isDownloaded) {
+											viewModel.deleteDownloadedChapters(setOf(row.chapter.id))
+										} else {
+											viewModel.downloadChapters(listOf(row.chapter.id))
+										}
 									}
 								},
-								onLongClick = {
-									if (isSelectionMode) {
-										viewModel.toggleChapterSelection(row.chapter.id)
-									} else {
-										chapterMenuTarget = row
-									}
-								},
-								onDownloadClick = { viewModel.downloadChapters(listOf(row.chapter.id)) },
-								onDeleteLocalClick = { viewModel.deleteDownloadedChapters(setOf(row.chapter.id)) },
-							)
+							) {
+								ChapterRowView(
+									row = row,
+									isSelectionMode = isSelectionMode,
+									isSelected = isSelected,
+									showDownloadButton = !uiState.isLocalOnly,
+									onClick = {
+										if (isSelectionMode) {
+											viewModel.toggleChapterSelection(row.chapter.id)
+										} else {
+											MangaTransferCache.put(manga)
+											onStartReader(manga, row.chapter.id, uiState.selectedBranch)
+										}
+									},
+									onLongClick = {
+										if (isSelectionMode) {
+											viewModel.toggleChapterSelection(row.chapter.id)
+										} else {
+											chapterMenuTarget = row
+										}
+									},
+									onDownloadClick = { viewModel.downloadChapters(listOf(row.chapter.id)) },
+									onDeleteLocalClick = { viewModel.deleteDownloadedChapters(setOf(row.chapter.id)) },
+								)
+							}
 						}
 					}
 
@@ -901,9 +985,21 @@ fun MangaDetailsScreen(
 							color = NemuriTheme.colors.textPrimary,
 						)
 					}
-					Row(verticalAlignment = Alignment.CenterVertically) {
+					Row(
+						modifier = Modifier.horizontalScroll(rememberScrollState()),
+						verticalAlignment = Alignment.CenterVertically,
+					) {
 						IconButton(onClick = viewModel::selectAllChapters) {
 							Icon(Icons.Default.SelectAll, contentDescription = "Select all", tint = NemuriTheme.colors.textSecondary)
+						}
+						TextButton(onClick = viewModel::invertChapterSelection) {
+							Text("Invert", color = NemuriTheme.colors.textSecondary)
+						}
+						IconButton(onClick = viewModel::selectChaptersBelow) {
+							Icon(Icons.Default.VerticalAlignBottom, contentDescription = "Select below", tint = NemuriTheme.colors.textSecondary)
+						}
+						TextButton(onClick = viewModel::selectUnreadChapters) {
+							Text("Unread", color = NemuriTheme.colors.cyan)
 						}
 						if (!uiState.isLocalOnly) {
 							IconButton(onClick = { viewModel.downloadChapters(uiState.selectedChapterIds) }) {
@@ -1408,6 +1504,8 @@ private fun WhereWasIRecapCard(
 	recap: org.koitharu.kotatsu.ai.data.MangaAiRecapEntity?,
 	isGenerating: Boolean,
 	aiModeLabel: String,
+	recapDepth: RecapDepth,
+	onSelectDepth: (RecapDepth) -> Unit,
 	onGenerate: () -> Unit,
 	onOpenSettings: () -> Unit,
 ) {
@@ -1453,7 +1551,7 @@ private fun WhereWasIRecapCard(
 						shape = RoundedCornerShape(999.dp),
 					) {
 						Text(
-							text = recap?.engineUsed ?: aiModeLabel,
+							text = recap?.displayEngineLabel() ?: aiModeLabel,
 							style = MaterialTheme.typography.labelSmall,
 							color = if (recap?.isAiGenerated == true) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textMuted,
 							maxLines = 1,
@@ -1483,16 +1581,47 @@ private fun WhereWasIRecapCard(
 				)
 			} else {
 				Text(
-					text = "Spoiler-free recap up to your current read chapter. Never passes unread chapters.",
+					text = "Spoiler-free recap up to your current read chapter. Unread chapters remain 100% quarantined.",
 					style = MaterialTheme.typography.bodySmall,
 					color = NemuriTheme.colors.textMuted,
 				)
 			}
 
+			val cachedDepth = recap?.parsedDepth()
 			Row(
 				modifier = Modifier.fillMaxWidth(),
-				horizontalArrangement = Arrangement.End,
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.SpaceBetween,
 			) {
+				Surface(
+					color = NemuriTheme.colors.surfaceElevated,
+					shape = RoundedCornerShape(10.dp),
+					modifier = Modifier.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(10.dp)),
+				) {
+					Row(
+						modifier = Modifier.padding(3.dp),
+						horizontalArrangement = Arrangement.spacedBy(4.dp),
+					) {
+						RecapDepth.entries.forEach { depth ->
+							val selected = recapDepth == depth
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else Color.Transparent,
+								shape = RoundedCornerShape(7.dp),
+								modifier = Modifier
+									.clip(RoundedCornerShape(7.dp))
+									.clickable { onSelectDepth(depth) },
+							) {
+								Text(
+									text = depth.shortLabel,
+									style = MaterialTheme.typography.labelSmall,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
+									modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+								)
+							}
+						}
+					}
+				}
+
 				Button(
 					onClick = onGenerate,
 					enabled = !isGenerating,
@@ -1517,7 +1646,13 @@ private fun WhereWasIRecapCard(
 							modifier = Modifier.size(15.dp),
 						)
 						Spacer(Modifier.width(5.dp))
-						Text(if (recap == null) "Generate Recap" else "Refresh Recap")
+						Text(
+							when {
+								recap == null -> "Catch Me Up (${recapDepth.shortLabel})"
+								cachedDepth != null && cachedDepth != recapDepth -> "Generate ${recapDepth.shortLabel}"
+								else -> "Refresh"
+							},
+						)
 					}
 				}
 			}
@@ -1720,6 +1855,7 @@ private fun DetailsChallengeView(
 	actionLabel: String,
 	onAction: () -> Unit,
 	onRetry: () -> Unit,
+	onMigrate: () -> Unit,
 ) {
 	Column(
 		modifier = Modifier
@@ -1732,7 +1868,10 @@ private fun DetailsChallengeView(
 		Spacer(modifier = Modifier.height(8.dp))
 		Text(message, style = MaterialTheme.typography.bodyMedium, color = NemuriTheme.colors.textMuted)
 		Spacer(modifier = Modifier.height(16.dp))
-		Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+		FlowRow(
+			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
 			Button(
 				onClick = onAction,
 				colors = ButtonDefaults.buttonColors(containerColor = NemuriTheme.colors.cyan, contentColor = NemuriTheme.colors.onCyan),
@@ -1740,7 +1879,10 @@ private fun DetailsChallengeView(
 				Text(actionLabel)
 			}
 			TextButton(onClick = onRetry) {
-				Text("Retry", color = NemuriTheme.colors.textSecondary)
+				Text("Retry", color = NemuriTheme.colors.cyan)
+			}
+			TextButton(onClick = onMigrate) {
+				Text("Find Alternative", color = NemuriTheme.colors.textSecondary)
 			}
 		}
 	}
@@ -1752,6 +1894,8 @@ private fun DetailsInlineChallengeBanner(
 	message: String,
 	actionLabel: String,
 	onAction: () -> Unit,
+	onRetry: (() -> Unit)? = null,
+	onMigrate: (() -> Unit)? = null,
 ) {
 	Surface(
 		color = NemuriTheme.colors.surfaceElevated,
@@ -1761,17 +1905,29 @@ private fun DetailsInlineChallengeBanner(
 			.padding(horizontal = 16.dp, vertical = 6.dp)
 			.border(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
 	) {
-		Row(
+		Column(
 			modifier = Modifier.padding(12.dp),
-			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			verticalArrangement = Arrangement.spacedBy(6.dp),
 		) {
-			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(title, style = MaterialTheme.typography.titleSmall, color = NemuriTheme.colors.amber)
-				Text(message, style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-			}
-			TextButton(onClick = onAction) {
-				Text(actionLabel, color = NemuriTheme.colors.cyan)
+			Text(title, style = MaterialTheme.typography.titleSmall, color = NemuriTheme.colors.amber)
+			Text(message, style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textSecondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+			FlowRow(
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+				verticalArrangement = Arrangement.spacedBy(4.dp),
+			) {
+				TextButton(onClick = onAction) {
+					Text(actionLabel, color = NemuriTheme.colors.cyan)
+				}
+				if (onRetry != null) {
+					TextButton(onClick = onRetry) {
+						Text("Retry", color = NemuriTheme.colors.textPrimary)
+					}
+				}
+				if (onMigrate != null) {
+					TextButton(onClick = onMigrate) {
+						Text("Find Alternative", color = NemuriTheme.colors.textSecondary)
+					}
+				}
 			}
 		}
 	}

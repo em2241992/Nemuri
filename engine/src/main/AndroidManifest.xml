@@ -73,6 +73,7 @@
 		<service
 			android:name="org.koitharu.kotatsu.local.ui.LocalIndexUpdateService"
 			android:exported="false"
+			android:foregroundServiceType="dataSync"
 			android:label="@string/local_manga_processing" />
 		<service
 			android:name="org.koitharu.kotatsu.local.ui.ImportService"

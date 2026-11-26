@@ -23,6 +23,7 @@ import org.koitharu.kotatsu.ai.domain.LocalLlmClient
 import org.koitharu.kotatsu.ai.domain.LocalModelDownloadState
 import org.koitharu.kotatsu.ai.domain.NanoAvailability
 import org.koitharu.kotatsu.ai.domain.NemuriAiRouter
+import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.koitharu.kotatsu.ai.domain.WhereWasIRecapUseCase
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.nemuri.app.ui.components.NemuriToastManager
@@ -38,6 +39,7 @@ data class LocalModelUiItem(
 	val isDownloaded: Boolean,
 	val isSelected: Boolean,
 	val sizeMb: Long,
+	val isRecommended: Boolean = false,
 )
 
 @Immutable
@@ -62,6 +64,7 @@ data class AiSettingsUiState(
 	val hasGeminiKey: Boolean = false,
 	val showRecapCard: Boolean = true,
 	val includeNovelExcerpt: Boolean = true,
+	val recapDepth: RecapDepth = RecapDepth.DETAILED,
 	val isTestingConnection: Boolean = false,
 	val testResult: AiConnectionTestResult? = null,
 )
@@ -120,6 +123,7 @@ class AiSettingsViewModel @Inject constructor(
 				isDownloaded = downloaded,
 				isSelected = selectedLocalId == entry.id,
 				sizeMb = mb,
+				isRecommended = entry.isRecommended,
 			)
 		}
 		AiSettingsUiState(
@@ -143,6 +147,7 @@ class AiSettingsViewModel @Inject constructor(
 			hasGeminiKey = dyn.hasGeminiKey,
 			showRecapCard = settings.isAiShowRecapCard,
 			includeNovelExcerpt = settings.isAiIncludeNovelExcerpt,
+			recapDepth = RecapDepth.fromKey(settings.aiRecapDepth),
 			isTestingConnection = dyn.isTestingConnection,
 			testResult = dyn.testResult,
 		)
@@ -261,6 +266,7 @@ class AiSettingsViewModel @Inject constructor(
 	fun saveRemoteConfig(url: String, model: String, bearerTokenInput: String?) {
 		settings.aiRemoteUrl = url.trim().ifEmpty { "http://127.0.0.1:11434/v1" }
 		settings.aiRemoteModel = model.trim().ifEmpty { "llama3.2" }
+		settings.isAiRemoteConfiguredByUser = true
 		if (bearerTokenInput != null) {
 			secretStore.setOpenAiApiKey(bearerTokenInput)
 		}
@@ -299,6 +305,10 @@ class AiSettingsViewModel @Inject constructor(
 
 	fun setIncludeNovelExcerpt(enabled: Boolean) {
 		settings.isAiIncludeNovelExcerpt = enabled
+	}
+
+	fun setRecapDepth(depth: RecapDepth) {
+		settings.aiRecapDepth = depth.key
 	}
 
 	fun testActiveBackend() {

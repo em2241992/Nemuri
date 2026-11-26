@@ -43,20 +43,23 @@ fun NemuriTheme(
 	)
 
 	val view = LocalView.current
+	val reduceMotion = rememberShouldReduceMotion()
 	if (!view.isInEditMode) {
 		SideEffect {
 			val window = (view.context as? Activity)?.window ?: return@SideEffect
-			window.statusBarColor = extendedColors.background.toArgb()
-			window.navigationBarColor = extendedColors.background.toArgb()
 			val insetsController = WindowCompat.getInsetsController(window, view)
 			insetsController.isAppearanceLightStatusBars = !isDark
 			insetsController.isAppearanceLightNavigationBars = !isDark
 		}
 	}
 
-	CompositionLocalProvider(LocalNemuriColors provides extendedColors) {
+	CompositionLocalProvider(
+		LocalNemuriColors provides extendedColors,
+		LocalReducedMotion provides reduceMotion,
+	) {
 		MaterialTheme(
 			colorScheme = materialColors,
+			motionScheme = if (reduceMotion) androidx.compose.material3.MotionScheme.standard() else androidx.compose.material3.MotionScheme.expressive(),
 			typography = NemuriTypography,
 			content = content,
 		)

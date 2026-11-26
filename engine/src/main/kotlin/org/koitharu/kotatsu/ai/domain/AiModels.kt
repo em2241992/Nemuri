@@ -1,5 +1,31 @@
 package org.koitharu.kotatsu.ai.domain
 
+enum class RecapDepth(
+	val key: String,
+	val shortLabel: String,
+	val label: String,
+	val description: String,
+) {
+	BRIEF(
+		key = "BRIEF",
+		shortLabel = "Brief",
+		label = "Brief (Safe Teaser)",
+		description = "Atmospheric reminder of premise and arc position without major plot twists or character fates",
+	),
+	DETAILED(
+		key = "DETAILED",
+		shortLabel = "Detailed",
+		label = "Detailed (Story & Characters So Far)",
+		description = "Names characters, key relationships, faction conflicts, and events strictly at or before your last read chapter",
+	),
+	;
+
+	companion object {
+		fun fromKey(key: String?): RecapDepth =
+			entries.firstOrNull { it.key.equals(key, ignoreCase = true) } ?: DETAILED
+	}
+}
+
 enum class AiMode(val key: String, val label: String) {
 	OFF("OFF", "Off"),
 	AUTO("AUTO", "Auto"),
@@ -33,6 +59,8 @@ data class LocalLlmCatalogEntry(
 	val downloadUrl: String?,
 	val approxSizeBytes: Long,
 	val minRamMb: Int,
+	val isRecommended: Boolean = false,
+	val requiredSocModel: String? = null,
 )
 
 data class LocalModelDownloadState(
@@ -54,6 +82,8 @@ data class NanoDiagnostics(
 	val detailMessage: String,
 	val activeProfileLabel: String? = null,
 	val aiCoreVersionName: String? = null,
+	val supportsOpenPrompt: Boolean = false,
+	val supportsSummarization: Boolean = false,
 )
 
 data class AiGenerationResult(

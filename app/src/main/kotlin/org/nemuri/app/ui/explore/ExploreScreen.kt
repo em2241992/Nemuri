@@ -1,5 +1,6 @@
 package org.nemuri.app.ui.explore
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,13 +79,19 @@ import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.parser.favicon.faviconUri
 import org.koitharu.kotatsu.explore.data.SourcesSortOrder
 import org.koitharu.kotatsu.parsers.model.Manga
+import org.nemuri.app.browser.CloudFlareActivity
+import org.nemuri.app.browser.NemuriBrowserActivity
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.cornerSafeBadgeInset
+import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.theme.NemuriTheme
+import org.nemuri.app.ui.theme.nemuriSharedCover
 
 @Composable
 fun ExploreScreen(
@@ -94,17 +101,26 @@ fun ExploreScreen(
 	onOpenDownloads: () -> Unit,
 	onOpenSourceBrowse: (String) -> Unit,
 	onOpenGlobalSearch: (String) -> Unit,
-	onOpenDetails: (Manga) -> Unit,
+	onOpenDetails: (Manga, String?) -> Unit,
 	onOpenSettings: () -> Unit,
 	viewModel: ExploreViewModel = viewModel(),
 ) {
 	val context = LocalContext.current
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val layoutPrefs = LocalLayoutStudioPrefs.current
+	val bottomPadding = rememberRootTabBottomPadding()
 
 	var showSortAndLanguageSheet by remember { mutableStateOf(false) }
 	var showHomeSourcePicker by remember { mutableStateOf(false) }
 	var actionTargetTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
 	var languagePickerTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
+
+	val cfLauncher = rememberLauncherForActivityResult(CloudFlareActivity.Contract()) { solved ->
+		if (solved) viewModel.refreshHomeHub()
+	}
+	val browserLauncher = rememberLauncherForActivityResult(NemuriBrowserActivity.Contract()) { solved ->
+		if (solved) viewModel.refreshHomeHub()
+	}
 
 	Column(modifier = Modifier.fillMaxSize()) {
 		NemuriTopSearchHeader(
@@ -121,7 +137,7 @@ fun ExploreScreen(
 		LazyVerticalGrid(
 			columns = GridCells.Adaptive(minSize = 280.dp),
 			modifier = Modifier.fillMaxSize(),
-			contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 120.dp),
+			contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
 			horizontalArrangement = Arrangement.spacedBy(10.dp),
 			verticalArrangement = Arrangement.spacedBy(10.dp),
 		) {
@@ -177,7 +193,7 @@ fun ExploreScreen(
 								.clickable(enabled = !uiState.isFindingRandom) {
 									viewModel.findRandomManga { manga ->
 										MangaTransferCache.put(manga)
-										onOpenDetails(manga)
+										onOpenDetails(manga, "explore-random-${manga.id}")
 									}
 								},
 						) {
@@ -290,26 +306,68 @@ fun ExploreScreen(
 								.fillMaxWidth()
 								.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
 						) {
-							Row(
+							Column(
 								modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.SpaceBetween,
+								verticalArrangement = Arrangement.spacedBy(8.dp),
 							) {
 								Text(
 									text = uiState.homeHubError.orEmpty(),
 									style = MaterialTheme.typography.bodySmall,
 									color = NemuriTheme.colors.textMuted,
-									modifier = Modifier.weight(1f),
 								)
-								Text(
-									text = "Retry",
-									style = MaterialTheme.typography.labelMedium,
-									color = NemuriTheme.colors.cyan,
-									modifier = Modifier
-										.clip(RoundedCornerShape(8.dp))
-										.clickable { viewModel.refreshHomeHub() }
-										.padding(horizontal = 8.dp, vertical = 4.dp),
-								)
+								Row(
+									modifier = Modifier.fillMaxWidth(),
+									horizontalArrangement = Arrangement.spacedBy(8.dp),
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									val cf = uiState.homeHubCloudFlare
+									val interactive = uiState.homeHubInteractive
+									val browserUrl = uiState.homeHubBrowserUrl ?: home.homeUrl
+									if (cf != null || interactive != null || !browserUrl.isNullOrBlank()) {
+										Surface(
+											color = NemuriTheme.colors.tealContainer,
+											shape = RoundedCornerShape(8.dp),
+											modifier = Modifier
+												.clip(RoundedCornerShape(8.dp))
+												.clickable {
+													when {
+														cf != null -> cfLauncher.launch(cf)
+														interactive != null -> browserLauncher.launch(interactive)
+														!browserUrl.isNullOrBlank() -> runCatching {
+															context.startActivity(
+																AppRouter.browserIntent(context, browserUrl, home.sourceInfo.mangaSource, home.title),
+															)
+														}
+													}
+												},
+										) {
+											Text(
+												text = "Solve in WebView",
+												style = MaterialTheme.typography.labelMedium,
+												color = NemuriTheme.colors.cyan,
+												modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+											)
+										}
+									}
+									Text(
+										text = "Retry",
+										style = MaterialTheme.typography.labelMedium,
+										color = NemuriTheme.colors.cyan,
+										modifier = Modifier
+											.clip(RoundedCornerShape(8.dp))
+											.clickable { viewModel.refreshHomeHub() }
+											.padding(horizontal = 8.dp, vertical = 5.dp),
+									)
+									Text(
+										text = "Switch Source",
+										style = MaterialTheme.typography.labelMedium,
+										color = NemuriTheme.colors.textSecondary,
+										modifier = Modifier
+											.clip(RoundedCornerShape(8.dp))
+											.clickable { showHomeSourcePicker = true }
+											.padding(horizontal = 8.dp, vertical = 5.dp),
+									)
+								}
 							}
 						}
 					}
@@ -352,12 +410,16 @@ fun ExploreScreen(
 									) {
 										items(carousel.items, key = { "${carousel.id}:${it.id}" }) { manga ->
 											val inLib = manga.id in uiState.libraryMangaIds || manga.url in uiState.libraryMangaUrls
+											val coverKey = "explore-${carousel.id}-${manga.id}"
 											HomeCarouselCard(
 												manga = manga,
 												inLibrary = inLib,
+												cornerRadiusDp = layoutPrefs.cardCornerRadiusDp,
+												aspectRatio = layoutPrefs.coverAspectRatio.ratio,
+												sharedCoverKey = coverKey,
 												onClick = {
 													MangaTransferCache.put(manga)
-													onOpenDetails(manga)
+													onOpenDetails(manga, coverKey)
 												},
 											)
 										}
@@ -920,30 +982,36 @@ private fun HomeSourceHubHeader(
 private fun HomeCarouselCard(
 	manga: Manga,
 	inLibrary: Boolean,
+	cornerRadiusDp: Int,
+	aspectRatio: Float,
+	sharedCoverKey: String,
 	onClick: () -> Unit,
 ) {
+	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val coverShape = RoundedCornerShape(safeCorner.dp)
 	Column(
 		modifier = Modifier
-			.width(108.dp)
-			.clip(RoundedCornerShape(12.dp))
+			.width(110.dp)
 			.clickable(onClick = onClick),
-		verticalArrangement = Arrangement.spacedBy(5.dp),
+		verticalArrangement = Arrangement.spacedBy(6.dp),
 	) {
 		Box(
 			modifier = Modifier
 				.fillMaxWidth()
-				.aspectRatio(0.7f)
-				.clip(RoundedCornerShape(12.dp))
+				.aspectRatio(aspectRatio)
+				.clip(coverShape)
 				.border(
 					1.dp,
 					if (inLibrary) NemuriTheme.colors.healthy.copy(alpha = 0.65f) else NemuriTheme.colors.border,
-					RoundedCornerShape(12.dp),
+					coverShape,
 				),
 		) {
 			MangaCoverImage(
 				manga = manga,
 				coverUrl = manga.coverUrl,
-				modifier = Modifier.fillMaxSize(),
+				modifier = Modifier
+					.fillMaxSize()
+					.nemuriSharedCover(sharedCoverKey, safeCorner.dp),
 			)
 			if (inLibrary) {
 				Surface(
@@ -951,7 +1019,7 @@ private fun HomeCarouselCard(
 					shape = RoundedCornerShape(6.dp),
 					modifier = Modifier
 						.align(Alignment.TopEnd)
-						.padding(5.dp),
+						.padding(cornerSafeBadgeInset(safeCorner)),
 				) {
 					NonWrappingBadgeText(
 						text = "SAVED",
@@ -966,6 +1034,7 @@ private fun HomeCarouselCard(
 			text = manga.title,
 			style = MaterialTheme.typography.labelMedium,
 			color = NemuriTheme.colors.textPrimary,
+			minLines = 2,
 			maxLines = 2,
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.padding(horizontal = 2.dp),

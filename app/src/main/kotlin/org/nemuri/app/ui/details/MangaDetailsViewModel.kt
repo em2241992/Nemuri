@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.ai.data.MangaAiRecapEntity
 import org.koitharu.kotatsu.ai.domain.AiMode
+import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.koitharu.kotatsu.ai.domain.WhereWasIRecapUseCase
 import org.koitharu.kotatsu.alternatives.domain.MigrateUseCase
 import org.koitharu.kotatsu.bookmarks.domain.Bookmark
@@ -165,6 +166,7 @@ data class MangaDetailsUiState(
 	val isGeneratingRecap: Boolean = false,
 	val isRecapCardEnabled: Boolean = true,
 	val aiModeLabel: String = "Auto",
+	val recapDepth: RecapDepth = RecapDepth.DETAILED,
 )
 
 private data class DetailsChapterControls(
@@ -223,6 +225,7 @@ class MangaDetailsViewModel @Inject constructor(
 	private val replacingDuplicateFlow = MutableStateFlow(false)
 	private val titleStatsFlow = MutableStateFlow(MangaTitleStats())
 	private val generatingRecapFlow = MutableStateFlow(false)
+	private val selectedRecapDepthFlow = MutableStateFlow<RecapDepth?>(null)
 	private var recapJob: Job? = null
 
 	private val _uiState = MutableStateFlow(MangaDetailsUiState())
@@ -257,6 +260,7 @@ class MangaDetailsViewModel @Inject constructor(
 		auxiliaryJob?.cancel()
 		recapJob?.cancel()
 		generatingRecapFlow.value = false
+		selectedRecapDepthFlow.value = null
 		selectedChaptersFlow.value = emptySet()
 		relatedFlow.value = emptyList()
 
@@ -332,6 +336,70 @@ class MangaDetailsViewModel @Inject constructor(
 	fun selectAllChapters() {
 		val ids = uiState.value.chapters.mapTo(HashSet()) { it.chapter.id }
 		selectedChaptersFlow.value = ids
+	}
+
+	fun invertChapterSelection() {
+		val allIds = uiState.value.chapters.map { it.chapter.id }
+		val current = selectedChaptersFlow.value
+		selectedChaptersFlow.value = allIds.filterTo(HashSet()) { it !in current }
+	}
+
+	fun selectChaptersBelow() {
+		val orderedIds = uiState.value.chapters.map { it.chapter.id }
+		val selected = selectedChaptersFlow.value
+		if (orderedIds.isEmpty() || selected.isEmpty()) return
+		val anchorIdx = orderedIds.indexOfFirst { it in selected }
+		if (anchorIdx < 0) return
+		selectedChaptersFlow.value = selected + orderedIds.subList(anchorIdx, orderedIds.size)
+	}
+
+	fun selectUnreadChapters() {
+		selectedChaptersFlow.value = uiState.value.chapters
+			.filter { !it.isRead }
+			.mapTo(HashSet()) { it.chapter.id }
+	}
+
+	fun selectChapterRange(ids: Set<Long>) {
+		selectedChaptersFlow.value = ids
+	}
+
+	fun toggleChapterRead(row: ChapterRowItem) {
+		val details = rawDetailsFlow.value ?: return
+		val branch = uiState.value.selectedBranch
+		val branchChapters = details.chapters[branch] ?: details.allChapters
+		val idx = branchChapters.indexOfFirst { it.id == row.chapter.id }
+		if (idx < 0 || branchChapters.isEmpty()) return
+		val manga = details.toManga()
+		viewModelScope.launch(Dispatchers.IO) {
+			if (row.isRead || row.isCurrent) {
+				if (idx == 0 && row.isCurrent) {
+					historyRepository.delete(manga)
+				} else {
+					val targetPercent = (idx.toFloat() / branchChapters.size.toFloat()).coerceIn(0f, 1f)
+					historyRepository.addOrUpdate(
+						manga = manga,
+						chapterId = row.chapter.id,
+						page = 0,
+						scroll = 0,
+						percent = targetPercent,
+						force = true,
+					)
+				}
+				toastManager.show("Marked \"${chapterDisplayName(row.chapter)}\" unread")
+			} else {
+				val nextChapter = branchChapters.getOrNull(idx + 1) ?: row.chapter
+				val targetPercent = ((idx + 1).toFloat() / branchChapters.size.toFloat()).coerceIn(0f, 1f)
+				historyRepository.addOrUpdate(
+					manga = manga,
+					chapterId = nextChapter.id,
+					page = 0,
+					scroll = 0,
+					percent = targetPercent,
+					force = true,
+				)
+				toastManager.show("Marked \"${chapterDisplayName(row.chapter)}\" read")
+			}
+		}
 	}
 
 	fun clearChapterSelection() {
@@ -465,6 +533,11 @@ class MangaDetailsViewModel @Inject constructor(
 		}
 	}
 
+	fun selectRecapDepth(depth: RecapDepth) {
+		selectedRecapDepthFlow.value = depth
+		settings.aiRecapDepth = depth.key
+	}
+
 	fun generateRecap(forceRefresh: Boolean = false) {
 		val details = rawDetailsFlow.value ?: return
 		val state = uiState.value
@@ -475,6 +548,7 @@ class MangaDetailsViewModel @Inject constructor(
 		} else {
 			branchChapters
 		}
+		val requestedDepth = state.recapDepth
 		recapJob?.cancel()
 		recapJob = viewModelScope.launch(Dispatchers.IO) {
 			generatingRecapFlow.value = true
@@ -485,6 +559,7 @@ class MangaDetailsViewModel @Inject constructor(
 					currentChapterId = state.history?.chapterId,
 					descriptionText = details.description,
 					forceRefresh = forceRefresh,
+					depthOverride = requestedDepth,
 				)
 			}.onFailure { err ->
 				toastManager.show(err.localizedMessage ?: "Failed to build recap")
@@ -728,19 +803,26 @@ class MangaDetailsViewModel @Inject constructor(
 			.filter {
 				it == null ||
 					it == AppSettings.KEY_AI_MODE ||
-					it == AppSettings.KEY_AI_SHOW_RECAP_CARD
+					it == AppSettings.KEY_AI_SHOW_RECAP_CARD ||
+					it == AppSettings.KEY_AI_RECAP_DEPTH
 			}
 			.onStart { emit(null) }
 
 		val recapBundleFlow = combine(
 			recapUseCaseProvider.get().observeCached(mangaId).catch { emit(null) },
 			generatingRecapFlow,
+			selectedRecapDepthFlow,
 			aiPrefFlow,
-		) { recap, isGen, _ ->
-			Triple(
-				recap,
-				isGen,
-				settings.isAiShowRecapCard to AiMode.fromKey(settings.aiMode).label,
+		) { recap, isGen, selectedDepth, _ ->
+			val effectiveDepth = selectedDepth
+				?: recap?.parsedDepth()
+				?: RecapDepth.fromKey(settings.aiRecapDepth)
+			RecapMetaBundle(
+				recap = recap,
+				isGenerating = isGen,
+				isCardEnabled = settings.isAiShowRecapCard,
+				aiModeLabel = AiMode.fromKey(settings.aiMode).label,
+				recapDepth = effectiveDepth,
 			)
 		}
 
@@ -769,10 +851,11 @@ class MangaDetailsViewModel @Inject constructor(
 			meta.copy(titleStats = titleStats)
 		}.combine(recapBundleFlow) { meta, recapBundle ->
 			meta.copy(
-				aiRecap = recapBundle.first,
-				isGeneratingRecap = recapBundle.second,
-				isRecapCardEnabled = recapBundle.third.first,
-				aiModeLabel = recapBundle.third.second,
+				aiRecap = recapBundle.recap,
+				isGeneratingRecap = recapBundle.isGenerating,
+				isRecapCardEnabled = recapBundle.isCardEnabled,
+				aiModeLabel = recapBundle.aiModeLabel,
+				recapDepth = recapBundle.recapDepth,
 			)
 		}
 
@@ -948,6 +1031,7 @@ class MangaDetailsViewModel @Inject constructor(
 					isGeneratingRecap = meta.isGeneratingRecap,
 					isRecapCardEnabled = meta.isRecapCardEnabled,
 					aiModeLabel = meta.aiModeLabel,
+					recapDepth = meta.recapDepth,
 				)
 			}.flowOn(Dispatchers.Default)
 				.collect { state ->
@@ -975,5 +1059,14 @@ class MangaDetailsViewModel @Inject constructor(
 		val isGeneratingRecap: Boolean = false,
 		val isRecapCardEnabled: Boolean = true,
 		val aiModeLabel: String = "Auto",
+		val recapDepth: RecapDepth = RecapDepth.DETAILED,
+	)
+
+	private data class RecapMetaBundle(
+		val recap: MangaAiRecapEntity?,
+		val isGenerating: Boolean,
+		val isCardEnabled: Boolean,
+		val aiModeLabel: String,
+		val recapDepth: RecapDepth,
 	)
 }

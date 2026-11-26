@@ -48,6 +48,7 @@ import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriLoadingState
+import org.nemuri.app.ui.components.rememberPushScreenBottomPadding
 import org.nemuri.app.ui.components.rememberSyncedTextField
 import org.nemuri.app.ui.theme.NemuriTheme
 
@@ -59,6 +60,7 @@ fun BookmarksScreen(
 	viewModel: BookmarksViewModel = viewModel(),
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val bottomPadding = rememberPushScreenBottomPadding(24.dp)
 
 	Column(
 		modifier = Modifier
@@ -142,7 +144,7 @@ fun BookmarksScreen(
 			else -> {
 				LazyColumn(
 					modifier = Modifier.fillMaxSize(),
-					contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomPadding),
 					verticalArrangement = Arrangement.spacedBy(10.dp),
 				) {
 					uiState.groups.forEach { group ->
@@ -196,8 +198,6 @@ fun BookmarksScreen(
 							)
 						}
 					}
-
-					item { Spacer(modifier = Modifier.height(64.dp)) }
 				}
 			}
 		}

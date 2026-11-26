@@ -76,9 +76,9 @@ object BitmapDecoderCompat {
 		return when (format?.subtype) {
 			FORMAT_JXL -> {
 				val headSlice = readPrefix(buffered, JXL_BOUNDS_PREFIX_BYTES)
-				val dims = JxlDecoder.decodeBounds(headSlice) ?: run {
+				val dims = JxlDecoder.decodeBoundsSafe(headSlice) ?: run {
 					val rest = buffered.readBytes()
-					if (rest.isEmpty()) null else JxlDecoder.decodeBounds(headSlice + rest)
+					if (rest.isEmpty()) null else JxlDecoder.decodeBoundsSafe(headSlice + rest)
 				} ?: return null
 				Size(dims[0], dims[1])
 			}
@@ -131,7 +131,7 @@ object BitmapDecoderCompat {
 
 	/** Android has no JPEG XL decoder of its own, so these go through the bundled one. */
 	@Blocking
-	fun decodeJxl(bytes: ByteArray): Bitmap = checkBitmapNotNull(JxlDecoder.decode(bytes), FORMAT_JXL)
+	fun decodeJxl(bytes: ByteArray): Bitmap = checkBitmapNotNull(JxlDecoder.decodeSafe(bytes), FORMAT_JXL)
 
 	@Blocking
 	fun createRegionDecoder(inoutStream: InputStream): BitmapRegionDecoder? = try {

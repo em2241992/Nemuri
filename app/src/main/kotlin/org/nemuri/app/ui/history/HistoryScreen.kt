@@ -53,16 +53,18 @@ import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
+import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.theme.NemuriTheme
 
 @Composable
 fun HistoryScreen(
-	onOpenDetails: (Manga) -> Unit,
+	onOpenDetails: (Manga, String?) -> Unit,
 	onResumeReading: (Manga, MangaHistory) -> Unit,
 	onOpenSettings: () -> Unit,
 	viewModel: HistoryViewModel = viewModel(),
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val bottomPadding = rememberRootTabBottomPadding()
 	var showOptionsSheet by remember { mutableStateOf(false) }
 	var showClearDialog by remember { mutableStateOf(false) }
 
@@ -126,7 +128,7 @@ fun HistoryScreen(
 			else -> {
 				LazyColumn(
 					modifier = Modifier.fillMaxSize(),
-					contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
+					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
 					verticalArrangement = Arrangement.spacedBy(10.dp),
 				) {
 					uiState.groups.forEach { (groupTitle, items) ->
@@ -141,6 +143,7 @@ fun HistoryScreen(
 							}
 						}
 						items(items, key = { it.manga.id }) { item ->
+							val coverKey = "hist-${item.manga.id}"
 							Row(
 								modifier = Modifier.fillMaxWidth(),
 								verticalAlignment = Alignment.CenterVertically,
@@ -150,9 +153,10 @@ fun HistoryScreen(
 									manga = item.manga,
 									subtitle = item.timeSummary,
 									progress = item.progressPercent,
+									sharedCoverKey = coverKey,
 									onClick = {
 										MangaTransferCache.put(item.manga)
-										onOpenDetails(item.manga)
+										onOpenDetails(item.manga, coverKey)
 									},
 									onQuickActionClick = {
 										MangaTransferCache.put(item.manga)

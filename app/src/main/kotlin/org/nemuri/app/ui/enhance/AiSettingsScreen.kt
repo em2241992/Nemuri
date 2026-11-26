@@ -2,6 +2,7 @@ package org.nemuri.app.ui.enhance
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,6 +69,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koitharu.kotatsu.ai.domain.AiMode
 import org.koitharu.kotatsu.ai.domain.LocalLlmAccelerator
 import org.koitharu.kotatsu.ai.domain.NanoAvailability
+import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.nemuri.app.ui.settings.SettingsGroupCard
 import org.nemuri.app.ui.settings.SettingsRowDivider
 import org.nemuri.app.ui.settings.SettingsScaffold
@@ -217,20 +219,23 @@ fun AiSettingsScreen(
 							}
 						}
 						if (state.nanoAvailability == NanoAvailability.UNAVAILABLE && state.isLocalRuntimeSupported && !state.isCheckingNano) {
+							val isSamsung = remember { Build.MANUFACTURER.equals("samsung", ignoreCase = true) }
 							Row(
 								modifier = Modifier.fillMaxWidth(),
 								horizontalArrangement = Arrangement.spacedBy(8.dp),
 							) {
-								OutlinedButton(
-									onClick = {
-										runCatching {
-											context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-										}
-									},
-									border = BorderStroke(1.dp, NemuriTheme.colors.border),
-									modifier = Modifier.weight(1f),
-								) {
-									Text("Developer Options", style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textSecondary)
+								if (!isSamsung) {
+									OutlinedButton(
+										onClick = {
+											runCatching {
+												context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+											}
+										},
+										border = BorderStroke(1.dp, NemuriTheme.colors.border),
+										modifier = Modifier.weight(1f),
+									) {
+										Text("Developer Options", style = MaterialTheme.typography.labelMedium, color = NemuriTheme.colors.textSecondary)
+									}
 								}
 								OutlinedButton(
 									onClick = {
@@ -360,7 +365,25 @@ fun AiSettingsScreen(
 											horizontalArrangement = Arrangement.SpaceBetween,
 										) {
 											Column(modifier = Modifier.weight(1f)) {
-												Text(item.title, style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textPrimary)
+												Row(
+													verticalAlignment = Alignment.CenterVertically,
+													horizontalArrangement = Arrangement.spacedBy(6.dp),
+												) {
+													Text(item.title, style = MaterialTheme.typography.labelLarge, color = NemuriTheme.colors.textPrimary)
+													if (item.isRecommended) {
+														Surface(
+															color = NemuriTheme.colors.cyan.copy(alpha = 0.16f),
+															shape = RoundedCornerShape(999.dp),
+														) {
+															Text(
+																text = "Recommended",
+																style = MaterialTheme.typography.labelSmall,
+																color = NemuriTheme.colors.cyan,
+																modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+															)
+														}
+													}
+												}
 												Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = NemuriTheme.colors.textMuted)
 											}
 											if (item.isDownloaded) {
@@ -655,6 +678,63 @@ fun AiSettingsScreen(
 
 			item {
 				SettingsGroupCard("Where Was I? & Privacy") {
+					Column(
+						modifier = Modifier.padding(14.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						Text(
+							text = "Default Recap Depth",
+							style = MaterialTheme.typography.titleSmall,
+							color = NemuriTheme.colors.textPrimary,
+						)
+						Text(
+							text = state.recapDepth.description,
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							RecapDepth.entries.forEach { depth ->
+								val selected = state.recapDepth == depth
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = RoundedCornerShape(10.dp),
+									border = BorderStroke(
+										1.dp,
+										if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.weight(1f)
+										.clip(RoundedCornerShape(10.dp))
+										.clickable { viewModel.setRecapDepth(depth) },
+								) {
+									Row(
+										modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+										horizontalArrangement = Arrangement.Center,
+										verticalAlignment = Alignment.CenterVertically,
+									) {
+										if (selected) {
+											Icon(
+												imageVector = Icons.Default.Check,
+												contentDescription = null,
+												tint = NemuriTheme.colors.cyan,
+												modifier = Modifier.size(14.dp),
+											)
+											Spacer(Modifier.width(4.dp))
+										}
+										Text(
+											text = depth.shortLabel,
+											style = MaterialTheme.typography.labelLarge,
+											color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										)
+									}
+								}
+							}
+						}
+					}
+					SettingsRowDivider()
 					SettingsToggleRow(
 						title = "Show Recap Card on Details",
 						subtitle = "Strictly spoiler-quarantined up to your current read chapter",

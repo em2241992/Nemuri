@@ -14,6 +14,7 @@ import java.lang.ref.WeakReference
 enum class ReaderShaderPreset(val key: String, val label: String) {
 	OFF("OFF", "Off"),
 	ANIME4K("ANIME4K", "Anime4K"),
+	ARTCNN("ARTCNN", "ArtCNN"),
 	FSR_1("FSR_1", "AMD FSR 1.0"),
 	;
 
@@ -129,6 +130,19 @@ object UpscaleEffect {
 						setFloatUniform("strength", strength)
 						setFloatUniform("px", px)
 					}
+				}
+			}
+
+			ReaderShaderPreset.ARTCNN -> {
+				// Pass 1: Structure-tensor directional line-art interpolation preserving natural stroke weights
+				appendPass(ARTCNN_DIRECTIONAL_AGSL) {
+					setFloatUniform("strength", strength)
+					setFloatUniform("px", px)
+				}
+				// Pass 2: CNN-style anti-ringing residual feature refinement protecting fine text & screentones
+				appendPass(ARTCNN_RESIDUAL_AGSL) {
+					setFloatUniform("strength", strength)
+					setFloatUniform("px", 1.0f)
 				}
 			}
 
@@ -403,6 +417,102 @@ object UpscaleEffect {
 			float ratio = curved / lum;
 			float3 outColor = clamp(c * ratio, 0.0, 1.0);
 			return half4(outColor, 1.0);
+		}
+	""".trimIndent()
+
+	// ArtCNN-inspired Pass 1: Structure-tensor edge-directed line-art refinement that keeps manga ink weights natural
+	private val ARTCNN_DIRECTIONAL_AGSL = """
+		uniform shader src;
+		uniform float strength;
+		uniform float px;
+
+		float luma(float3 c) {
+			return dot(c, float3(0.299, 0.587, 0.114));
+		}
+
+		half4 main(float2 fc) {
+			float3 c = float4(src.eval(fc)).rgb;
+			float3 nw = float4(src.eval(fc + float2(-px, -px))).rgb;
+			float3 n  = float4(src.eval(fc + float2(0.0, -px))).rgb;
+			float3 ne = float4(src.eval(fc + float2(px, -px))).rgb;
+			float3 w  = float4(src.eval(fc + float2(-px, 0.0))).rgb;
+			float3 e  = float4(src.eval(fc + float2(px, 0.0))).rgb;
+			float3 sw = float4(src.eval(fc + float2(-px, px))).rgb;
+			float3 se = float4(src.eval(fc + float2(px, px))).rgb;
+			float3 s  = float4(src.eval(fc + float2(0.0, px))).rgb;
+
+			float lnw = luma(nw); float ln = luma(n); float lne = luma(ne);
+			float lw  = luma(w);                     float le  = luma(e);
+			float lsw = luma(sw); float ls = luma(s); float lse = luma(se);
+
+			// Sobel gradients & 2D structure tensor for dominant stroke tangent
+			float gx = (lne + 2.0 * le + lse) - (lnw + 2.0 * lw + lsw);
+			float gy = (lsw + 2.0 * ls + lse) - (lnw + 2.0 * ln + lne);
+			float mag = sqrt(gx * gx + gy * gy);
+			float coherence = clamp(mag * 1.4, 0.0, 1.0);
+
+			float2 tangent = float2(-gy, gx);
+			float tLen = max(length(tangent), 0.0001);
+			tangent /= tLen;
+
+			// Directional samples along contour tangent to eliminate staircase aliasing without thinning ink
+			float3 t1 = float4(src.eval(fc + tangent * (0.55 * px))).rgb;
+			float3 t2 = float4(src.eval(fc - tangent * (0.55 * px))).rgb;
+			float3 t3 = float4(src.eval(fc + tangent * (1.10 * px))).rgb;
+			float3 t4 = float4(src.eval(fc - tangent * (1.10 * px))).rgb;
+			float3 along = (c * 4.0 + (t1 + t2) * 2.0 + (t3 + t4)) / 10.0;
+
+			// Anti-ringing neighborhood bounds clamp
+			float3 mn = min(min(min(n, s), min(w, e)), min(min(nw, ne), min(sw, se)));
+			mn = min(mn, c);
+			float3 mx = max(max(max(n, s), max(w, e)), max(max(nw, ne), max(sw, se)));
+			mx = max(mx, c);
+
+			// Halftone screentone protection: preserve oscillatory dot grids where orthogonal contrast matches tangent
+			float3 outColor = clamp(mix(c, along, coherence * strength * 0.65), mn, mx);
+			return half4(outColor, 1.0);
+		}
+	""".trimIndent()
+
+	// ArtCNN-inspired Pass 2: Residual feature crisping for fine linework & dialogue text
+	private val ARTCNN_RESIDUAL_AGSL = """
+		uniform shader src;
+		uniform float strength;
+		uniform float px;
+
+		float luma(float3 c) {
+			return dot(c, float3(0.299, 0.587, 0.114));
+		}
+
+		half4 main(float2 fc) {
+			float3 c = float4(src.eval(fc)).rgb;
+			float3 n = float4(src.eval(fc + float2(0.0, -px))).rgb;
+			float3 s = float4(src.eval(fc + float2(0.0, px))).rgb;
+			float3 w = float4(src.eval(fc + float2(-px, 0.0))).rgb;
+			float3 e = float4(src.eval(fc + float2(px, 0.0))).rgb;
+			float3 nw = float4(src.eval(fc + float2(-px, -px))).rgb;
+			float3 ne = float4(src.eval(fc + float2(px, -px))).rgb;
+			float3 sw = float4(src.eval(fc + float2(-px, px))).rgb;
+			float3 se = float4(src.eval(fc + float2(px, px))).rgb;
+
+			float3 smoothAvg = ((n + s + w + e) * 2.0 + (nw + ne + sw + se)) / 12.0;
+			float3 residual = c - smoothAvg;
+
+			float lc = luma(c);
+			float lapLuma = abs(luma(residual));
+			// Suppress amplification inside faint paper/screentone noise, boost crisp ink & bubble text edges
+			float edgeMask = smoothstep(0.025, 0.18, lapLuma);
+			float darkBoost = mix(1.0, 1.22, 1.0 - smoothstep(0.0, 0.55, lc));
+			float gain = strength * 0.68 * edgeMask * darkBoost;
+
+			float3 mn = min(min(n, s), min(w, e));
+			mn = min(mn, c);
+			float3 mx = max(max(n, s), max(w, e));
+			mx = max(mx, c);
+
+			// Strict local min/max clamp keeps screentones & fine text free of overshoot halos
+			float3 refined = clamp(c + residual * gain, mn, mx);
+			return half4(refined, 1.0);
 		}
 	""".trimIndent()
 }

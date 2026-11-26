@@ -43,6 +43,8 @@ import org.koitharu.kotatsu.parsers.model.MangaState
 import org.koitharu.kotatsu.parsers.model.MangaTag
 import org.koitharu.kotatsu.parsers.model.SortOrder
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.nemuri.app.browser.WebViewChallengeAction
+import org.nemuri.app.browser.toWebViewChallengeAction
 import org.nemuri.app.ui.components.NemuriToastManager
 import javax.inject.Inject
 
@@ -142,6 +144,7 @@ data class SourceBrowseUiState(
 	val errorMessage: String? = null,
 	val pendingCloudFlare: CloudFlareProtectedException? = null,
 	val pendingInteractive: InteractiveActionRequiredException? = null,
+	val pendingChallengeUrl: String? = null,
 )
 
 @HiltViewModel
@@ -520,16 +523,20 @@ class SourceBrowseViewModel @Inject constructor(
 					}
 				},
 				onFailure = { error ->
-					val cfException = error as? CloudFlareProtectedException
-					val interactiveException = error as? InteractiveActionRequiredException
+					val challenge = error.toWebViewChallengeAction(
+						fallbackUrl = activeSource.homeUrl,
+						fallbackSource = activeSource,
+						title = activeSource.getTitle(context),
+					)
 					val message = error.getDisplayMessage(context.resources)
 					_uiState.update {
 						it.copy(
 							isInitialLoading = false,
 							isLoadingMore = false,
 							errorMessage = message,
-							pendingCloudFlare = cfException,
-							pendingInteractive = interactiveException,
+							pendingCloudFlare = (challenge as? WebViewChallengeAction.CloudFlare)?.exception,
+							pendingInteractive = (challenge as? WebViewChallengeAction.Interactive)?.exception,
+							pendingChallengeUrl = (challenge as? WebViewChallengeAction.BrowserUrl)?.url,
 						)
 					}
 				},

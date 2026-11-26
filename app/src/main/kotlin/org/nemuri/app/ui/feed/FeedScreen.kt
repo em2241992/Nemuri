@@ -57,16 +57,21 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koitharu.kotatsu.core.model.MangaHistory
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.navigation.MangaTransferCache
+import org.nemuri.app.ui.components.LocalLayoutStudioPrefs
 import org.nemuri.app.ui.components.MangaCoverImage
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.SnappingSwipeRow
+import org.nemuri.app.ui.components.cornerSafeBadgeInset
+import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.theme.NemuriTheme
+import org.nemuri.app.ui.theme.nemuriSharedCover
 
 @Composable
 fun FeedScreen(
-	onOpenDetails: (Manga) -> Unit,
+	onOpenDetails: (Manga, String?) -> Unit,
 	onOpenChapter: (Manga, Long) -> Unit,
 	onOpenSettings: () -> Unit,
 	onResumeReading: (Manga, MangaHistory) -> Unit = { manga, history ->
@@ -75,6 +80,8 @@ fun FeedScreen(
 	viewModel: FeedViewModel = viewModel(),
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+	val layoutPrefs = LocalLayoutStudioPrefs.current
+	val bottomPadding = rememberRootTabBottomPadding()
 	var showClearDialog by remember { mutableStateOf(false) }
 
 	Column(modifier = Modifier.fillMaxSize()) {
@@ -237,7 +244,7 @@ fun FeedScreen(
 				} else {
 					LazyColumn(
 						modifier = Modifier.fillMaxSize(),
-						contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
+						contentPadding = PaddingValues(top = 8.dp, bottom = bottomPadding),
 						verticalArrangement = Arrangement.spacedBy(18.dp),
 					) {
 						if (uiState.continueReading.isNotEmpty()) {
@@ -249,19 +256,23 @@ fun FeedScreen(
 							}
 							item(key = "hub_continue_row") {
 								LazyRow(
-									contentPadding = PaddingValues(horizontal = 14.dp),
+									contentPadding = PaddingValues(horizontal = 16.dp),
 									horizontalArrangement = Arrangement.spacedBy(10.dp),
 								) {
 									items(uiState.continueReading, key = { "cont:${it.manga.id}" }) { item ->
+										val shareKey = "feed-cont-${item.manga.id}"
 										ContinueReadingCard(
 											item = item,
+											cornerRadiusDp = layoutPrefs.cardCornerRadiusDp,
+											aspectRatio = layoutPrefs.coverAspectRatio.ratio,
+											sharedCoverKey = shareKey,
 											onResume = {
 												MangaTransferCache.put(item.manga)
 												onResumeReading(item.manga, item.history)
 											},
 											onOpenDetails = {
 												MangaTransferCache.put(item.manga)
-												onOpenDetails(item.manga)
+												onOpenDetails(item.manga, shareKey)
 											},
 										)
 									}
@@ -278,31 +289,51 @@ fun FeedScreen(
 								)
 							}
 							items(uiState.hubUpdates, key = { "hub_upd:${it.logId}" }) { entry ->
-								Box(modifier = Modifier.padding(horizontal = 14.dp)) {
-									FeedEntryCard(
-										entry = entry,
-										onOpenDetails = {
-											MangaTransferCache.put(entry.logItem.manga)
-											onOpenDetails(entry.logItem.manga)
-										},
-										onOpenLatestChapter = {
-											val chapterId = entry.firstChapterId
-											MangaTransferCache.put(entry.logItem.manga)
-											if (chapterId != null) {
-												onOpenChapter(entry.logItem.manga, chapterId)
-											} else {
-												onOpenDetails(entry.logItem.manga)
-											}
-										},
-										onDownload = { viewModel.downloadUpdates(entry) },
-										onMarkRead = {
+								val shareKey = "feed-hub-${entry.logId}"
+								Box(
+									modifier = Modifier
+										.animateItem()
+										.padding(horizontal = 16.dp),
+								) {
+									SnappingSwipeRow(
+										rightLabel = if (entry.logItem.isNew) "Mark Read" else "Dismiss",
+										rightIcon = Icons.Default.MarkEmailRead,
+										onSwipeRight = {
 											if (entry.logItem.isNew) {
 												viewModel.markMangaRead(entry.logItem.manga.id)
 											} else {
 												viewModel.removeLogEntry(entry.logId)
 											}
 										},
-									)
+										leftLabel = "Download",
+										onSwipeLeft = { viewModel.downloadUpdates(entry) },
+									) {
+										FeedEntryCard(
+											entry = entry,
+											sharedCoverKey = shareKey,
+											onOpenDetails = {
+												MangaTransferCache.put(entry.logItem.manga)
+												onOpenDetails(entry.logItem.manga, shareKey)
+											},
+											onOpenLatestChapter = {
+												val chapterId = entry.firstChapterId
+												MangaTransferCache.put(entry.logItem.manga)
+												if (chapterId != null) {
+													onOpenChapter(entry.logItem.manga, chapterId)
+												} else {
+													onOpenDetails(entry.logItem.manga, shareKey)
+												}
+											},
+											onDownload = { viewModel.downloadUpdates(entry) },
+											onMarkRead = {
+												if (entry.logItem.isNew) {
+													viewModel.markMangaRead(entry.logItem.manga.id)
+												} else {
+													viewModel.removeLogEntry(entry.logId)
+												}
+											},
+										)
+									}
 								}
 							}
 						}
@@ -316,15 +347,19 @@ fun FeedScreen(
 							}
 							item(key = "hub_recent_row") {
 								LazyRow(
-									contentPadding = PaddingValues(horizontal = 14.dp),
+									contentPadding = PaddingValues(horizontal = 16.dp),
 									horizontalArrangement = Arrangement.spacedBy(10.dp),
 								) {
 									items(uiState.recentlyAdded, key = { "rec:${it.id}" }) { manga ->
+										val shareKey = "feed-rec-${manga.id}"
 										RecentLibraryCard(
 											manga = manga,
+											cornerRadiusDp = layoutPrefs.cardCornerRadiusDp,
+											aspectRatio = layoutPrefs.coverAspectRatio.ratio,
+											sharedCoverKey = shareKey,
 											onClick = {
 												MangaTransferCache.put(manga)
-												onOpenDetails(manga)
+												onOpenDetails(manga, shareKey)
 											},
 										)
 									}
@@ -361,7 +396,7 @@ fun FeedScreen(
 			else -> {
 				LazyColumn(
 					modifier = Modifier.fillMaxSize(),
-					contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
+					contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding),
 					verticalArrangement = Arrangement.spacedBy(8.dp),
 				) {
 					uiState.groups.forEach { (dateLabel, entries) ->
@@ -376,31 +411,49 @@ fun FeedScreen(
 						}
 
 						items(entries, key = { it.logId }) { entry ->
-							FeedEntryCard(
-								entry = entry,
-								onOpenDetails = {
-									MangaTransferCache.put(entry.logItem.manga)
-									onOpenDetails(entry.logItem.manga)
-								},
-								onOpenLatestChapter = {
-									val chapterId = entry.firstChapterId
-									if (chapterId != null) {
-										MangaTransferCache.put(entry.logItem.manga)
-										onOpenChapter(entry.logItem.manga, chapterId)
-									} else {
-										MangaTransferCache.put(entry.logItem.manga)
-										onOpenDetails(entry.logItem.manga)
-									}
-								},
-								onDownload = { viewModel.downloadUpdates(entry) },
-								onMarkRead = {
-									if (entry.logItem.isNew) {
-										viewModel.markMangaRead(entry.logItem.manga.id)
-									} else {
-										viewModel.removeLogEntry(entry.logId)
-									}
-								},
-							)
+							val shareKey = "feed-cls-${entry.logId}"
+							Box(modifier = Modifier.animateItem()) {
+								SnappingSwipeRow(
+									rightLabel = if (entry.logItem.isNew) "Mark Read" else "Dismiss",
+									rightIcon = Icons.Default.MarkEmailRead,
+									onSwipeRight = {
+										if (entry.logItem.isNew) {
+											viewModel.markMangaRead(entry.logItem.manga.id)
+										} else {
+											viewModel.removeLogEntry(entry.logId)
+										}
+									},
+									leftLabel = "Download",
+									onSwipeLeft = { viewModel.downloadUpdates(entry) },
+								) {
+									FeedEntryCard(
+										entry = entry,
+										sharedCoverKey = shareKey,
+										onOpenDetails = {
+											MangaTransferCache.put(entry.logItem.manga)
+											onOpenDetails(entry.logItem.manga, shareKey)
+										},
+										onOpenLatestChapter = {
+											val chapterId = entry.firstChapterId
+											if (chapterId != null) {
+												MangaTransferCache.put(entry.logItem.manga)
+												onOpenChapter(entry.logItem.manga, chapterId)
+											} else {
+												MangaTransferCache.put(entry.logItem.manga)
+												onOpenDetails(entry.logItem.manga, shareKey)
+											}
+										},
+										onDownload = { viewModel.downloadUpdates(entry) },
+										onMarkRead = {
+											if (entry.logItem.isNew) {
+												viewModel.markMangaRead(entry.logItem.manga.id)
+											} else {
+												viewModel.removeLogEntry(entry.logId)
+											}
+										},
+									)
+								}
+							}
 						}
 					}
 				}
@@ -485,53 +538,57 @@ private fun HubSectionHeader(
 @Composable
 private fun ContinueReadingCard(
 	item: ContinueReadingItem,
+	cornerRadiusDp: Int,
+	aspectRatio: Float,
+	sharedCoverKey: String,
 	onResume: () -> Unit,
 	onOpenDetails: () -> Unit,
 ) {
-	Surface(
-		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(14.dp),
+	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val coverShape = RoundedCornerShape(safeCorner.dp)
+	Column(
 		modifier = Modifier
 			.width(126.dp)
-			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
-			.clip(RoundedCornerShape(14.dp))
 			.clickable(onClick = onResume),
+		verticalArrangement = Arrangement.spacedBy(6.dp),
 	) {
-		Column {
-			Box(
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.aspectRatio(aspectRatio)
+				.clip(coverShape)
+				.border(1.dp, NemuriTheme.colors.border, coverShape),
+		) {
+			MangaCoverImage(
+				manga = item.manga,
+				coverUrl = item.manga.coverUrl,
 				modifier = Modifier
-					.fillMaxWidth()
-					.aspectRatio(0.72f),
+					.fillMaxSize()
+					.nemuriSharedCover(sharedCoverKey, safeCorner.dp),
+			)
+			Surface(
+				color = NemuriTheme.colors.dock.copy(alpha = 0.88f),
+				shape = RoundedCornerShape(999.dp),
+				modifier = Modifier
+					.align(Alignment.BottomEnd)
+					.padding(cornerSafeBadgeInset(safeCorner)),
 			) {
-				MangaCoverImage(
-					manga = item.manga,
-					coverUrl = item.manga.coverUrl,
-					modifier = Modifier.fillMaxSize(),
-				)
-				Surface(
-					color = NemuriTheme.colors.dock.copy(alpha = 0.88f),
-					shape = RoundedCornerShape(999.dp),
-					modifier = Modifier
-						.align(Alignment.BottomEnd)
-						.padding(6.dp),
+				Row(
+					modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(3.dp),
 				) {
-					Row(
-						modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(3.dp),
-					) {
-						Icon(
-							imageVector = Icons.Default.PlayArrow,
-							contentDescription = "Resume",
-							tint = NemuriTheme.colors.cyan,
-							modifier = Modifier.size(12.dp),
-						)
-						Text(
-							text = item.progressPercentLabel,
-							style = MaterialTheme.typography.labelSmall,
-							color = NemuriTheme.colors.textPrimary,
-						)
-					}
+					Icon(
+						imageVector = Icons.Default.PlayArrow,
+						contentDescription = "Resume",
+						tint = NemuriTheme.colors.cyan,
+						modifier = Modifier.size(12.dp),
+					)
+					Text(
+						text = item.progressPercentLabel,
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textPrimary,
+					)
 				}
 			}
 			LinearProgressIndicator(
@@ -540,29 +597,33 @@ private fun ContinueReadingCard(
 				trackColor = NemuriTheme.colors.surfaceElevated,
 				modifier = Modifier
 					.fillMaxWidth()
-					.height(3.dp),
+					.height(3.dp)
+					.align(Alignment.BottomCenter),
 			)
-			Column(
-				modifier = Modifier
-					.clickable(onClick = onOpenDetails)
-					.padding(horizontal = 8.dp, vertical = 7.dp),
-				verticalArrangement = Arrangement.spacedBy(2.dp),
-			) {
-				Text(
-					text = item.manga.title,
-					style = MaterialTheme.typography.labelMedium,
-					color = NemuriTheme.colors.textPrimary,
-					maxLines = 2,
-					overflow = TextOverflow.Ellipsis,
-				)
-				Text(
-					text = item.sourceTitle,
-					style = MaterialTheme.typography.labelSmall,
-					color = NemuriTheme.colors.textDim,
-					maxLines = 1,
-					overflow = TextOverflow.Ellipsis,
-				)
-			}
+		}
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.clip(RoundedCornerShape(8.dp))
+				.clickable(onClick = onOpenDetails)
+				.padding(horizontal = 2.dp),
+			verticalArrangement = Arrangement.spacedBy(2.dp),
+		) {
+			Text(
+				text = item.manga.title,
+				style = MaterialTheme.typography.labelMedium,
+				color = NemuriTheme.colors.textPrimary,
+				minLines = 2,
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
+			Text(
+				text = item.sourceTitle,
+				style = MaterialTheme.typography.labelSmall,
+				color = NemuriTheme.colors.textDim,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
 		}
 	}
 }
@@ -570,30 +631,37 @@ private fun ContinueReadingCard(
 @Composable
 private fun RecentLibraryCard(
 	manga: Manga,
+	cornerRadiusDp: Int,
+	aspectRatio: Float,
+	sharedCoverKey: String,
 	onClick: () -> Unit,
 ) {
+	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val coverShape = RoundedCornerShape(safeCorner.dp)
 	Column(
 		modifier = Modifier
-			.width(108.dp)
-			.clip(RoundedCornerShape(12.dp))
+			.width(110.dp)
 			.clickable(onClick = onClick),
-		verticalArrangement = Arrangement.spacedBy(5.dp),
+		verticalArrangement = Arrangement.spacedBy(6.dp),
 	) {
 		MangaCoverImage(
 			manga = manga,
 			coverUrl = manga.coverUrl,
 			modifier = Modifier
 				.fillMaxWidth()
-				.aspectRatio(0.7f)
-				.clip(RoundedCornerShape(12.dp))
-				.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
+				.aspectRatio(aspectRatio)
+				.clip(coverShape)
+				.border(1.dp, NemuriTheme.colors.border, coverShape)
+				.nemuriSharedCover(sharedCoverKey, safeCorner.dp),
 		)
 		Text(
 			text = manga.title,
 			style = MaterialTheme.typography.labelMedium,
 			color = NemuriTheme.colors.textPrimary,
+			minLines = 2,
 			maxLines = 2,
 			overflow = TextOverflow.Ellipsis,
+			modifier = Modifier.padding(horizontal = 2.dp),
 		)
 	}
 }
@@ -641,6 +709,7 @@ private fun FeedFilterPill(
 @Composable
 private fun FeedEntryCard(
 	entry: FeedEntryItem,
+	sharedCoverKey: String,
 	onOpenDetails: () -> Unit,
 	onOpenLatestChapter: () -> Unit,
 	onDownload: () -> Unit,
@@ -672,6 +741,7 @@ private fun FeedEntryCard(
 				modifier = Modifier
 					.size(width = 52.dp, height = 74.dp)
 					.clip(RoundedCornerShape(10.dp))
+					.nemuriSharedCover(sharedCoverKey, 10.dp)
 					.clickable(onClick = onOpenDetails),
 			)
 

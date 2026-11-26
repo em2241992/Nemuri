@@ -46,7 +46,9 @@ class WhereWasIRecapUseCase @Inject constructor(
 		currentChapterId: Long?,
 		descriptionText: CharSequence? = manga.description,
 		forceRefresh: Boolean = false,
+		depthOverride: RecapDepth? = null,
 	): MangaAiRecapEntity = withContext(Dispatchers.IO) {
+		val depth = depthOverride ?: RecapDepth.fromKey(settings.aiRecapDepth)
 		val dao = db.getMangaAiRecapDao()
 		val currentIndex = currentChapterId?.let { id -> orderedChapters.indexOfFirst { it.id == id } } ?: -1
 		// STRICT SPOILER QUARANTINE: never inspect or pass any chapter after currentIndex.
@@ -64,52 +66,111 @@ class WhereWasIRecapUseCase @Inject constructor(
 			existing != null &&
 			existing.lastChapterId == targetChapterId &&
 			existing.chaptersReadCount == readCount &&
+			existing.parsedDepth() == depth &&
 			(existing.isAiGenerated || !aiRouter.isAiEnabled())
 		) {
 			return@withContext existing
 		}
 
-		val premisePlain = htmlToPlain(descriptionText?.toString().orEmpty()).take(MAX_PREMISE_CHARS)
-		val recentTitles = readChapters.takeLast(MAX_CHAPTER_TITLES).mapIndexed { idx, ch ->
-			val baseIndex = (readCount - readChapters.takeLast(MAX_CHAPTER_TITLES).size) + idx + 1
+		val premiseLimit = if (depth == RecapDepth.BRIEF) MAX_BRIEF_PREMISE_CHARS else MAX_DETAILED_PREMISE_CHARS
+		val titleLimit = if (depth == RecapDepth.BRIEF) MAX_BRIEF_CHAPTER_TITLES else MAX_DETAILED_CHAPTER_TITLES
+		val genreLimit = if (depth == RecapDepth.BRIEF) 6 else 14
+
+		val premisePlain = htmlToPlain(descriptionText?.toString().orEmpty()).take(premiseLimit)
+		val recentSlice = readChapters.takeLast(titleLimit)
+		val recentTitles = recentSlice.mapIndexed { idx, ch ->
+			val baseIndex = (readCount - recentSlice.size) + idx + 1
 			"#$baseIndex: ${ch.title?.takeIf { it.isNotBlank() } ?: "Chapter ${ch.number}"}"
 		}
 
 		val isProse = manga.source.isNovelSource || manga.isEpub
-		val novelExcerpt = if (isProse && settings.isAiIncludeNovelExcerpt && currentChapter != null) {
-			loadReadChapterExcerpt(currentChapter)
+		val includeExcerpt = isProse && settings.isAiIncludeNovelExcerpt && currentChapter != null &&
+			(depth == RecapDepth.DETAILED || premisePlain.isBlank())
+		val novelExcerpt = if (includeExcerpt && currentChapter != null) {
+			loadReadChapterExcerpt(
+				chapter = currentChapter,
+				maxChars = if (depth == RecapDepth.BRIEF) MAX_BRIEF_EXCERPT_CHARS else MAX_DETAILED_EXCERPT_CHARS,
+			)
 		} else {
 			""
 		}
 
+		val lastTitle = currentChapter?.let { ch ->
+			ch.title?.takeIf { it.isNotBlank() } ?: "Chapter ${ch.number}"
+		} ?: "the current reading checkpoint"
+
 		val aiResult = if (aiRouter.isAiEnabled() && (premisePlain.isNotBlank() || recentTitles.isNotEmpty())) {
-			val systemPrompt =
-				"You write concise, spoiler-free 'Where Was I?' reading recaps for a reader returning to a series. " +
-					"CRITICAL RULE: Only reference the premise and chapters already read (listed below). NEVER speculate about or include events beyond the last read chapter. " +
-					"Keep it to 3-4 crisp sentences highlighting the core premise, current arc/stopping point, and key context to jump back in."
-			val userPrompt = buildString {
+			val systemPrompt = when (depth) {
+				RecapDepth.BRIEF ->
+					"You are Nemuri's spoiler-safe 'Where Was I?' assistant. Write a concise 2-3 sentence atmospheric safe teaser " +
+						"reminding a returning reader of the series premise and current arc position up to $lastTitle. " +
+						"Do NOT name major plot twists, character deaths/fates, or anything occurring after $lastTitle."
+
+				RecapDepth.DETAILED ->
+					"You are Nemuri's 'Where Was I?' story and character recap assistant. Help a returning reader remember concrete story details up to their exact stopping point. " +
+						"You MAY explicitly name specific characters, key relationships, faction conflicts, abilities, and concrete plot events that occurred AT OR BEFORE $lastTitle, " +
+						"leveraging the provided context and your prior series knowledge strictly up to $lastTitle. " +
+						"CRITICAL ANTI-SPOILER RULE: NEVER mention, foreshadow, or hint at any events, twists, or character fates occurring AFTER $lastTitle."
+			}
+
+			val contextBlock = buildString {
 				appendLine("Title: ${manga.title}")
+				if (manga.authors.isNotEmpty() && depth == RecapDepth.DETAILED) {
+					appendLine("Author(s): ${manga.authors.joinToString(", ")}")
+				}
 				if (manga.tags.isNotEmpty()) {
-					appendLine("Genres: ${manga.tags.take(6).joinToString { it.title }}")
+					appendLine("Genres: ${manga.tags.take(genreLimit).joinToString { it.title }}")
 				}
 				if (premisePlain.isNotBlank()) {
-					appendLine("Premise: $premisePlain")
+					appendLine("Synopsis: $premisePlain")
 				}
-				appendLine("Chapters Read So Far: $readCount")
+				appendLine("Chapters Read So Far: $readCount${if (orderedChapters.isNotEmpty()) " of ${orderedChapters.size}" else ""}")
 				if (currentChapter != null) {
-					val curName = currentChapter.title?.takeIf { it.isNotBlank() } ?: "Chapter ${currentChapter.number}"
-					appendLine("Last Read Stopping Point: $curName")
+					appendLine("Last Read Stopping Point: $lastTitle")
 				}
 				if (recentTitles.isNotEmpty()) {
-					appendLine("Recent Read Chapters:")
+					appendLine("Read Chapters Leading Here:")
 					recentTitles.forEach { appendLine("- $it") }
 				}
 				if (novelExcerpt.isNotBlank()) {
-					appendLine("Snippet from last read chapter (already read):")
+					appendLine("Read Chapter Excerpt (from $lastTitle):")
 					appendLine(novelExcerpt)
 				}
 			}
-			aiRouter.generate(systemPrompt, userPrompt, maxTokens = 280).getOrNull()
+
+			val rawUserPrompt = when (depth) {
+				RecapDepth.BRIEF -> buildString {
+					appendLine(contextBlock.trimEnd())
+					appendLine()
+					append("Task: Write a brief, atmospheric, spoiler-free 2-3 sentence teaser anchored at $lastTitle without revealing major plot twists or character fates.")
+				}
+
+				RecapDepth.DETAILED -> buildString {
+					appendLine(contextBlock.trimEnd())
+					appendLine()
+					append(
+						"Task: Write a detailed 4-6 sentence 'Story & Characters So Far' recap up to and including $lastTitle. " +
+							"You MAY explicitly name characters, key relationships, faction conflicts, and concrete plot events occurring up to and including $lastTitle. " +
+							"NEVER mention, foreshadow, or hint at any events after $lastTitle.",
+					)
+				}
+			}
+
+			val paddedArticle = ensureMinRecapLength(
+				raw = contextBlock,
+				title = manga.title,
+				readCount = readCount,
+				totalCount = orderedChapters.size,
+				currentChapterTitle = lastTitle,
+				depth = depth,
+			)
+			aiRouter.summarizeRecap(
+				systemPrompt = systemPrompt,
+				userPrompt = rawUserPrompt,
+				articleText = paddedArticle,
+				maxTokens = if (depth == RecapDepth.BRIEF) 200 else 520,
+				recapDepth = depth,
+			).getOrNull()
 		} else {
 			null
 		}
@@ -120,7 +181,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 				lastChapterId = targetChapterId,
 				chaptersReadCount = readCount,
 				summaryText = aiResult.text,
-				engineUsed = aiResult.engineUsed,
+				engineUsed = MangaAiRecapEntity.encodeEngineWithDepth(aiResult.engineUsed, depth),
 				isAiGenerated = true,
 				updatedAt = System.currentTimeMillis(),
 			)
@@ -129,8 +190,13 @@ class WhereWasIRecapUseCase @Inject constructor(
 		}
 
 		// Honest non-AI fallback ("Reading Trail") when AI is off or unavailable;
-		// never overwrite a valid cached AI recap for the same stopping point.
-		if (existing != null && existing.isAiGenerated && existing.lastChapterId == targetChapterId && !forceRefresh) {
+		// never overwrite a valid cached AI recap for the same stopping point & depth.
+		if (existing != null &&
+			existing.isAiGenerated &&
+			existing.lastChapterId == targetChapterId &&
+			existing.parsedDepth() == depth &&
+			!forceRefresh
+		) {
 			return@withContext existing
 		}
 
@@ -147,7 +213,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 			lastChapterId = targetChapterId,
 			chaptersReadCount = readCount,
 			summaryText = trailText,
-			engineUsed = ENGINE_READING_TRAIL,
+			engineUsed = MangaAiRecapEntity.encodeEngineWithDepth(ENGINE_READING_TRAIL, depth),
 			isAiGenerated = false,
 			updatedAt = System.currentTimeMillis(),
 		)
@@ -190,7 +256,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 		}
 	}
 
-	private suspend fun loadReadChapterExcerpt(chapter: MangaChapter): String {
+	private suspend fun loadReadChapterExcerpt(chapter: MangaChapter, maxChars: Int): String {
 		val html = runCatchingCancellable {
 			withTimeoutOrNull(5_000L) {
 				val url = chapter.url
@@ -216,7 +282,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 			}
 		}.getOrNull().orEmpty()
 		if (html.isBlank()) return ""
-		return htmlToPlain(html).take(MAX_EXCERPT_CHARS)
+		return htmlToPlain(html).take(maxChars)
 	}
 
 	private fun htmlToPlain(raw: String): String {
@@ -227,11 +293,47 @@ class WhereWasIRecapUseCase @Inject constructor(
 		return stripped.replace(WHITESPACE_REGEX, " ").trim()
 	}
 
+	/**
+	 * Pads short synopses + read chapter trails to `>= 420` characters so ML Kit's 400-character
+	 * minimum summarizer input threshold never rejects concise series entries.
+	 */
+	private fun ensureMinRecapLength(
+		raw: String,
+		title: String,
+		readCount: Int,
+		totalCount: Int,
+		currentChapterTitle: String?,
+		depth: RecapDepth,
+	): String {
+		val trimmed = raw.trim()
+		if (trimmed.length >= MIN_RECAP_INPUT_CHARS) return trimmed
+		return buildString(MIN_RECAP_INPUT_CHARS + 96) {
+			appendLine(trimmed)
+			appendLine()
+			val anchor = currentChapterTitle ?: "the current reading checkpoint"
+			append("Reader Status: The reader is returning to \"$title\" after reading $readCount")
+			if (totalCount > 0) append(" out of $totalCount")
+			append(" chapters, paused right at $anchor. ")
+			if (depth == RecapDepth.DETAILED) {
+				append("Detail the main characters, key relationships, faction dynamics, and established story events up to $anchor without revealing anything beyond $anchor.")
+			} else {
+				append("Give a brief, spoiler-free atmospheric refresher anchored up to $anchor without revealing twists or later chapters.")
+			}
+			while (length < MIN_RECAP_INPUT_CHARS) {
+				append(" Keep the recap strictly anchored to \"$title\" at $anchor.")
+			}
+		}
+	}
+
 	private companion object {
 		const val ENGINE_READING_TRAIL = "Reading Trail (Local)"
-		const val MAX_PREMISE_CHARS = 700
-		const val MAX_CHAPTER_TITLES = 12
-		const val MAX_EXCERPT_CHARS = 1200
+		const val MIN_RECAP_INPUT_CHARS = 430
+		const val MAX_BRIEF_PREMISE_CHARS = 550
+		const val MAX_DETAILED_PREMISE_CHARS = 1600
+		const val MAX_BRIEF_CHAPTER_TITLES = 6
+		const val MAX_DETAILED_CHAPTER_TITLES = 20
+		const val MAX_BRIEF_EXCERPT_CHARS = 400
+		const val MAX_DETAILED_EXCERPT_CHARS = 1800
 		val SCRIPT_STYLE_REGEX = Regex("(?is)<(head|style|script|title)[^>]*>.*?</\\1>")
 		val WHITESPACE_REGEX = Regex("\\s+")
 	}

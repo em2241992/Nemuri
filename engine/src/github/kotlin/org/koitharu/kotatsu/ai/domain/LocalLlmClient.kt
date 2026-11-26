@@ -3,6 +3,7 @@ package org.koitharu.kotatsu.ai.domain
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import android.os.Process
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -42,7 +43,7 @@ class LocalLlmClient @Inject constructor(
 ) {
 
 	val isRuntimeSupported: Boolean
-		get() = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
+		get() = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() && Process.is64Bit()
 
 	private val _isModelLoadedInRam = MutableStateFlow(false)
 	val isModelLoadedInRam: StateFlow<Boolean> = _isModelLoadedInRam.asStateFlow()

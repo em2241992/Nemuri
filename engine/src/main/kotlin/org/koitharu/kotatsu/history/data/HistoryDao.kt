@@ -1,6 +1,7 @@
 package org.koitharu.kotatsu.history.data
 
 import android.database.DatabaseUtils.sqlEscapeString
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -93,6 +94,14 @@ abstract class HistoryDao : MangaQueryBuilder.ConditionCallback {
 
 	@Query("SELECT * FROM history WHERE manga_id = :id AND deleted_at = 0")
 	abstract suspend fun find(id: Long): HistoryEntity?
+
+	@Query("SELECT manga_id, percent FROM history WHERE deleted_at = 0 AND manga_id IN (:mangaIds)")
+	abstract suspend fun findPercentByIds(mangaIds: Collection<Long>): List<MangaHistoryPercentTuple>
+
+	data class MangaHistoryPercentTuple(
+		@ColumnInfo(name = "manga_id") val mangaId: Long,
+		@ColumnInfo(name = "percent") val percent: Float,
+	)
 
 	@Query("SELECT * FROM history WHERE manga_id = :id")
 	abstract suspend fun findIncludingDeleted(id: Long): HistoryEntity?

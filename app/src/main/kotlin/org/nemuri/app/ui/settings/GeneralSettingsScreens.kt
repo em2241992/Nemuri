@@ -3,8 +3,10 @@ package org.nemuri.app.ui.settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,7 +15,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,8 +26,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Cookie
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -57,28 +64,41 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
-import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
-import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koitharu.kotatsu.core.model.ContentWarning
 import org.koitharu.kotatsu.core.network.DoHProvider
 import org.koitharu.kotatsu.core.prefs.ColorScheme
+import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
 import org.koitharu.kotatsu.core.prefs.DownloadFormat
+import org.koitharu.kotatsu.core.prefs.GridGutterDensity
+import org.koitharu.kotatsu.core.prefs.MangaCardStyle
+import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
 import org.koitharu.kotatsu.core.prefs.ReaderMode
+import org.koitharu.kotatsu.core.prefs.ReaderTapZoneMode
 import org.koitharu.kotatsu.core.prefs.ScreenshotsPolicy
 import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
+import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
+import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
+import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.nemuri.app.BuildConfig
 import org.nemuri.app.navigation.SettingsSection
+import org.nemuri.app.ui.components.NonWrappingBadgeText
+import org.nemuri.app.ui.components.cornerSafeBadgeInset
+import org.nemuri.app.ui.components.cornerSafeBottomPadding
+import org.nemuri.app.ui.components.cornerSafeHorizontalPadding
 import org.nemuri.app.ui.theme.NemuriTheme
+import org.nemuri.app.ui.theme.nemuriSpatialSpring
 import java.net.Proxy
 import kotlin.math.roundToInt
 
@@ -182,23 +202,444 @@ fun AppearanceSettingsScreen(
 		}
 
 		item {
-			SettingsGroupCard("Library Grid & Cards") {
+			SettingsGroupCard("Live Studio Preview") {
+				AppearanceLivePreview(state = state)
+			}
+		}
+
+		item {
+			SettingsGroupCard("Library & Browse Cards") {
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Card Style",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						MangaCardStyle.entries.forEach { style ->
+							val selected = state.mangaCardStyle == style
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(12.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(12.dp))
+									.clickable { viewModel.setMangaCardStyle(style) },
+							) {
+								Text(
+									text = when (style) {
+										MangaCardStyle.COMPACT -> "Compact"
+										MangaCardStyle.COMFORTABLE -> "Comfortable"
+										MangaCardStyle.DETAILED_LIST -> "List Row"
+									},
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 10.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
 				SettingsSliderRow(
-					title = "Card Scale",
-					subtitle = "Adjusts library and browse grid density",
+					title = "Corner Radius",
+					subtitle = "Binds corner-safe title padding mathematically to rounded card edges",
+					valueLabel = "${state.cardCornerRadiusDp} dp",
+					value = state.cardCornerRadiusDp.toFloat(),
+					valueRange = 0f..24f,
+					steps = 11,
+					onValueChange = { viewModel.setCardCornerRadiusDp(it.roundToInt()) },
+				)
+				SettingsRowDivider()
+				SettingsSliderRow(
+					title = "Portrait Columns",
+					subtitle = "Pinch the Library grid with two fingers anytime to resize live",
+					valueLabel = "${state.gridColumnsPortrait} cols",
+					value = state.gridColumnsPortrait.toFloat(),
+					valueRange = 2f..6f,
+					steps = 3,
+					onValueChange = { viewModel.setGridColumnsPortrait(it.roundToInt()) },
+				)
+				SettingsRowDivider()
+				SettingsSliderRow(
+					title = "Landscape Columns",
+					subtitle = "Columns shown in landscape or tablet orientation",
+					valueLabel = "${state.gridColumnsLandscape} cols",
+					value = state.gridColumnsLandscape.toFloat(),
+					valueRange = 4f..9f,
+					steps = 4,
+					onValueChange = { viewModel.setGridColumnsLandscape(it.roundToInt()) },
+				)
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Grid Spacing & Cover Aspect",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						GridGutterDensity.entries.forEach { density ->
+							val selected = state.gridGutterDensity == density
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setGridGutterDensity(density) },
+							) {
+								Text(
+									text = density.label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 8.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						CoverAspectRatio.entries.forEach { ratio ->
+							val selected = state.coverAspectRatio == ratio
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setCoverAspectRatio(ratio) },
+							) {
+								Text(
+									text = ratio.label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 8.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
+				SettingsSliderRow(
+					title = "Interface Density Scale",
+					subtitle = "Scales app typography spacing and controls globally",
 					valueLabel = "${state.uiScalePercent}%",
 					value = state.uiScalePercent.toFloat(),
-					valueRange = 75f..125f,
-					steps = 9,
+					valueRange = 85f..115f,
+					steps = 5,
 					onValueChange = { viewModel.setUiScale(it.roundToInt()) },
+				)
+			}
+		}
+
+		item {
+			SettingsGroupCard("Card Badges & Indicators") {
+				SettingsToggleRow(
+					title = "Show Unread / Caught-Up Badge",
+					checked = state.showUnreadBadge,
+					onCheckedChange = viewModel::setShowUnreadBadge,
 				)
 				SettingsRowDivider()
 				SettingsToggleRow(
-					title = "Overlay Title on Cover",
-					subtitle = "Show gradient title directly inside cover cards",
-					checked = state.isTitleOverCover,
-					onCheckedChange = viewModel::setTitleOverCover,
+					title = "Show Downloaded Badge",
+					checked = state.showDownloadedBadge,
+					onCheckedChange = viewModel::setShowDownloadedBadge,
 				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Show Source Name Badge",
+					checked = state.showSourceBadge,
+					onCheckedChange = viewModel::setShowSourceBadge,
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Show Reading Progress Bar",
+					checked = state.showBottomProgressBar,
+					onCheckedChange = viewModel::setShowBottomProgressBar,
+				)
+			}
+		}
+
+		item {
+			SettingsGroupCard("Navigation Bar & Gestures") {
+				SettingsToggleRow(
+					title = "Compact Navigation Dock",
+					subtitle = "Reduces floating dock pill height for extra vertical screen space",
+					checked = state.isNavBarCompact,
+					onCheckedChange = viewModel::setNavBarCompact,
+				)
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Navigation Label Visibility",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						NavLabelVisibility.entries.forEach { vis ->
+							val selected = state.navLabelVisibility == vis
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = RoundedCornerShape(10.dp),
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(RoundedCornerShape(10.dp))
+									.clickable { viewModel.setNavLabelVisibility(vis) },
+							) {
+								Text(
+									text = vis.label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 8.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Horizontal Row Swipe Actions",
+					subtitle = "Swipe Feed entries & Chapter rows right to mark read or left to download",
+					checked = state.isSwipeActionsEnabled,
+					onCheckedChange = viewModel::setSwipeActionsEnabled,
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun AppearanceLivePreview(state: SettingsUiState) {
+	val corner = state.cardCornerRadiusDp.coerceIn(0, 24)
+	val shape = RoundedCornerShape(corner.dp)
+	val hInset = cornerSafeHorizontalPadding(corner)
+	val bInset = cornerSafeBottomPadding(corner)
+	val badgeInset = cornerSafeBadgeInset(corner)
+
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(16.dp)
+			.animateContentSize(nemuriSpatialSpring()),
+		verticalArrangement = Arrangement.spacedBy(8.dp),
+	) {
+		Text(
+			text = "${state.mangaCardStyle.label} • ${state.gridColumnsPortrait} cols • ${corner}dp corner • ${state.coverAspectRatio.label}",
+			style = MaterialTheme.typography.labelSmall,
+			color = NemuriTheme.colors.cyan,
+		)
+		if (state.mangaCardStyle == MangaCardStyle.DETAILED_LIST) {
+			Surface(
+				color = NemuriTheme.colors.surfaceElevated,
+				shape = RoundedCornerShape(corner.coerceIn(8, 18).dp),
+				border = BorderStroke(1.dp, NemuriTheme.colors.border),
+				modifier = Modifier.fillMaxWidth(),
+			) {
+				Row(
+					modifier = Modifier.padding(10.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp),
+				) {
+					Box(
+						modifier = Modifier
+							.size(width = 50.dp, height = 70.dp)
+							.clip(RoundedCornerShape((corner - 2).coerceIn(4, 14).dp))
+							.background(
+								Brush.linearGradient(
+									listOf(
+										NemuriTheme.colors.tealContainer,
+										NemuriTheme.colors.cyan.copy(alpha = 0.35f),
+									),
+								),
+							),
+					)
+					Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+						Text(
+							text = "A Long Chronicle of the Corner-Safe Library Card",
+							style = MaterialTheme.typography.titleSmall,
+							color = NemuriTheme.colors.textPrimary,
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+						)
+						Text(
+							text = "MangaDex • Action, Fantasy",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+						if (state.showBottomProgressBar) {
+							LinearProgressIndicator(
+								progress = { 0.65f },
+								color = NemuriTheme.colors.cyan,
+								trackColor = NemuriTheme.colors.border,
+								modifier = Modifier.fillMaxWidth().height(3.dp),
+							)
+						}
+					}
+					if (state.showDownloadedBadge) {
+						Icon(Icons.Default.CloudDone, contentDescription = null, tint = NemuriTheme.colors.healthy, modifier = Modifier.size(16.dp))
+					}
+					if (state.showUnreadBadge) {
+						Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
+							NonWrappingBadgeText(
+								text = "14",
+								color = MaterialTheme.colorScheme.onPrimary,
+								modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+							)
+						}
+					}
+				}
+			}
+		} else {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.Center,
+			) {
+				Column(
+					modifier = Modifier.width(126.dp),
+					verticalArrangement = Arrangement.spacedBy(6.dp),
+				) {
+					Box(
+						modifier = Modifier
+							.fillMaxWidth()
+							.aspectRatio(state.coverAspectRatio.ratio)
+							.clip(shape)
+							.border(1.dp, NemuriTheme.colors.border, shape)
+							.background(
+								Brush.linearGradient(
+									listOf(
+										NemuriTheme.colors.surfaceElevated,
+										NemuriTheme.colors.tealContainer,
+									),
+								),
+							),
+					) {
+						Row(
+							modifier = Modifier
+								.align(Alignment.TopStart)
+								.padding(badgeInset),
+						) {
+							if (state.showUnreadBadge) {
+								Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(6.dp)) {
+									NonWrappingBadgeText(
+										text = "14",
+										color = MaterialTheme.colorScheme.onPrimary,
+										modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+									)
+								}
+							}
+						}
+						Row(
+							modifier = Modifier
+								.align(Alignment.TopEnd)
+								.padding(badgeInset),
+							horizontalArrangement = Arrangement.spacedBy(4.dp),
+						) {
+							if (state.showDownloadedBadge) {
+								Surface(color = Color.Black.copy(alpha = 0.65f), shape = CircleShape, modifier = Modifier.size(18.dp)) {
+									Box(contentAlignment = Alignment.Center) {
+										Icon(Icons.Default.CloudDone, null, tint = NemuriTheme.colors.healthy, modifier = Modifier.size(11.dp))
+									}
+								}
+							}
+							if (state.showSourceBadge) {
+								Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(6.dp)) {
+									NonWrappingBadgeText(
+										text = "MD",
+										color = NemuriTheme.colors.cyan,
+										fontSizeSp = 8.5f,
+										modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+									)
+								}
+							}
+						}
+						if (state.mangaCardStyle == MangaCardStyle.COMPACT) {
+							Box(
+								modifier = Modifier
+									.fillMaxWidth()
+									.align(Alignment.BottomCenter)
+									.background(
+										Brush.verticalGradient(
+											listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f)),
+										),
+									)
+									.padding(
+										start = hInset,
+										end = hInset,
+										top = 18.dp,
+										bottom = bInset + if (state.showBottomProgressBar) 4.dp else 0.dp,
+									),
+							) {
+								Text(
+									text = "Corner-Safe Manga Title Never Clips",
+									style = MaterialTheme.typography.titleSmall,
+									fontSize = 11.5.sp,
+									fontWeight = FontWeight.Bold,
+									color = Color.White,
+									maxLines = 2,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
+						}
+						if (state.showBottomProgressBar) {
+							LinearProgressIndicator(
+								progress = { 0.65f },
+								color = MaterialTheme.colorScheme.primary,
+								trackColor = Color.Black.copy(alpha = 0.35f),
+								modifier = Modifier
+									.fillMaxWidth()
+									.height(3.dp)
+									.align(Alignment.BottomCenter),
+							)
+						}
+					}
+					if (state.mangaCardStyle == MangaCardStyle.COMFORTABLE) {
+						Text(
+							text = "Unclipped Two-Line Card Title",
+							style = MaterialTheme.typography.titleSmall,
+							fontSize = 11.5.sp,
+							lineHeight = 15.sp,
+							color = NemuriTheme.colors.textPrimary,
+							minLines = 2,
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+							modifier = Modifier.padding(horizontal = 2.dp),
+						)
+					}
+				}
 			}
 		}
 	}
@@ -346,6 +787,7 @@ fun ReadingSettingsScreen(
 ) {
 	val state by viewModel.uiState.collectAsStateWithLifecycle()
 	var showModeDialog by remember { mutableStateOf(false) }
+	var showTapZoneDialog by remember { mutableStateOf(false) }
 	var showShaderDialog by remember { mutableStateOf(false) }
 	var showAccelDialog by remember { mutableStateOf(false) }
 	val importOnnxLauncher = rememberLauncherForActivityResult(
@@ -402,6 +844,27 @@ fun ReadingSettingsScreen(
 					subtitle = "Display subtle page counter while reading",
 					checked = state.isPagesNumbersEnabled,
 					onCheckedChange = viewModel::setPagesNumbers,
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Seamless Page Stitching",
+					subtitle = "Reassemble uneven chopped slivers into whole pages before rendering",
+					checked = state.isReaderSeamlessStitchEnabled,
+					onCheckedChange = viewModel::setReaderSeamlessStitchEnabled,
+				)
+				SettingsRowDivider()
+				SettingsChoiceRow(
+					title = "Tap-Zone Layout",
+					subtitle = state.readerTapZoneMode.description,
+					currentLabel = state.readerTapZoneMode.label,
+					onClick = { showTapZoneDialog = true },
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Smart Double-Tap Fill Zoom",
+					subtitle = "Zoom to screen fill width/height when double-tapping a page",
+					checked = state.isReaderDoubleTapFill,
+					onCheckedChange = viewModel::setReaderDoubleTapFill,
 				)
 			}
 		}
@@ -461,7 +924,7 @@ fun ReadingSettingsScreen(
 					SettingsRowDivider()
 					SettingsChoiceRow(
 						title = "Hardware Accelerator",
-						subtitle = state.neuralAccelerator.subtitle,
+						subtitle = "${state.neuralAccelerator.subtitle} • Active: ${state.activeNeuralDelegateLabel}",
 						currentLabel = state.neuralAccelerator.label,
 						onClick = { showAccelDialog = true },
 					)
@@ -556,19 +1019,18 @@ fun ReadingSettingsScreen(
 								}
 							}
 						}
-						if (state.neuralCacheBytes > 0L) {
-							OutlinedButton(
-								onClick = viewModel::clearNeuralCache,
-								border = BorderStroke(1.dp, NemuriTheme.colors.border),
-								modifier = Modifier.fillMaxWidth(),
-							) {
-								Icon(Icons.Default.CleaningServices, contentDescription = null, tint = NemuriTheme.colors.textSecondary, modifier = Modifier.size(17.dp))
-								Spacer(Modifier.width(8.dp))
-								Text(
-									text = "Clear Neural Cache (${String.format("%.1f MB", state.neuralCacheBytes / (1024f * 1024f))})",
-									color = NemuriTheme.colors.textSecondary,
-								)
-							}
+						OutlinedButton(
+							onClick = viewModel::clearNeuralCache,
+							enabled = state.neuralCacheBytes > 0L,
+							border = BorderStroke(1.dp, NemuriTheme.colors.border),
+							modifier = Modifier.fillMaxWidth(),
+						) {
+							Icon(Icons.Default.CleaningServices, contentDescription = null, tint = NemuriTheme.colors.textSecondary, modifier = Modifier.size(17.dp))
+							Spacer(Modifier.width(8.dp))
+							Text(
+								text = "Clear Upscale Cache (${formatByteSize(state.neuralCacheBytes)} / 250 MB)",
+								color = if (state.neuralCacheBytes > 0L) NemuriTheme.colors.textSecondary else NemuriTheme.colors.textDim,
+							)
 						}
 					}
 				}
@@ -696,6 +1158,16 @@ fun ReadingSettingsScreen(
 			selected = state.readerShaderPreset,
 			onSelect = viewModel::setReaderShaderPreset,
 			onDismiss = { showShaderDialog = false },
+		)
+	}
+
+	if (showTapZoneDialog) {
+		SettingsOptionDialog(
+			title = "Tap-Zone Layout",
+			options = ReaderTapZoneMode.entries.map { it to "${it.label} — ${it.description}" },
+			selected = state.readerTapZoneMode,
+			onSelect = viewModel::setReaderTapZoneMode,
+			onDismiss = { showTapZoneDialog = false },
 		)
 	}
 
@@ -1367,6 +1839,9 @@ private fun CreditLine(title: String, detail: String) {
 
 private fun colorSchemeSwatchColor(scheme: ColorScheme): Color = when (scheme) {
 	ColorScheme.DEFAULT, ColorScheme.EXPRESSIVE -> Color(0xFF5CE1E6)
+	ColorScheme.YORHA -> Color(0xFFC8B88A)
+	ColorScheme.KYOTO_WASHI -> Color(0xFFC84B31)
+	ColorScheme.SUIBOKUGA -> Color(0xFF7C98AB)
 	ColorScheme.MIKU -> Color(0xFF4CCAD0)
 	ColorScheme.RENA, ColorScheme.SHANA -> Color(0xFFFF4D6D)
 	ColorScheme.FROG -> Color(0xFF34D399)

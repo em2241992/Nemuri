@@ -1,5 +1,6 @@
 package org.koitharu.kotatsu.core.db.dao
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -19,6 +20,14 @@ abstract class ChaptersDao {
 
 	@Query("SELECT COUNT(*) FROM chapters WHERE manga_id = :mangaId")
 	abstract suspend fun count(mangaId: Long): Int
+
+	@Query("SELECT manga_id, COUNT(*) AS chapters_count FROM chapters WHERE manga_id IN (:mangaIds) GROUP BY manga_id")
+	abstract suspend fun countByMangaIds(mangaIds: Collection<Long>): List<MangaChapterCountTuple>
+
+	data class MangaChapterCountTuple(
+		@ColumnInfo(name = "manga_id") val mangaId: Long,
+		@ColumnInfo(name = "chapters_count") val chaptersCount: Int,
+	)
 
 	@Query("DELETE FROM chapters WHERE manga_id = :mangaId")
 	abstract suspend fun deleteAll(mangaId: Long)

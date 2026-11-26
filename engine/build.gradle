@@ -129,9 +129,12 @@ dependencies {
 	// Google Drive sign-in; the F-Droid version has no Drive sync and no Play Services.
 	githubImplementation libs.play.services.auth
 	githubImplementation libs.mlkit.genai.prompt
-	// On-device LiteRT-LM local LLM fallback & ONNX Runtime neural page upscaler (GitHub builds).
+	githubImplementation libs.mlkit.genai.summarization
+	// On-device LiteRT-LM local LLM fallback, ONNX Runtime & Qualcomm QNN NPU neural delegates (GitHub builds).
 	githubImplementation libs.litertlm.android
 	githubImplementation libs.onnxruntime.android
+	githubImplementation libs.qnn.litert.delegate
+	githubImplementation libs.qnn.runtime
 
 	api libs.okhttp
 	implementation libs.okhttp.brotli

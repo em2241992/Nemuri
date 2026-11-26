@@ -1,8 +1,10 @@
 package org.nemuri.app.ui.settings
 
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
@@ -15,11 +17,13 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,9 +59,29 @@ fun SettingsRootScreen(
 		else -> "Not signed in — multi-device library sync"
 	}
 
+	val isBetaBuild = BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("beta", ignoreCase = true)
+
 	SettingsLazyPage(
 		title = SettingsSection.ROOT.title,
 		onBack = onBack,
+		actions = {
+			if (isBetaBuild) {
+				Surface(
+					color = NemuriTheme.colors.amber.copy(alpha = 0.16f),
+					shape = RoundedCornerShape(999.dp),
+					border = BorderStroke(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.6f)),
+					modifier = Modifier.padding(end = 8.dp),
+				) {
+					Text(
+						text = "BETA",
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.Bold,
+						color = NemuriTheme.colors.amber,
+						modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+					)
+				}
+			}
+		},
 	) {
 		item {
 			SettingsGroupCard("Personalization & Reading") {

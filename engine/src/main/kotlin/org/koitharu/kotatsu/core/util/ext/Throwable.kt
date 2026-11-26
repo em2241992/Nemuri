@@ -219,6 +219,32 @@ fun Throwable.isWebViewUnavailable(): Boolean {
     return trace.contains("android.webkit.WebView.<init>")
 }
 
+fun Throwable.isHttp403OrChallenge(): Boolean {
+    var cur: Throwable? = this
+    var depth = 0
+    while (cur != null && depth < 16) {
+        when (cur) {
+            is CloudFlareProtectedException,
+            is CloudFlareBlockedException,
+            is InteractiveActionRequiredException -> return true
+            is HttpStatusException -> if (cur.statusCode == HttpURLConnection.HTTP_FORBIDDEN || cur.statusCode == 429 || cur.statusCode == 503) return true
+            is HttpException -> if (cur.response.code == HttpURLConnection.HTTP_FORBIDDEN || cur.response.code == 429 || cur.response.code == 503) return true
+            is eu.kanade.tachiyomi.network.HttpException -> if (cur.code == HttpURLConnection.HTTP_FORBIDDEN || cur.code == 429 || cur.code == 503) return true
+        }
+        val msg = cur.message.orEmpty()
+        if (msg.contains("403", ignoreCase = true) ||
+            msg.contains("cloudflare", ignoreCase = true) ||
+            msg.contains("captcha", ignoreCase = true) ||
+            msg.contains("forbidden", ignoreCase = true)
+        ) {
+            return true
+        }
+        cur = cur.cause
+        depth++
+    }
+    return false
+}
+
 fun FileNotFoundException.parseMessage(resources: Resources): String? {
     /*
     Examples:

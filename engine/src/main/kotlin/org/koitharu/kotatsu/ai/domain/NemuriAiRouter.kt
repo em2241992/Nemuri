@@ -51,6 +51,42 @@ class NemuriAiRouter @Inject constructor(
 		AiMode.AUTO -> generateAuto(systemPrompt, userPrompt, maxTokens)
 	}
 
+	/**
+	 * Specialized recap routing supporting `genai-prompt` first and falling back to
+	 * task-specific ML Kit `genai-summarization` on Samsung Galaxy S25 (`SM8750`).
+	 */
+	suspend fun summarizeRecap(
+		systemPrompt: String,
+		userPrompt: String,
+		articleText: String,
+		maxTokens: Int = 280,
+		recapDepth: RecapDepth = RecapDepth.DETAILED,
+	): Result<AiGenerationResult> = when (currentMode()) {
+		AiMode.OFF -> Result.failure(IllegalStateException("AI features are turned off"))
+
+		AiMode.GEMINI_NANO -> geminiNanoClient.summarize(
+			articleText = articleText,
+			fallbackPrompt = "$systemPrompt\n\n$userPrompt",
+			recapDepth = recapDepth,
+		).map { (text, label) ->
+			AiGenerationResult(text = text, engineUsed = label, isAiGenerated = true)
+		}
+
+		AiMode.LOCAL_MODEL -> localLlmClient.generate(systemPrompt, userPrompt, maxTokens).map { (text, label) ->
+			AiGenerationResult(text = text, engineUsed = label, isAiGenerated = true)
+		}
+
+		AiMode.REMOTE_OPENAI -> remoteAiClient.generateOpenAiCompatible(systemPrompt, userPrompt, maxTokens).map { text ->
+			AiGenerationResult(text = text, engineUsed = remoteEngineLabel(), isAiGenerated = true)
+		}
+
+		AiMode.GEMINI_API -> remoteAiClient.generateGeminiRest(systemPrompt, userPrompt, maxTokens).map { text ->
+			AiGenerationResult(text = text, engineUsed = "Gemini (${settings.aiGeminiModel})", isAiGenerated = true)
+		}
+
+		AiMode.AUTO -> summarizeAuto(systemPrompt, userPrompt, articleText, maxTokens, recapDepth)
+	}
+
 	private suspend fun generateAuto(
 		systemPrompt: String,
 		userPrompt: String,
@@ -58,8 +94,9 @@ class NemuriAiRouter @Inject constructor(
 	): Result<AiGenerationResult> {
 		var lastError: Throwable? = null
 
-		// 1. Primary: On-device Gemini Nano via AICore when immediately available
-		if (geminiNanoClient.checkAvailability() == NanoAvailability.AVAILABLE) {
+		// 1. Open-ended Gemini Nano via AICore when provisioned
+		val diag = geminiNanoClient.checkDiagnostics()
+		if (diag.availability == NanoAvailability.AVAILABLE && diag.supportsOpenPrompt) {
 			val nanoRes = geminiNanoClient.generate("$systemPrompt\n\n$userPrompt")
 			if (nanoRes.isSuccess) {
 				return Result.success(
@@ -72,6 +109,50 @@ class NemuriAiRouter @Inject constructor(
 			}
 			lastError = nanoRes.exceptionOrNull()
 		}
+
+		return fallbackAfterNano(systemPrompt, userPrompt, maxTokens, lastError)
+	}
+
+	private suspend fun summarizeAuto(
+		systemPrompt: String,
+		userPrompt: String,
+		articleText: String,
+		maxTokens: Int,
+		recapDepth: RecapDepth,
+	): Result<AiGenerationResult> {
+		var lastError: Throwable? = null
+
+		// 1. On-device Gemini Nano (Prompt -> Summarizer fallback for S25 / SM8750)
+		val diag = geminiNanoClient.checkDiagnostics()
+		if (diag.availability == NanoAvailability.AVAILABLE && (diag.supportsOpenPrompt || diag.supportsSummarization)) {
+			val nanoRes = geminiNanoClient.summarize(
+				articleText = articleText,
+				fallbackPrompt = "$systemPrompt\n\n$userPrompt",
+				recapDepth = recapDepth,
+			)
+			if (nanoRes.isSuccess) {
+				val (text, label) = nanoRes.getOrThrow()
+				return Result.success(
+					AiGenerationResult(
+						text = text,
+						engineUsed = label,
+						isAiGenerated = true,
+					),
+				)
+			}
+			lastError = nanoRes.exceptionOrNull()
+		}
+
+		return fallbackAfterNano(systemPrompt, userPrompt, maxTokens, lastError)
+	}
+
+	private suspend fun fallbackAfterNano(
+		systemPrompt: String,
+		userPrompt: String,
+		maxTokens: Int,
+		initialError: Throwable?,
+	): Result<AiGenerationResult> {
+		var lastError: Throwable? = initialError
 
 		// 2. Configured Gemini Cloud REST API key (encrypted)
 		if (secretStore.hasGeminiApiKey()) {
@@ -88,7 +169,7 @@ class NemuriAiRouter @Inject constructor(
 			lastError = geminiRes.exceptionOrNull()
 		}
 
-		// 3. Configured Ollama / OpenAI-compatible endpoint
+		// 3. Configured Ollama / OpenAI-compatible endpoint (only when explicitly enabled/configured)
 		if (hasRemoteConfigured()) {
 			val remoteRes = remoteAiClient.generateOpenAiCompatible(systemPrompt, userPrompt, maxTokens)
 			if (remoteRes.isSuccess) {
@@ -119,7 +200,7 @@ class NemuriAiRouter @Inject constructor(
 			lastError = localRes.exceptionOrNull()
 		}
 
-		return Result.failure(lastError ?: IllegalStateException("No AI backend available in Auto mode"))
+		return Result.failure(lastError ?: IllegalStateException("No active AI backend ready in Auto mode"))
 	}
 
 	suspend fun testActiveBackend(): AiConnectionTestResult {
@@ -133,11 +214,26 @@ class NemuriAiRouter @Inject constructor(
 			)
 		}
 		val start = System.currentTimeMillis()
-		val res = generate(
-			systemPrompt = "Respond strictly with the word OK.",
-			userPrompt = "Health check",
-			maxTokens = 16,
-		)
+		val nanoDiag = if (mode == AiMode.AUTO || mode == AiMode.GEMINI_NANO) checkNanoDiagnostics() else null
+		val useSummarizerHealthCheck = nanoDiag != null &&
+			nanoDiag.availability == NanoAvailability.AVAILABLE &&
+			!nanoDiag.supportsOpenPrompt &&
+			nanoDiag.supportsSummarization
+
+		val res = if (useSummarizerHealthCheck || mode == AiMode.GEMINI_NANO) {
+			summarizeRecap(
+				systemPrompt = "Respond strictly with the word OK.",
+				userPrompt = "Health check",
+				articleText = HEALTH_CHECK_ARTICLE,
+				maxTokens = 24,
+			)
+		} else {
+			generate(
+				systemPrompt = "Respond strictly with the word OK.",
+				userPrompt = "Health check",
+				maxTokens = 16,
+			)
+		}
 		val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
 		return res.fold(
 			onSuccess = { out ->
@@ -149,16 +245,24 @@ class NemuriAiRouter @Inject constructor(
 				)
 			},
 			onFailure = { err ->
-				val nanoNote = if (mode == AiMode.AUTO || mode == AiMode.GEMINI_NANO) {
-					val diag = checkNanoDiagnostics()
-					" (Gemini Nano: ${diag.detailMessage})"
+				val baseMsg = err.message?.trim().orEmpty().ifBlank { "Connection failed" }
+				val nanoNote = if ((mode == AiMode.AUTO || mode == AiMode.GEMINI_NANO) && nanoDiag != null) {
+					val diagMsg = nanoDiag.detailMessage.trim()
+					if (diagMsg.isNotBlank() &&
+						!baseMsg.contains(diagMsg, ignoreCase = true) &&
+						!diagMsg.contains(baseMsg, ignoreCase = true)
+					) {
+						" (Gemini Nano: $diagMsg)"
+					} else {
+						""
+					}
 				} else {
 					""
 				}
 				AiConnectionTestResult(
 					ok = false,
 					engineName = mode.label,
-					message = "${err.message ?: "Connection failed"}$nanoNote",
+					message = "$baseMsg$nanoNote",
 					latencyMs = elapsed,
 				)
 			},
@@ -168,7 +272,10 @@ class NemuriAiRouter @Inject constructor(
 	private fun hasRemoteConfigured(): Boolean {
 		val url = settings.aiRemoteUrl.trim()
 		val model = settings.aiRemoteModel.trim()
-		return url.isNotBlank() && model.isNotBlank()
+		if (url.isBlank() || model.isBlank()) return false
+		return settings.isAiRemoteConfiguredByUser ||
+			secretStore.hasOpenAiApiKey() ||
+			!url.equals(DEFAULT_LOCAL_OLLAMA_URL, ignoreCase = true)
 	}
 
 	private fun remoteEngineLabel(): String {
@@ -179,5 +286,11 @@ class NemuriAiRouter @Inject constructor(
 			":1234" in url -> "LM Studio ($model)"
 			else -> "OpenAI API ($model)"
 		}
+	}
+
+	private companion object {
+		const val DEFAULT_LOCAL_OLLAMA_URL = "http://127.0.0.1:11434/v1"
+		const val HEALTH_CHECK_ARTICLE =
+			"Reader status health check passage: A long-running serialized fantasy adventure follows a young cartographer mapping an archipelago of floating ruins while searching for lost chapters of an ancient chronicle. After completing forty-two chapters of the prologue arc and crossing the storm barrier, the party arrives safely at the sky harbor citadel to regroup before the next expedition."
 	}
 }

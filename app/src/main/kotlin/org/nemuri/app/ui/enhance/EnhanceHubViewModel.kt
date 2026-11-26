@@ -14,12 +14,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.ai.domain.AiMode
 import org.koitharu.kotatsu.core.db.MangaDatabase
-import org.koitharu.kotatsu.core.model.isNovelSource
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
-import org.koitharu.kotatsu.local.data.isEpub
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.stats.data.StatsRepository
@@ -36,6 +35,9 @@ data class EnhanceHubUiState(
 	val totalReadingTimeMs: Long = 0L,
 	val currentStreakDays: Int = 0,
 	val activeShaderLabel: String = "Off",
+	val activeNeuralDelegateLabel: String = "",
+	val isNeuralUpscaleEnabled: Boolean = false,
+	val neuralCacheBytes: Long = 0L,
 	val aiModeLabel: String = "Auto",
 	val isDuplicateCheckOnAdd: Boolean = true,
 	val isDuplicateProgressMigrated: Boolean = true,
@@ -43,9 +45,8 @@ data class EnhanceHubUiState(
 	val isScanningHealth: Boolean = true,
 )
 
-private data class EnhanceScanResult(
+private data class EnhanceStatsResult(
 	val isScanning: Boolean = true,
-	val duplicatePairs: Int = 0,
 	val totalReadingTimeMs: Long = 0L,
 	val currentStreakDays: Int = 0,
 )
@@ -56,10 +57,12 @@ class EnhanceHubViewModel @Inject constructor(
 	private val databaseProvider: Provider<MangaDatabase>,
 	private val sourcesRepository: MangaSourcesRepository,
 	private val statsRepository: StatsRepository,
+	private val duplicateCache: LibraryDuplicateCache,
+	private val pageUpscaleEngine: PageUpscaleEngine,
 	private val settings: AppSettings,
 ) : ViewModel() {
 
-	private val scanResultFlow = MutableStateFlow(EnhanceScanResult())
+	private val statsResultFlow = MutableStateFlow(EnhanceStatsResult())
 
 	init {
 		refreshDiagnostics()
@@ -69,9 +72,27 @@ class EnhanceHubViewModel @Inject constructor(
 		favouritesRepository.observeMangaCount(),
 		databaseProvider.get().getMangaDao().observeLibrarySourceUsage(),
 		sourcesRepository.observeEnabledSources(),
-		scanResultFlow,
+		statsResultFlow,
+		duplicateCache.snapshot,
+		combine(
+			pageUpscaleEngine.activeDelegateLabel,
+			pageUpscaleEngine.cacheBytesFlow,
+		) { label, bytes -> label to bytes },
 		settings.observeChanges().onStart { emit(null) },
-	) { libraryCount, usages, enabledSources, scan, _ ->
+	) { values ->
+		@Suppress("UNCHECKED_CAST")
+		val libraryCount = values[0] as Int
+		@Suppress("UNCHECKED_CAST")
+		val usages = values[1] as List<org.koitharu.kotatsu.core.db.dao.LibrarySourceUsage>
+		@Suppress("UNCHECKED_CAST")
+		val enabledSources = values[2] as List<org.koitharu.kotatsu.parsers.model.MangaSource>
+		val stats = values[3] as EnhanceStatsResult
+		val dupSnap = values[4] as DuplicateScanSnapshot
+		@Suppress("UNCHECKED_CAST")
+		val neuralPair = values[5] as Pair<String, Long>
+		val delegateLabel = neuralPair.first
+		val neuralCacheBytes = neuralPair.second
+
 		val enabledNames = enabledSources.mapTo(HashSet(enabledSources.size)) { it.name }
 		val broken = usages.filter { it.source !in enabledNames }
 		val shaderCfg = ReaderShaderConfig(
@@ -91,15 +112,18 @@ class EnhanceHubViewModel @Inject constructor(
 			libraryCount = libraryCount,
 			brokenSourcesCount = broken.size,
 			brokenTitlesCount = broken.sumOf { it.mangaCount },
-			duplicatePairsCount = scan.duplicatePairs,
-			totalReadingTimeMs = scan.totalReadingTimeMs,
-			currentStreakDays = scan.currentStreakDays,
+			duplicatePairsCount = dupSnap.exactPairCount,
+			totalReadingTimeMs = stats.totalReadingTimeMs,
+			currentStreakDays = stats.currentStreakDays,
 			activeShaderLabel = activeUpscalerLabel,
+			activeNeuralDelegateLabel = delegateLabel,
+			isNeuralUpscaleEnabled = neuralActive,
+			neuralCacheBytes = neuralCacheBytes,
 			aiModeLabel = AiMode.fromKey(settings.aiMode).label,
 			isDuplicateCheckOnAdd = settings.isDuplicateCheckEnabled,
 			isDuplicateProgressMigrated = settings.isDuplicateProgressMigrated,
 			isStatsEnabled = settings.isStatsEnabled,
-			isScanningHealth = scan.isScanning,
+			isScanningHealth = stats.isScanning || dupSnap.isScanningTier1,
 		)
 	}.stateIn(
 		scope = viewModelScope,
@@ -108,17 +132,14 @@ class EnhanceHubViewModel @Inject constructor(
 	)
 
 	fun refreshDiagnostics() {
+		duplicateCache.ensureScanned(forceRefresh = true)
 		viewModelScope.launch(Dispatchers.IO) {
-			scanResultFlow.value = scanResultFlow.value.copy(isScanning = true)
+			statsResultFlow.value = statsResultFlow.value.copy(isScanning = true)
 			val stats = runCatchingCancellable {
 				statsRepository.getStatsSnapshot(StatsPeriod.ALL, emptySet())
 			}.getOrNull()
-			val dupesCount = runCatchingCancellable {
-				countQuickDuplicates()
-			}.getOrDefault(0)
-			scanResultFlow.value = EnhanceScanResult(
+			statsResultFlow.value = EnhanceStatsResult(
 				isScanning = false,
-				duplicatePairs = dupesCount,
 				totalReadingTimeMs = stats?.totalDuration ?: 0L,
 				currentStreakDays = stats?.currentStreak ?: 0,
 			)
@@ -133,28 +154,9 @@ class EnhanceHubViewModel @Inject constructor(
 		settings.isDuplicateProgressMigrated = enabled
 	}
 
-	private suspend fun countQuickDuplicates(): Int {
-		val all = favouritesRepository.getAllManga()
-		if (all.size < 2) return 0
-		val byNormalizedKey = HashMap<String, MutableList<Long>>()
-		for (manga in all) {
-			val kind = if (manga.source.isNovelSource || manga.isEpub) "N" else "M"
-			val norm = buildString {
-				for (c in manga.title) {
-					if (c.isLetterOrDigit()) append(c.lowercaseChar())
-				}
-			}
-			if (norm.length >= 4) {
-				byNormalizedKey.getOrPut("$kind:$norm") { ArrayList(2) }.add(manga.id)
-			}
+	fun clearUpscaleCache() {
+		viewModelScope.launch(Dispatchers.IO) {
+			pageUpscaleEngine.clearCache()
 		}
-		var pairCount = 0
-		for (ids in byNormalizedKey.values) {
-			val distinctCount = ids.distinct().size
-			if (distinctCount >= 2) {
-				pairCount += distinctCount - 1
-			}
-		}
-		return pairCount
 	}
 }
