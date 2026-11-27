@@ -607,6 +607,55 @@ private val MonochromeEInkLightExtended = NemuriExtendedColors(
 	mergePurple = Color(0xFF3F3F46),
 )
 
+// 13. PERIWINKLE_ALLEGEDLY — #6395EE Cornflower Blue (or Periwinkle, if she says so)
+private val PeriwinkleAllegedlyDarkExtended = NemuriExtendedColors(
+	isDark = true,
+	background = Color(0xFF0A0D16),
+	surface = Color(0xFF0F1422),
+	surfaceElevated = Color(0xFF1B243A),
+	card = Color(0xFF151C2E),
+	dock = Color(0xFF172034),
+	sheet = Color(0xFF111828),
+	toast = Color(0xFF202B44),
+	border = Color(0xFF283757),
+	cyan = Color(0xFF6395EE),
+	teal = Color(0xFF8AB4F8),
+	tealContainer = Color(0xFF1A2D4F),
+	onCyan = Color(0xFF061024),
+	textPrimary = Color(0xFFEFF4FF),
+	textSecondary = Color(0xFFC7D7F5),
+	textMuted = Color(0xFF8FA5CE),
+	textDim = Color(0xFF63769C),
+	healthy = Color(0xFF5EEAD4),
+	amber = Color(0xFFFBBF24),
+	danger = Color(0xFFFB7185),
+	mergePurple = Color(0xFFA5B4FC),
+)
+
+private val PeriwinkleAllegedlyLightExtended = NemuriExtendedColors(
+	isDark = false,
+	background = Color(0xFFF5F8FF),
+	surface = Color(0xFFEDF2FE),
+	surfaceElevated = Color(0xFFE2EBFC),
+	card = Color(0xFFFFFFFF),
+	dock = Color(0xFFE8F0FE),
+	sheet = Color(0xFFF9FBFF),
+	toast = Color(0xFF151C2E),
+	border = Color(0xFFCBD9F5),
+	cyan = Color(0xFF3B6FD8),
+	teal = Color(0xFF6395EE),
+	tealContainer = Color(0xFFDCE8FD),
+	onCyan = Color(0xFFFFFFFF),
+	textPrimary = Color(0xFF101A33),
+	textSecondary = Color(0xFF32436B),
+	textMuted = Color(0xFF5C6F99),
+	textDim = Color(0xFF8395BA),
+	healthy = Color(0xFF0D9488),
+	amber = Color(0xFFD97706),
+	danger = Color(0xFFE11D48),
+	mergePurple = Color(0xFF6366F1),
+)
+
 val LocalNemuriColors = staticCompositionLocalOf { ObsidianExtendedColors }
 
 private data class AccentSpec(
@@ -731,6 +780,16 @@ private fun ColorScheme.accentSpec(): AccentSpec = when (this) {
 		onDarkPrimary = MonochromeEInkDarkExtended.onCyan,
 		darkTertiary = MonochromeEInkDarkExtended.healthy,
 		lightTertiary = MonochromeEInkLightExtended.healthy,
+	)
+
+	ColorScheme.PERIWINKLE_ALLEGEDLY -> AccentSpec(
+		darkPrimary = PeriwinkleAllegedlyDarkExtended.cyan,
+		lightPrimary = PeriwinkleAllegedlyLightExtended.cyan,
+		darkContainer = PeriwinkleAllegedlyDarkExtended.tealContainer,
+		lightContainer = PeriwinkleAllegedlyLightExtended.tealContainer,
+		onDarkPrimary = PeriwinkleAllegedlyDarkExtended.onCyan,
+		darkTertiary = PeriwinkleAllegedlyDarkExtended.mergePurple,
+		lightTertiary = PeriwinkleAllegedlyLightExtended.mergePurple,
 	)
 
 	// 16 Classic Accents — each with unique primary, container, and tertiary swatch tokens
@@ -989,6 +1048,12 @@ private fun resolveStaticExtendedColors(
 		MonochromeEInkLightExtended
 	}
 
+	ColorScheme.PERIWINKLE_ALLEGEDLY -> if (isDark) {
+		if (amoled) PeriwinkleAllegedlyDarkExtended.toSmartAmoled() else PeriwinkleAllegedlyDarkExtended
+	} else {
+		PeriwinkleAllegedlyLightExtended
+	}
+
 	// Classic Accents — accent-tinted Obsidian dark (and Smart AMOLED) + clean paper light
 	ColorScheme.TOTORO,
 	ColorScheme.MIKU,
@@ -1186,6 +1251,7 @@ fun paletteDisplayName(scheme: ColorScheme): String = when (scheme) {
 	ColorScheme.CRIMSON_INK -> "Crimson Ink"
 	ColorScheme.MIDNIGHT_INDIGO -> "Midnight Indigo"
 	ColorScheme.MONOCHROME_E_INK -> "Monochrome E-Ink"
+	ColorScheme.PERIWINKLE_ALLEGEDLY -> "Veri-lys"
 	ColorScheme.TOTORO -> "Default (Totoro)"
 	ColorScheme.MIKU -> "Miku"
 	ColorScheme.RENA -> "Asuka"
@@ -1222,6 +1288,7 @@ fun paletteTagline(scheme: ColorScheme): String = when (scheme) {
 	ColorScheme.CRIMSON_INK -> "Velvet obsidian & scarlet lacquer"
 	ColorScheme.MIDNIGHT_INDIGO -> "Astral navy & starlight indigo"
 	ColorScheme.MONOCHROME_E_INK -> "High-contrast paper & pure ink"
+	ColorScheme.PERIWINKLE_ALLEGEDLY -> "#6395EE — Cornflower blue, or periwinkle if she says so"
 	ColorScheme.TOTORO -> "Forest spirit teal-emerald"
 	ColorScheme.MIKU -> "Vocaloid turquoise cyan"
 	ColorScheme.RENA -> "Plugsuit scarlet vermilion"

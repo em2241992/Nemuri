@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
@@ -122,7 +123,7 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AppearanceSettingsScreen(
+fun ColorPaletteSettingsScreen(
 	viewModel: SettingsViewModel,
 	onBack: () -> Unit,
 ) {
@@ -140,6 +141,115 @@ fun AppearanceSettingsScreen(
 		}
 	}
 	val classicAccents = remember { ColorScheme.classicAccents }
+
+	SettingsLazyPage(
+		title = SettingsSection.COLOR_PALETTE.title,
+		onBack = onBack,
+	) {
+		item {
+			SettingsGroupCard(
+				title = paletteDisplayName(state.colorScheme),
+			) {
+				AppearanceLivePreview(state = state)
+				Text(
+					text = org.nemuri.app.ui.theme.paletteTagline(state.colorScheme),
+					style = MaterialTheme.typography.bodySmall,
+					color = NemuriTheme.colors.textMuted,
+					modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "AMOLED Pure Black",
+					subtitle = "True #000000 backdrop with persona-tinted surfaces",
+					checked = state.isAmoled,
+					onCheckedChange = viewModel::setAmoled,
+				)
+			}
+		}
+
+		item {
+			SettingsGroupCard("Signature & Persona Themes (${signaturePersonas.size})") {
+				FlowRow(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					signaturePersonas.forEach { scheme ->
+						val swatch = remember(scheme, effectiveDark, state.isAmoled) {
+							palettePreviewSwatch(
+								scheme = scheme,
+								isDark = effectiveDark,
+								amoled = state.isAmoled,
+								context = context,
+							)
+						}
+						ThemeSwatchChip(
+							label = paletteDisplayName(scheme),
+							swatch = swatch,
+							selected = state.colorScheme == scheme,
+							onClick = { viewModel.setColorScheme(scheme) },
+						)
+					}
+				}
+			}
+		}
+
+		item {
+			SettingsGroupCard("Classic Accent Palettes (${classicAccents.size})") {
+				FlowRow(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					classicAccents.forEach { scheme ->
+						val swatch = remember(scheme, effectiveDark, state.isAmoled) {
+							palettePreviewSwatch(
+								scheme = scheme,
+								isDark = effectiveDark,
+								amoled = state.isAmoled,
+								context = context,
+							)
+						}
+						ThemeSwatchChip(
+							label = paletteDisplayName(scheme),
+							swatch = swatch,
+							selected = state.colorScheme == scheme,
+							onClick = { viewModel.setColorScheme(scheme) },
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AppearanceSettingsScreen(
+	viewModel: SettingsViewModel,
+	onOpenColorPalette: () -> Unit = {},
+	onBack: () -> Unit,
+) {
+	val context = LocalContext.current
+	val state by viewModel.uiState.collectAsStateWithLifecycle()
+	val systemDark = isSystemInDarkTheme()
+	val effectiveDark = when (state.themeMode) {
+		AppCompatDelegate.MODE_NIGHT_NO -> false
+		AppCompatDelegate.MODE_NIGHT_YES -> true
+		else -> systemDark
+	}
+	val activeSwatch = remember(state.colorScheme, effectiveDark, state.isAmoled) {
+		palettePreviewSwatch(
+			scheme = state.colorScheme,
+			isDark = effectiveDark,
+			amoled = state.isAmoled,
+			context = context,
+		)
+	}
 
 	SettingsLazyPage(
 		title = SettingsSection.APPEARANCE.title,
@@ -185,81 +295,50 @@ fun AppearanceSettingsScreen(
 					checked = state.isAmoled,
 					onCheckedChange = viewModel::setAmoled,
 				)
-			}
-		}
-
-		item {
-			SettingsGroupCard("Accent Color Scheme") {
-				Column(
-					modifier = Modifier
-						.fillMaxWidth()
-						.padding(14.dp),
-					verticalArrangement = Arrangement.spacedBy(10.dp),
-				) {
-					Text(
-						text = "SIGNATURE & PERSONA THEMES",
-						style = MaterialTheme.typography.labelSmall,
-						fontWeight = FontWeight.Bold,
-						color = NemuriTheme.colors.cyan,
-					)
-					FlowRow(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(8.dp),
-						verticalArrangement = Arrangement.spacedBy(8.dp),
-					) {
-						signaturePersonas.forEach { scheme ->
-							val swatch = remember(scheme, effectiveDark, state.isAmoled) {
-								palettePreviewSwatch(
-									scheme = scheme,
-									isDark = effectiveDark,
-									amoled = state.isAmoled,
-									context = context,
-								)
-							}
-							ThemeSwatchChip(
-								label = paletteDisplayName(scheme),
-								swatch = swatch,
-								selected = state.colorScheme == scheme,
-								onClick = { viewModel.setColorScheme(scheme) },
-							)
-						}
-					}
-				}
 				SettingsRowDivider()
-				Column(
+				Row(
 					modifier = Modifier
 						.fillMaxWidth()
-						.padding(14.dp),
-					verticalArrangement = Arrangement.spacedBy(10.dp),
+						.clickable(onClick = onOpenColorPalette)
+						.padding(horizontal = 14.dp, vertical = 12.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp),
 				) {
-					Text(
-						text = "CLASSIC ACCENT PALETTES",
-						style = MaterialTheme.typography.labelSmall,
-						fontWeight = FontWeight.Bold,
-						color = NemuriTheme.colors.textMuted,
-					)
-					FlowRow(
-						modifier = Modifier.fillMaxWidth(),
-						horizontalArrangement = Arrangement.spacedBy(8.dp),
-						verticalArrangement = Arrangement.spacedBy(8.dp),
+					Row(
+						horizontalArrangement = Arrangement.spacedBy((-4).dp),
+						verticalAlignment = Alignment.CenterVertically,
 					) {
-						classicAccents.forEach { scheme ->
-							val swatch = remember(scheme, effectiveDark, state.isAmoled) {
-								palettePreviewSwatch(
-									scheme = scheme,
-									isDark = effectiveDark,
-									amoled = state.isAmoled,
-									context = context,
-								)
-							}
-							ThemeSwatchChip(
-								label = paletteDisplayName(scheme),
-								swatch = swatch,
-								selected = state.colorScheme == scheme,
-								onClick = { viewModel.setColorScheme(scheme) },
+						listOf(activeSwatch.accent, activeSwatch.card, activeSwatch.tertiary).forEach { dot ->
+							Box(
+								modifier = Modifier
+									.size(16.dp)
+									.clip(CircleShape)
+									.background(dot)
+									.border(1.dp, NemuriTheme.colors.border, CircleShape),
 							)
 						}
 					}
+					Column(modifier = Modifier.weight(1f)) {
+						Text(
+							text = "Color Palette",
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.SemiBold,
+							color = NemuriTheme.colors.textPrimary,
+						)
+						Text(
+							text = "${paletteDisplayName(state.colorScheme)} • ${ColorScheme.entries.size} themes",
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.cyan,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+					}
+					Icon(
+						imageVector = Icons.Default.ChevronRight,
+						contentDescription = "Open Color Palette",
+						tint = NemuriTheme.colors.textMuted,
+						modifier = Modifier.size(20.dp),
+					)
 				}
 			}
 		}

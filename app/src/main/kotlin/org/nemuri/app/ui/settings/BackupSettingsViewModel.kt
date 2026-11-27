@@ -172,12 +172,13 @@ class BackupSettingsViewModel @Inject constructor(
 					val input = context.contentResolver.openInputStream(uri)
 						?: throw IOException("Could not open backup archive")
 					val collector = FlowCollector<org.koitharu.kotatsu.core.util.progress.Progress> { p ->
+						val pct = p.percent
 						workingState.value = workingState.value.copy(
-							progressFraction = if (p.isIndeterminate) null else p.percent.coerceIn(0f, 1f),
+							progressFraction = if (p.isIndeterminate || !pct.isFinite()) null else pct.coerceIn(0f, 1f),
 						)
 					}
 					val sectionsToRestore = selectedSections + BackupSection.INDEX
-					input.use { stream ->
+					input.buffered().use { stream ->
 						ZipInputStream(stream).use { zip ->
 							localBackupRepositoryProvider.get().restoreBackup(zip, sectionsToRestore, collector)
 						}
@@ -185,10 +186,17 @@ class BackupSettingsViewModel @Inject constructor(
 				}
 			}
 			result.onSuccess { composite ->
-				val summary = if (composite.isAllSuccess) {
-					"Restored backup (${composite.size} entries processed)."
-				} else {
-					"Restored with ${composite.failures.size} warning(s) out of ${composite.size} entries."
+				val summary = when {
+					composite.isAllSuccess -> "Restored backup (${composite.size} entries processed)."
+					composite.isAllFailed -> {
+						val reason = composite.failures.firstOrNull()?.localizedMessage
+						if (!reason.isNullOrBlank()) {
+							"Restore failed: $reason"
+						} else {
+							"Restore failed (${composite.failures.size} error(s))."
+						}
+					}
+					else -> "Restored with ${composite.failures.size} warning(s) out of ${composite.size} entries."
 				}
 				workingState.value = workingState.value.copy(
 					isWorking = false,

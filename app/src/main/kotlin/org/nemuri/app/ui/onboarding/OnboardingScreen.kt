@@ -1245,9 +1245,9 @@ private fun Step3SyncAndBackup(
 						color = NemuriTheme.colors.cyan,
 					)
 					val fraction = backupState.progressFraction
-					if (fraction != null) {
+					if (fraction != null && fraction.isFinite()) {
 						LinearProgressIndicator(
-							progress = { fraction },
+							progress = { fraction.coerceIn(0f, 1f) },
 							color = NemuriTheme.colors.cyan,
 							trackColor = NemuriTheme.colors.surfaceElevated,
 							modifier = Modifier.fillMaxWidth(),

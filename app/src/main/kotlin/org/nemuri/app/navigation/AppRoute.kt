@@ -16,6 +16,7 @@ enum class AppTab(val label: String) {
 enum class SettingsSection(val title: String) {
 	ROOT("Settings"),
 	APPEARANCE("Appearance"),
+	COLOR_PALETTE("Color Palette"),
 	EXTENSIONS("Extensions & Repos"),
 	READING("Reader & Novel"),
 	DOWNLOADS_STORAGE("Downloads & Storage"),

@@ -726,16 +726,24 @@ private fun ExploreTopBar(
 								modifier = Modifier.size(18.dp),
 							)
 						}
+					} else {
+						Box(
+							modifier = Modifier
+								.size(34.dp)
+								.clip(RoundedCornerShape(17.dp))
+								.clickable(onClick = onToggleGridMode),
+							contentAlignment = Alignment.Center,
+						) {
+							Icon(
+								imageVector = if (isGridMode) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
+								contentDescription = if (isGridMode) "Switch to list view" else "Switch to grid view",
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(19.dp),
+							)
+						}
 					}
 				}
 			}
-
-			HeaderSquareAction(
-				icon = if (isGridMode) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
-				contentDescription = if (isGridMode) "Switch to list view" else "Switch to grid view",
-				tint = NemuriTheme.colors.cyan,
-				onClick = onToggleGridMode,
-			)
 
 			HeaderSquareAction(
 				icon = Icons.Default.Tune,

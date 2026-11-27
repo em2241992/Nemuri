@@ -106,6 +106,13 @@ fun EnhanceHubScreen(
 			query = "",
 			onQueryChange = {},
 			placeholder = "Enhance Hub • Care, Repair, Shaders & AI",
+			onTuneClick = {
+				if (selectedTab == EnhanceHubTab.AI) {
+					onOpenAiSettings()
+				} else {
+					onOpenReadingSettings()
+				}
+			},
 			onSettingsClick = onOpenSettings,
 		)
 

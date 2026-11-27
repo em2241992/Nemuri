@@ -26,6 +26,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -242,10 +245,40 @@ class ReaderActivity : FragmentActivity() {
 
 	private val viewModel: ReaderViewModel by viewModels()
 	private var volumeKeyCallback: ((Boolean) -> Unit)? = null
+	private var keepSystemBarsVisible: Boolean = false
+
+	private fun applySystemBarsVisibility(visible: Boolean) {
+		keepSystemBarsVisible = visible
+		val controller = WindowCompat.getInsetsController(window, window.decorView)
+		controller.systemBarsBehavior =
+			WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+		if (visible) {
+			controller.show(WindowInsetsCompat.Type.systemBars())
+		} else {
+			controller.hide(WindowInsetsCompat.Type.systemBars())
+		}
+	}
+
+	override fun onWindowFocusChanged(hasFocus: Boolean) {
+		super.onWindowFocusChanged(hasFocus)
+		if (hasFocus && !keepSystemBarsVisible) {
+			applySystemBarsVisibility(false)
+		}
+	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		enableEdgeToEdge()
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+			window.attributes = window.attributes.apply {
+				layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+					WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+				} else {
+					WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+				}
+			}
+		}
+		applySystemBarsVisibility(false)
 
 		setContent {
 			NemuriTheme {
@@ -282,6 +315,10 @@ class ReaderActivity : FragmentActivity() {
 				}
 
 				Box(modifier = Modifier.fillMaxSize()) {
+					var readerWantsSystemBars by remember { mutableStateOf(false) }
+					LaunchedEffect(readerWantsSystemBars, isAppLocked) {
+						applySystemBarsVisibility(readerWantsSystemBars || isAppLocked)
+					}
 					ReaderRootScreen(
 						uiState = uiState,
 						toastManager = toastManager,
@@ -298,6 +335,7 @@ class ReaderActivity : FragmentActivity() {
 						onResetAutoRotate = {
 							manualOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 						},
+						onSystemBarsVisibilityChange = { readerWantsSystemBars = it },
 						onRegisterVolumeHandler = { volumeKeyCallback = it },
 						onBack = { finish() },
 					)
@@ -378,6 +416,7 @@ private fun ReaderRootScreen(
 	isOrientationLocked: Boolean,
 	onToggleManualRotate: () -> Unit,
 	onResetAutoRotate: () -> Unit,
+	onSystemBarsVisibilityChange: (Boolean) -> Unit,
 	onRegisterVolumeHandler: (((Boolean) -> Unit)?) -> Unit,
 	onBack: () -> Unit,
 ) {
@@ -388,6 +427,12 @@ private fun ReaderRootScreen(
 	var showSettingsSheet by remember { mutableStateOf(false) }
 	var quickActionPage by remember { mutableStateOf<ReaderPage?>(null) }
 	var compareSplitPage by remember { mutableStateOf<ReaderPage?>(null) }
+
+	LaunchedEffect(showHud, showChaptersSheet, showSettingsSheet, quickActionPage) {
+		onSystemBarsVisibilityChange(
+			showHud || showChaptersSheet || showSettingsSheet || quickActionPage != null,
+		)
+	}
 
 	val cfLauncher = rememberLauncherForActivityResult(CloudFlareActivity.Contract()) { solved ->
 		if (solved) viewModel.retry()

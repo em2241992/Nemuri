@@ -25,6 +25,7 @@ enum class ColorScheme(
 	CRIMSON_INK(R.string.theme_name_crimson_ink, isSignaturePersona = true),
 	MIDNIGHT_INDIGO(R.string.theme_name_midnight_indigo, isSignaturePersona = true),
 	MONOCHROME_E_INK(R.string.theme_name_monochrome_eink, isSignaturePersona = true),
+	PERIWINKLE_ALLEGEDLY(R.string.theme_name_periwinkle_allegedly, isSignaturePersona = true),
 
 	// 2. Classic Accent Palettes (Kotatsu / DropSauce)
 	TOTORO(R.string.theme_name_totoro),

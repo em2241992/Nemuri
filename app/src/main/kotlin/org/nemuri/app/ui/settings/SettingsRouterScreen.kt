@@ -28,6 +28,12 @@ fun SettingsRouterScreen(
 
 		SettingsSection.APPEARANCE -> AppearanceSettingsScreen(
 			viewModel = settingsViewModel,
+			onOpenColorPalette = { onNavigateSection(SettingsSection.COLOR_PALETTE) },
+			onBack = onBack,
+		)
+
+		SettingsSection.COLOR_PALETTE -> ColorPaletteSettingsScreen(
+			viewModel = settingsViewModel,
 			onBack = onBack,
 		)
 

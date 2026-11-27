@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocalLibrary
 import androidx.compose.material.icons.filled.Refresh
@@ -326,51 +327,62 @@ fun LibraryScreen(
 				}
 			}
 
-			// Row 2: Status Filters prefixed with STATUS micro-label + colored status indicator dots
-			Row(
+			// Row 2: Status Filters inside matching tonal container track for visual consistency with Row 1
+			Surface(
+				color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
+				shape = RoundedCornerShape(16.dp),
+				border = BorderStroke(1.dp, NemuriTheme.colors.border),
 				modifier = Modifier
 					.fillMaxWidth()
-					.padding(horizontal = 16.dp, vertical = 3.dp),
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(8.dp),
+					.padding(horizontal = 14.dp, vertical = 3.dp),
 			) {
-				Text(
-					text = "STATUS",
-					style = MaterialTheme.typography.labelSmall,
-					fontSize = 10.sp,
-					fontWeight = FontWeight.Bold,
-					letterSpacing = 0.8.sp,
-					color = NemuriTheme.colors.textMuted,
-				)
-				Box(
-					modifier = Modifier
-						.width(1.dp)
-						.height(14.dp)
-						.background(NemuriTheme.colors.border),
-				)
 				Row(
 					modifier = Modifier
-						.weight(1f)
-						.clipToBounds()
-						.horizontalScroll(rememberScrollState()),
-					horizontalArrangement = Arrangement.spacedBy(6.dp),
+						.fillMaxWidth()
+						.padding(horizontal = 8.dp, vertical = 6.dp),
 					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(8.dp),
 				) {
-					LibraryQuickFilter.entries.forEach { filter ->
-						val dotColor: Color? = when (filter) {
-							LibraryQuickFilter.ALL -> null
-							LibraryQuickFilter.UNREAD -> NemuriTheme.colors.cyan
-							LibraryQuickFilter.DOWNLOADED -> NemuriTheme.colors.healthy
-							LibraryQuickFilter.NEW_CHAPTERS -> NemuriTheme.colors.amber
-							LibraryQuickFilter.ONGOING -> Color(0xFF60A5FA)
-							LibraryQuickFilter.COMPLETED -> NemuriTheme.colors.mergePurple
+					Surface(
+						color = NemuriTheme.colors.tealContainer,
+						shape = RoundedCornerShape(10.dp),
+						border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+						modifier = Modifier.size(30.dp),
+					) {
+						Box(contentAlignment = Alignment.Center) {
+							Icon(
+								imageVector = Icons.Default.FilterList,
+								contentDescription = "Status filters",
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(16.dp),
+							)
 						}
-						LibraryStatusChip(
-							label = filter.label,
-							dotColor = dotColor,
-							selected = uiState.quickFilter == filter,
-							onClick = { viewModel.setQuickFilter(filter) },
-						)
+					}
+
+					Row(
+						modifier = Modifier
+							.weight(1f)
+							.clipToBounds()
+							.horizontalScroll(rememberScrollState()),
+						horizontalArrangement = Arrangement.spacedBy(6.dp),
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						LibraryQuickFilter.entries.forEach { filter ->
+							val dotColor: Color? = when (filter) {
+								LibraryQuickFilter.ALL -> null
+								LibraryQuickFilter.UNREAD -> NemuriTheme.colors.cyan
+								LibraryQuickFilter.DOWNLOADED -> NemuriTheme.colors.healthy
+								LibraryQuickFilter.NEW_CHAPTERS -> NemuriTheme.colors.amber
+								LibraryQuickFilter.ONGOING -> Color(0xFF60A5FA)
+								LibraryQuickFilter.COMPLETED -> NemuriTheme.colors.mergePurple
+							}
+							LibraryStatusChip(
+								label = filter.label,
+								dotColor = dotColor,
+								selected = uiState.quickFilter == filter,
+								onClick = { viewModel.setQuickFilter(filter) },
+							)
+						}
 					}
 				}
 			}
