@@ -632,8 +632,21 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 			?: ReaderTapZoneMode.DEFAULT.key
 		set(value) = prefs.edit { putString(KEY_READER_TAP_ZONE_MODE, value) }
 
-	val isReaderZoomButtonsEnabled: Boolean
+	var isReaderZoomButtonsEnabled: Boolean
 		get() = prefs.getBoolean(KEY_READER_ZOOM_BUTTONS, false)
+		set(value) = prefs.edit { putBoolean(KEY_READER_ZOOM_BUTTONS, value) }
+
+	var isSuggestionsPromptHandled: Boolean
+		get() = prefs.getBoolean(KEY_SUGGESTIONS_PROMPT_HANDLED, false)
+		set(value) = prefs.edit { putBoolean(KEY_SUGGESTIONS_PROMPT_HANDLED, value) }
+
+	var dismissedUpdateId: Long
+		get() = prefs.getLong(KEY_DISMISSED_UPDATE_ID, 0L)
+		set(value) = prefs.edit { putLong(KEY_DISMISSED_UPDATE_ID, value) }
+
+	var lastUpdateCheckAt: Long
+		get() = prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
+		set(value) = prefs.edit { putLong(KEY_LAST_UPDATE_CHECK_AT, value) }
 
 	val isReaderControlAlwaysLTR: Boolean
 		get() = prefs.getBoolean(KEY_READER_CONTROL_LTR, false)
@@ -2098,6 +2111,9 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_QUICK_SCROLL_BUTTONS = "ui_quick_scroll_buttons"
 		const val KEY_LAST_POSITION_PILL = "ui_last_position_pill"
 		const val KEY_TRACKER_INTERVAL = "tracker_interval_v2"
+		const val KEY_SUGGESTIONS_PROMPT_HANDLED = "suggestions_prompt_handled"
+		const val KEY_DISMISSED_UPDATE_ID = "dismissed_github_update_id"
+		const val KEY_LAST_UPDATE_CHECK_AT = "last_github_update_check_at"
 
 		/**
 		 * Keys that must never leave the device: credentials, app-lock state and per-install ids.

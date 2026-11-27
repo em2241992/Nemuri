@@ -22,10 +22,15 @@ import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
 import org.koitharu.kotatsu.explore.data.MangaSourcesRepository
 import org.koitharu.kotatsu.favourites.domain.FavouritesRepository
+import org.koitharu.kotatsu.history.data.HistoryRepository
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
+import org.koitharu.kotatsu.reader.domain.NeuralUpscaleModelManager
 import org.koitharu.kotatsu.reader.domain.PageUpscaleEngine
+import org.koitharu.kotatsu.reader.domain.ReaderColorFilter
 import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
+import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.koitharu.kotatsu.stats.data.StatsRepository
 import org.koitharu.kotatsu.stats.domain.StatsPeriod
 import org.nemuri.app.ui.components.NemuriToastManager
@@ -50,11 +55,16 @@ data class EnhanceHubUiState(
 	val activeShaderLabel: String = "Off",
 	val isNeuralUpscaleSupported: Boolean = false,
 	val activeNeuralDelegateLabel: String = "",
+	val neuralAccelerator: NeuralAccelerator = NeuralAccelerator.AUTO,
+	val hasReadyNeuralModel: Boolean = false,
+	val isWarmBedtimePresetActive: Boolean = false,
+	val sampleCoverUrl: String? = null,
 	val isNeuralUpscaleEnabled: Boolean = false,
 	val isNeuralPreloadEnabled: Boolean = true,
 	val neuralCacheBytes: Long = 0L,
 	val aiMode: AiMode = AiMode.AUTO,
 	val aiModeLabel: String = "Auto",
+	val activeAiEngineLabel: String = "Auto",
 	val aiRecapDepth: RecapDepth = RecapDepth.DETAILED,
 	val isAiShowRecapCard: Boolean = true,
 	val isAiIncludeNovelExcerpt: Boolean = true,
@@ -80,14 +90,23 @@ private data class EnhanceAiTestState(
 	val result: AiConnectionTestResult? = null,
 )
 
+private data class EnhanceExtraRuntimeState(
+	val aiTestState: EnhanceAiTestState = EnhanceAiTestState(),
+	val isLocalLoaded: Boolean = false,
+	val activeAiEngineLabel: String = "Auto",
+	val sampleCoverUrl: String? = null,
+)
+
 @HiltViewModel
 class EnhanceHubViewModel @Inject constructor(
 	private val favouritesRepository: FavouritesRepository,
+	private val historyRepository: HistoryRepository,
 	private val databaseProvider: Provider<MangaDatabase>,
 	private val sourcesRepository: MangaSourcesRepository,
 	private val statsRepository: StatsRepository,
 	private val duplicateCache: LibraryDuplicateCache,
 	private val pageUpscaleEngine: PageUpscaleEngine,
+	private val upscaleModelManager: NeuralUpscaleModelManager,
 	private val aiRouterProvider: Provider<NemuriAiRouter>,
 	private val localLlmClientProvider: Provider<LocalLlmClient>,
 	private val settings: AppSettings,
@@ -96,9 +115,23 @@ class EnhanceHubViewModel @Inject constructor(
 
 	private val statsResultFlow = MutableStateFlow(EnhanceStatsResult())
 	private val aiTestStateFlow = MutableStateFlow(EnhanceAiTestState())
+	private val sampleCoverUrlFlow = MutableStateFlow<String?>(null)
+	private val activeAiEngineLabelFlow = MutableStateFlow("Auto")
 
 	init {
 		refreshDiagnostics()
+		viewModelScope.launch(Dispatchers.IO) {
+			settings.observe(
+				AppSettings.KEY_AI_MODE,
+				AppSettings.KEY_AI_LOCAL_MODEL_ID,
+				AppSettings.KEY_AI_GEMINI_MODEL,
+				AppSettings.KEY_AI_REMOTE_URL,
+				AppSettings.KEY_AI_REMOTE_MODEL,
+				AppSettings.KEY_AI_REMOTE_ENABLED,
+			).collect {
+				refreshActiveAiEngineLabel()
+			}
+		}
 	}
 
 	val uiState: StateFlow<EnhanceHubUiState> = combine(
@@ -110,11 +143,21 @@ class EnhanceHubViewModel @Inject constructor(
 		combine(
 			pageUpscaleEngine.activeDelegateLabel,
 			pageUpscaleEngine.cacheBytesFlow,
-		) { label, bytes -> label to bytes },
+			upscaleModelManager.inventoryVersion,
+		) { label, bytes, _ -> label to bytes },
 		combine(
 			aiTestStateFlow,
 			localLlmClientProvider.get().isModelLoadedInRam,
-		) { testState, loadedInRam -> testState to loadedInRam },
+			activeAiEngineLabelFlow,
+			sampleCoverUrlFlow,
+		) { testState, loadedInRam, engineLabel, sampleCover ->
+			EnhanceExtraRuntimeState(
+				aiTestState = testState,
+				isLocalLoaded = loadedInRam,
+				activeAiEngineLabel = engineLabel,
+				sampleCoverUrl = sampleCover,
+			)
+		},
 		settings.observeChanges().onStart { emit(null) },
 	) { values ->
 		@Suppress("UNCHECKED_CAST")
@@ -129,10 +172,9 @@ class EnhanceHubViewModel @Inject constructor(
 		val neuralPair = values[5] as Pair<String, Long>
 		val delegateLabel = neuralPair.first
 		val neuralCacheBytes = neuralPair.second
-		@Suppress("UNCHECKED_CAST")
-		val aiRuntimePair = values[6] as Pair<EnhanceAiTestState, Boolean>
-		val aiTestState = aiRuntimePair.first
-		val isLocalLoaded = aiRuntimePair.second
+		val extra = values[6] as EnhanceExtraRuntimeState
+		val aiTestState = extra.aiTestState
+		val isLocalLoaded = extra.isLocalLoaded
 
 		val enabledNames = enabledSources.mapTo(HashSet(enabledSources.size)) { it.name }
 		val broken = usages.filter { it.source !in enabledNames }
@@ -150,7 +192,10 @@ class EnhanceHubViewModel @Inject constructor(
 			neuralActive -> "Neural 2x"
 			else -> shaderSummary
 		}
-		val currentAiMode = AiMode.fromKey(settings.aiMode)
+		val currentAiMode = aiRouterProvider.get().sanitizeDeletedLocalModel()
+		val effectiveAiLabel = extra.activeAiEngineLabel.ifBlank { currentAiMode.label }
+		val hasReadyNeuralModel = upscaleModelManager.resolveActiveReadyModel() != null
+		val isWarmBedtimeActive = settings.readerColorFilter?.isBookBackground == true
 		EnhanceHubUiState(
 			libraryCount = libraryCount,
 			brokenSourcesCount = broken.size,
@@ -168,11 +213,16 @@ class EnhanceHubViewModel @Inject constructor(
 			activeShaderLabel = activeUpscalerLabel,
 			isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
 			activeNeuralDelegateLabel = delegateLabel,
+			neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
+			hasReadyNeuralModel = hasReadyNeuralModel,
+			isWarmBedtimePresetActive = isWarmBedtimeActive,
+			sampleCoverUrl = extra.sampleCoverUrl,
 			isNeuralUpscaleEnabled = neuralActive,
 			isNeuralPreloadEnabled = settings.isNeuralPreloadEnabled,
 			neuralCacheBytes = neuralCacheBytes,
 			aiMode = currentAiMode,
 			aiModeLabel = currentAiMode.label,
+			activeAiEngineLabel = effectiveAiLabel,
 			aiRecapDepth = RecapDepth.fromKey(settings.aiRecapDepth),
 			isAiShowRecapCard = settings.isAiShowRecapCard,
 			isAiIncludeNovelExcerpt = settings.isAiIncludeNovelExcerpt,
@@ -199,12 +249,30 @@ class EnhanceHubViewModel @Inject constructor(
 			val stats = runCatchingCancellable {
 				statsRepository.getStatsSnapshot(StatsPeriod.ALL, emptySet())
 			}.getOrNull()
+			val sampleCover = runCatchingCancellable {
+				val fromHistory = historyRepository.getLastOrNull()
+					?.let { it.largeCoverUrl?.takeIf(String::isNotBlank) ?: it.coverUrl?.takeIf(String::isNotBlank) }
+				fromHistory ?: favouritesRepository.getLastManga(1)
+					.firstOrNull()
+					?.let { it.largeCoverUrl?.takeIf(String::isNotBlank) ?: it.coverUrl?.takeIf(String::isNotBlank) }
+			}.getOrNull()
+			sampleCoverUrlFlow.value = sampleCover
+			refreshActiveAiEngineLabel()
 			statsResultFlow.value = EnhanceStatsResult(
 				isScanning = false,
 				totalReadingTimeMs = stats?.totalDuration ?: 0L,
 				currentStreakDays = stats?.currentStreak ?: 0,
 			)
 		}
+	}
+
+	private suspend fun refreshActiveAiEngineLabel() {
+		val router = aiRouterProvider.get()
+		val sanitizedMode = router.sanitizeDeletedLocalModel()
+		val label = runCatchingCancellable {
+			router.resolveActiveEngineDisplayLabel()
+		}.getOrElse { sanitizedMode.label }
+		activeAiEngineLabelFlow.value = label
 	}
 
 	fun setDuplicateCheckOnAdd(enabled: Boolean) {
@@ -245,6 +313,31 @@ class EnhanceHubViewModel @Inject constructor(
 		settings.isNeuralUpscaleEnabled = enabled
 	}
 
+	fun setNeuralAccelerator(accelerator: NeuralAccelerator) {
+		settings.neuralUpscaleAccelerator = accelerator.key
+	}
+
+	fun applyBedtimeWarmPreset(enabled: Boolean) {
+		val current = settings.readerColorFilter ?: ReaderColorFilter.EMPTY
+		if (enabled) {
+			settings.readerColorFilter = current.copy(
+				contrast = current.contrast.coerceAtLeast(0.14f),
+				isBookBackground = true,
+			)
+			if (UpscaleEffect.isSupported) {
+				settings.readerShaderMode = ReaderShaderPreset.FSR_1.key
+				settings.isReaderInkLevelsEnabled = true
+				settings.isReaderDescreenEnabled = false
+			}
+		} else {
+			if (current.isBookBackground) {
+				val nextContrast = if (kotlin.math.abs(current.contrast - 0.14f) < 0.02f) 0f else current.contrast
+				val updated = current.copy(contrast = nextContrast, isBookBackground = false)
+				settings.readerColorFilter = updated.takeUnless { it.isEmpty }
+			}
+		}
+	}
+
 	fun setNeuralPreloadEnabled(enabled: Boolean) {
 		settings.isNeuralPreloadEnabled = enabled
 	}
@@ -259,6 +352,9 @@ class EnhanceHubViewModel @Inject constructor(
 	fun setAiMode(mode: AiMode) {
 		settings.aiMode = mode.key
 		aiTestStateFlow.value = EnhanceAiTestState()
+		viewModelScope.launch(Dispatchers.IO) {
+			refreshActiveAiEngineLabel()
+		}
 	}
 
 	fun setAiRecapDepth(depth: RecapDepth) {

@@ -36,6 +36,8 @@ data class NemuriExtendedColors(
 	val amber: Color,
 	val danger: Color,
 	val mergePurple: Color,
+	val secondary: Color = mergePurple,
+	val secondaryContainer: Color = tealContainer,
 )
 
 @Immutable
@@ -656,6 +658,112 @@ private val PeriwinkleAllegedlyLightExtended = NemuriExtendedColors(
 	mergePurple = Color(0xFF6366F1),
 )
 
+// 14. VERI_LYS_ICY_BLUE — Locked Cornflower Blue Primary + Icy Sky Surfaces & Wisteria Secondary
+private val VeriLysIcyBlueDarkExtended = NemuriExtendedColors(
+	isDark = true,
+	background = Color(0xFF0E1624),
+	surface = Color(0xFF162236),
+	surfaceElevated = Color(0xFF1E2E47),
+	card = Color(0xFF162236),
+	dock = Color(0xFF1E2E47),
+	sheet = Color(0xFF121C2E),
+	toast = Color(0xFF1E2E47),
+	border = Color(0xFF2D4466),
+	cyan = Color(0xFF7DA4FF),
+	teal = Color(0xFF8CC8FF),
+	tealContainer = Color(0xFF1E355E),
+	onCyan = Color(0xFF061329),
+	textPrimary = Color(0xFFE6F0FC),
+	textSecondary = Color(0xFFC2D5EE),
+	textMuted = Color(0xFF8CA5C7),
+	textDim = Color(0xFF617B9E),
+	healthy = Color(0xFF8CC8FF),
+	amber = Color(0xFFFBBF24),
+	danger = Color(0xFFFB7185),
+	mergePurple = Color(0xFFB9A3FF),
+	secondary = Color(0xFFB9A3FF),
+	secondaryContainer = Color(0xFF312654),
+)
+
+private val VeriLysIcyBlueLightExtended = NemuriExtendedColors(
+	isDark = false,
+	background = Color(0xFFE2EFFB),
+	surface = Color(0xFFF2F8FF),
+	surfaceElevated = Color(0xFFD5E6F7),
+	card = Color(0xFFF2F8FF),
+	dock = Color(0xFFD5E6F7),
+	sheet = Color(0xFFF2F8FF),
+	toast = Color(0xFF162238),
+	border = Color(0xFFB8D2F2),
+	cyan = Color(0xFF5887ED),
+	teal = Color(0xFF5BA4E8),
+	tealContainer = Color(0xFFD6E8FA),
+	onCyan = Color(0xFFFFFFFF),
+	textPrimary = Color(0xFF162238),
+	textSecondary = Color(0xFF314466),
+	textMuted = Color(0xFF556B8F),
+	textDim = Color(0xFF7990B5),
+	healthy = Color(0xFF5BA4E8),
+	amber = Color(0xFFD97706),
+	danger = Color(0xFFE11D48),
+	mergePurple = Color(0xFF8E72EB),
+	secondary = Color(0xFF8E72EB),
+	secondaryContainer = Color(0xFFE6DEFA),
+)
+
+// 15. VERI_LYS_WISTERIA_MIST — Locked Cornflower Blue Primary + Wisteria Mist Surfaces & Purple Secondary
+private val VeriLysWisteriaMistDarkExtended = NemuriExtendedColors(
+	isDark = true,
+	background = Color(0xFF131124),
+	surface = Color(0xFF1C1933),
+	surfaceElevated = Color(0xFF262244),
+	card = Color(0xFF1C1933),
+	dock = Color(0xFF262244),
+	sheet = Color(0xFF17142B),
+	toast = Color(0xFF262244),
+	border = Color(0xFF3A3361),
+	cyan = Color(0xFF7DA4FF),
+	teal = Color(0xFF8EC4FF),
+	tealContainer = Color(0xFF1F345C),
+	onCyan = Color(0xFF061329),
+	textPrimary = Color(0xFFECE8FA),
+	textSecondary = Color(0xFFCCC4E8),
+	textMuted = Color(0xFF9B91C2),
+	textDim = Color(0xFF706799),
+	healthy = Color(0xFF8EC4FF),
+	amber = Color(0xFFFBBF24),
+	danger = Color(0xFFFB7185),
+	mergePurple = Color(0xFFBFA8FF),
+	secondary = Color(0xFFBFA8FF),
+	secondaryContainer = Color(0xFF332757),
+)
+
+private val VeriLysWisteriaMistLightExtended = NemuriExtendedColors(
+	isDark = false,
+	background = Color(0xFFEAE4F9),
+	surface = Color(0xFFF5F2FD),
+	surfaceElevated = Color(0xFFDFD8F5),
+	card = Color(0xFFF5F2FD),
+	dock = Color(0xFFDFD8F5),
+	sheet = Color(0xFFF5F2FD),
+	toast = Color(0xFF1B1833),
+	border = Color(0xFFC7BBE8),
+	cyan = Color(0xFF5887ED),
+	teal = Color(0xFF5E9EF2),
+	tealContainer = Color(0xFFDCEBFA),
+	onCyan = Color(0xFFFFFFFF),
+	textPrimary = Color(0xFF1B1833),
+	textSecondary = Color(0xFF3D3663),
+	textMuted = Color(0xFF635B8C),
+	textDim = Color(0xFF8A81B0),
+	healthy = Color(0xFF5E9EF2),
+	amber = Color(0xFFD97706),
+	danger = Color(0xFFE11D48),
+	mergePurple = Color(0xFF8A6CE8),
+	secondary = Color(0xFF8A6CE8),
+	secondaryContainer = Color(0xFFE3DAFA),
+)
+
 val LocalNemuriColors = staticCompositionLocalOf { ObsidianExtendedColors }
 
 private data class AccentSpec(
@@ -790,6 +898,26 @@ private fun ColorScheme.accentSpec(): AccentSpec = when (this) {
 		onDarkPrimary = PeriwinkleAllegedlyDarkExtended.onCyan,
 		darkTertiary = PeriwinkleAllegedlyDarkExtended.mergePurple,
 		lightTertiary = PeriwinkleAllegedlyLightExtended.mergePurple,
+	)
+
+	ColorScheme.VERI_LYS_ICY_BLUE -> AccentSpec(
+		darkPrimary = VeriLysIcyBlueDarkExtended.cyan,
+		lightPrimary = VeriLysIcyBlueLightExtended.cyan,
+		darkContainer = VeriLysIcyBlueDarkExtended.tealContainer,
+		lightContainer = VeriLysIcyBlueLightExtended.tealContainer,
+		onDarkPrimary = VeriLysIcyBlueDarkExtended.onCyan,
+		darkTertiary = VeriLysIcyBlueDarkExtended.secondary,
+		lightTertiary = VeriLysIcyBlueLightExtended.secondary,
+	)
+
+	ColorScheme.VERI_LYS_WISTERIA_MIST -> AccentSpec(
+		darkPrimary = VeriLysWisteriaMistDarkExtended.cyan,
+		lightPrimary = VeriLysWisteriaMistLightExtended.cyan,
+		darkContainer = VeriLysWisteriaMistDarkExtended.tealContainer,
+		lightContainer = VeriLysWisteriaMistLightExtended.tealContainer,
+		onDarkPrimary = VeriLysWisteriaMistDarkExtended.onCyan,
+		darkTertiary = VeriLysWisteriaMistDarkExtended.secondary,
+		lightTertiary = VeriLysWisteriaMistLightExtended.secondary,
 	)
 
 	// 16 Classic Accents — each with unique primary, container, and tertiary swatch tokens
@@ -1054,6 +1182,18 @@ private fun resolveStaticExtendedColors(
 		PeriwinkleAllegedlyLightExtended
 	}
 
+	ColorScheme.VERI_LYS_ICY_BLUE -> if (isDark) {
+		if (amoled) VeriLysIcyBlueDarkExtended.toSmartAmoled() else VeriLysIcyBlueDarkExtended
+	} else {
+		VeriLysIcyBlueLightExtended
+	}
+
+	ColorScheme.VERI_LYS_WISTERIA_MIST -> if (isDark) {
+		if (amoled) VeriLysWisteriaMistDarkExtended.toSmartAmoled() else VeriLysWisteriaMistDarkExtended
+	} else {
+		VeriLysWisteriaMistLightExtended
+	}
+
 	// Classic Accents — accent-tinted Obsidian dark (and Smart AMOLED) + clean paper light
 	ColorScheme.TOTORO,
 	ColorScheme.MIKU,
@@ -1165,9 +1305,9 @@ fun buildMaterialColorScheme(
 			onPrimary = ext.onCyan,
 			primaryContainer = ext.tealContainer,
 			onPrimaryContainer = onContainerColor,
-			secondary = ext.teal,
+			secondary = ext.secondary,
 			onSecondary = ext.onCyan,
-			secondaryContainer = ext.tealContainer,
+			secondaryContainer = ext.secondaryContainer,
 			onSecondaryContainer = ext.textPrimary,
 			tertiary = ext.healthy,
 			onTertiary = Color(0xFF052014),
@@ -1202,9 +1342,9 @@ fun buildMaterialColorScheme(
 			onPrimary = ext.onCyan,
 			primaryContainer = ext.tealContainer,
 			onPrimaryContainer = onContainerColor,
-			secondary = ext.teal,
+			secondary = ext.secondary,
 			onSecondary = ext.onCyan,
-			secondaryContainer = ext.tealContainer,
+			secondaryContainer = ext.secondaryContainer,
 			onSecondaryContainer = ext.textPrimary,
 			tertiary = ext.healthy,
 			onTertiary = Color.White,
@@ -1252,6 +1392,8 @@ fun paletteDisplayName(scheme: ColorScheme): String = when (scheme) {
 	ColorScheme.MIDNIGHT_INDIGO -> "Midnight Indigo"
 	ColorScheme.MONOCHROME_E_INK -> "Monochrome E-Ink"
 	ColorScheme.PERIWINKLE_ALLEGEDLY -> "Veri-lys"
+	ColorScheme.VERI_LYS_ICY_BLUE -> "Veri-Lys Icy Blue"
+	ColorScheme.VERI_LYS_WISTERIA_MIST -> "Veri-Lys Wisteria Mist"
 	ColorScheme.TOTORO -> "Default (Totoro)"
 	ColorScheme.MIKU -> "Miku"
 	ColorScheme.RENA -> "Asuka"
@@ -1289,6 +1431,8 @@ fun paletteTagline(scheme: ColorScheme): String = when (scheme) {
 	ColorScheme.MIDNIGHT_INDIGO -> "Astral navy & starlight indigo"
 	ColorScheme.MONOCHROME_E_INK -> "High-contrast paper & pure ink"
 	ColorScheme.PERIWINKLE_ALLEGEDLY -> "#6395EE — Cornflower blue, or periwinkle if she says so"
+	ColorScheme.VERI_LYS_ICY_BLUE -> "Cornflower primary (#5887ED) on crisp icy blue surfaces with wisteria accents"
+	ColorScheme.VERI_LYS_WISTERIA_MIST -> "Cornflower primary (#5887ED) on soft wisteria mist with lilac-purple accents"
 	ColorScheme.TOTORO -> "Forest spirit teal-emerald"
 	ColorScheme.MIKU -> "Vocaloid turquoise cyan"
 	ColorScheme.RENA -> "Plugsuit scarlet vermilion"

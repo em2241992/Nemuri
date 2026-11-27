@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -89,6 +88,7 @@ import org.koitharu.kotatsu.core.model.ContentWarning
 import org.koitharu.kotatsu.core.network.DoHProvider
 import org.koitharu.kotatsu.core.prefs.ColorScheme
 import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
+import org.koitharu.kotatsu.core.prefs.DetailsUiMode
 import org.koitharu.kotatsu.core.prefs.DownloadFormat
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
@@ -263,6 +263,7 @@ fun AppearanceSettingsScreen(
 						.padding(14.dp),
 					horizontalArrangement = Arrangement.spacedBy(8.dp),
 				) {
+					val chipShape12 = NemuriTheme.shape(12.dp)
 					listOf(
 						AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM to "System",
 						AppCompatDelegate.MODE_NIGHT_NO to "Light",
@@ -271,11 +272,11 @@ fun AppearanceSettingsScreen(
 						val selected = state.themeMode == mode
 						Surface(
 							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
+							shape = chipShape12,
 							border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 							modifier = Modifier
 								.weight(1f)
-								.clip(RoundedCornerShape(12.dp))
+								.clip(chipShape12)
 								.clickable { viewModel.setThemeMode(mode) },
 						) {
 							Text(
@@ -304,6 +305,7 @@ fun AppearanceSettingsScreen(
 					verticalAlignment = Alignment.CenterVertically,
 					horizontalArrangement = Arrangement.spacedBy(12.dp),
 				) {
+					val swatchDotShape = NemuriTheme.pillShape()
 					Row(
 						horizontalArrangement = Arrangement.spacedBy((-4).dp),
 						verticalAlignment = Alignment.CenterVertically,
@@ -312,9 +314,9 @@ fun AppearanceSettingsScreen(
 							Box(
 								modifier = Modifier
 									.size(16.dp)
-									.clip(CircleShape)
+									.clip(swatchDotShape)
 									.background(dot)
-									.border(1.dp, NemuriTheme.colors.border, CircleShape),
+									.border(1.dp, NemuriTheme.colors.border, swatchDotShape),
 							)
 						}
 					}
@@ -351,6 +353,8 @@ fun AppearanceSettingsScreen(
 
 		item {
 			SettingsGroupCard("Library & Browse Cards") {
+				val cardChipShape = NemuriTheme.shape(12.dp)
+				val compactChipShape = NemuriTheme.shape(10.dp)
 				Column(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -370,11 +374,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.mangaCardStyle == style
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(12.dp),
+								shape = cardChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(12.dp))
+									.clip(cardChipShape)
 									.clickable { viewModel.setMangaCardStyle(style) },
 							) {
 								Text(
@@ -386,6 +390,50 @@ fun AppearanceSettingsScreen(
 									style = MaterialTheme.typography.labelMedium,
 									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
 									modifier = Modifier.padding(vertical = 10.dp),
+									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+								)
+							}
+						}
+					}
+				}
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Manga Details Layout",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						listOf(
+							DetailsUiMode.EXPRESSIVE to "Centered Large",
+							DetailsUiMode.COMPACT to "Compact",
+							DetailsUiMode.ULTRA_COMPACT to "Ultra Compact",
+						).forEach { (mode, label) ->
+							val selected = state.detailsUiMode == mode
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = cardChipShape,
+								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
+								modifier = Modifier
+									.weight(1f)
+									.clip(cardChipShape)
+									.clickable { viewModel.setDetailsUiMode(mode) },
+							) {
+								Text(
+									text = label,
+									style = MaterialTheme.typography.labelMedium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
 									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
 								)
 							}
@@ -442,11 +490,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.gridGutterDensity == density
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = compactChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(compactChipShape)
 									.clickable { viewModel.setGridGutterDensity(density) },
 							) {
 								Text(
@@ -467,11 +515,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.coverAspectRatio == ratio
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = compactChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(compactChipShape)
 									.clickable { viewModel.setCoverAspectRatio(ratio) },
 							) {
 								Text(
@@ -528,6 +576,7 @@ fun AppearanceSettingsScreen(
 
 		item {
 			SettingsGroupCard("Navigation Bar & Gestures") {
+				val navChipShape = NemuriTheme.shape(10.dp)
 				Column(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -550,11 +599,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.isLegacyNavigationBar == isLegacy
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = navChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(navChipShape)
 									.clickable { viewModel.setLegacyNavigationBar(isLegacy) },
 							) {
 								Text(
@@ -595,11 +644,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.navLabelVisibility == vis
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = navChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(navChipShape)
 									.clickable { viewModel.setNavLabelVisibility(vis) },
 							) {
 								Text(
@@ -633,11 +682,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.selectionMenuStyle == menuStyle
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = navChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(navChipShape)
 									.clickable { viewModel.setSelectionMenuStyle(menuStyle) },
 							) {
 								Text(
@@ -662,6 +711,20 @@ fun AppearanceSettingsScreen(
 		}
 
 		item {
+			var lastEnabledQuickScrollMode by remember {
+				mutableStateOf(
+					if (state.quickScrollButtonsMode != QuickScrollButtonsMode.OFF) {
+						state.quickScrollButtonsMode
+					} else {
+						QuickScrollButtonsMode.LONG_LISTS_ONLY
+					},
+				)
+			}
+			val quickButtonsEnabled = state.quickScrollButtonsMode != QuickScrollButtonsMode.OFF
+			if (quickButtonsEnabled) {
+				lastEnabledQuickScrollMode = state.quickScrollButtonsMode
+			}
+			val listNavChipShape = NemuriTheme.shape(10.dp)
 			SettingsGroupCard("List Navigation & One-Hand Controls") {
 				SettingsToggleRow(
 					title = "Fast-Scroll Thumb & Callout Bubble",
@@ -692,11 +755,11 @@ fun AppearanceSettingsScreen(
 							val selected = state.isFastScrollLeftHanded == isLeft
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = listNavChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(listNavChipShape)
 									.clickable { viewModel.setFastScrollLeftHanded(isLeft) },
 							) {
 								Text(
@@ -711,42 +774,46 @@ fun AppearanceSettingsScreen(
 					}
 				}
 				SettingsRowDivider()
-				Column(
-					modifier = Modifier
-						.fillMaxWidth()
-						.padding(14.dp),
-					verticalArrangement = Arrangement.spacedBy(8.dp),
-				) {
-					Text(
-						text = "Show ▲ / ▼ Quick-Scroll Buttons",
-						style = MaterialTheme.typography.labelLarge,
-						color = NemuriTheme.colors.textPrimary,
-					)
-					Text(
-						text = state.quickScrollButtonsMode.subtitle,
-						style = MaterialTheme.typography.bodySmall,
-						color = NemuriTheme.colors.textMuted,
-					)
+				SettingsToggleRow(
+					title = "Show Floating ▲ / ▼ Buttons",
+					subtitle = if (quickButtonsEnabled) {
+						state.quickScrollButtonsMode.subtitle
+					} else {
+						"Optional floating ▲ / ▼ quick-scroll capsule tucked in the corner (Off by default)"
+					},
+					checked = quickButtonsEnabled,
+					onCheckedChange = { enabled ->
+						viewModel.setQuickScrollButtonsMode(
+							if (enabled) lastEnabledQuickScrollMode else QuickScrollButtonsMode.OFF,
+						)
+					},
+				)
+				if (quickButtonsEnabled) {
 					Row(
-						modifier = Modifier.fillMaxWidth(),
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
 						horizontalArrangement = Arrangement.spacedBy(8.dp),
 					) {
-						QuickScrollButtonsMode.entries.forEach { mode ->
+						listOf(
+							QuickScrollButtonsMode.LONG_LISTS_ONLY,
+							QuickScrollButtonsMode.ALWAYS,
+						).forEach { mode ->
 							val selected = state.quickScrollButtonsMode == mode
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = listNavChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(listNavChipShape)
 									.clickable { viewModel.setQuickScrollButtonsMode(mode) },
 							) {
 								Text(
 									text = mode.label,
 									style = MaterialTheme.typography.labelMedium,
 									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-									modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
+									modifier = Modifier.padding(vertical = 9.dp, horizontal = 6.dp),
 									maxLines = 1,
 									overflow = TextOverflow.Ellipsis,
 									textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -774,12 +841,14 @@ private fun ThemeSwatchChip(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val chipShape = NemuriTheme.shape(12.dp)
+	val dotShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(12.dp),
+		shape = chipShape,
 		border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 		modifier = Modifier
-			.clip(RoundedCornerShape(12.dp))
+			.clip(chipShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -795,9 +864,9 @@ private fun ThemeSwatchChip(
 					Box(
 						modifier = Modifier
 							.size(10.dp)
-							.clip(CircleShape)
+							.clip(dotShape)
 							.background(dotColor)
-							.border(0.8.dp, NemuriTheme.colors.border, CircleShape),
+							.border(0.8.dp, NemuriTheme.colors.border, dotShape),
 					)
 				}
 			}
@@ -814,7 +883,8 @@ private fun ThemeSwatchChip(
 
 @Composable
 private fun AppearanceLivePreview(state: SettingsUiState) {
-	val corner = state.cardCornerRadiusDp.coerceIn(0, 24)
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
+	val corner = if (isSharp) 2 else state.cardCornerRadiusDp.coerceIn(0, 24)
 	val shape = RoundedCornerShape(corner.dp)
 	val hInset = cornerSafeHorizontalPadding(corner)
 	val bInset = cornerSafeBottomPadding(corner)
@@ -833,9 +903,11 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 			color = NemuriTheme.colors.cyan,
 		)
 		if (state.mangaCardStyle == MangaCardStyle.DETAILED_LIST) {
+			val rowCorner = if (isSharp) 2 else corner.coerceIn(8, 18)
+			val thumbCorner = if (isSharp) 2 else (corner - 2).coerceIn(4, 14)
 			Surface(
 				color = NemuriTheme.colors.surfaceElevated,
-				shape = RoundedCornerShape(corner.coerceIn(8, 18).dp),
+				shape = RoundedCornerShape(rowCorner.dp),
 				border = BorderStroke(1.dp, NemuriTheme.colors.border),
 				modifier = Modifier.fillMaxWidth(),
 			) {
@@ -847,7 +919,7 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 					Box(
 						modifier = Modifier
 							.size(width = 50.dp, height = 70.dp)
-							.clip(RoundedCornerShape((corner - 2).coerceIn(4, 14).dp))
+							.clip(RoundedCornerShape(thumbCorner.dp))
 							.background(
 								Brush.linearGradient(
 									listOf(
@@ -873,7 +945,7 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 						if (state.showBottomProgressBar) {
 							LinearProgressIndicator(
 								progress = { 0.65f },
-								color = NemuriTheme.colors.cyan,
+								color = NemuriTheme.colors.secondary,
 								trackColor = NemuriTheme.colors.border,
 								modifier = Modifier.fillMaxWidth().height(3.dp),
 							)
@@ -883,7 +955,7 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 						Icon(Icons.Default.CloudDone, contentDescription = null, tint = NemuriTheme.colors.healthy, modifier = Modifier.size(16.dp))
 					}
 					if (state.showUnreadBadge) {
-						Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
+						Surface(color = MaterialTheme.colorScheme.primary, shape = NemuriTheme.shape(8.dp)) {
 							NonWrappingBadgeText(
 								text = "14",
 								color = MaterialTheme.colorScheme.onPrimary,
@@ -894,6 +966,8 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 				}
 			}
 		} else {
+			val badgeRectShape = NemuriTheme.shape(6.dp)
+			val badgeDotShape = NemuriTheme.pillShape()
 			Row(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalArrangement = Arrangement.Center,
@@ -923,7 +997,7 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 								.padding(badgeInset),
 						) {
 							if (state.showUnreadBadge) {
-								Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(6.dp)) {
+								Surface(color = MaterialTheme.colorScheme.primary, shape = badgeRectShape) {
 									NonWrappingBadgeText(
 										text = "14",
 										color = MaterialTheme.colorScheme.onPrimary,
@@ -939,14 +1013,14 @@ private fun AppearanceLivePreview(state: SettingsUiState) {
 							horizontalArrangement = Arrangement.spacedBy(4.dp),
 						) {
 							if (state.showDownloadedBadge) {
-								Surface(color = Color.Black.copy(alpha = 0.65f), shape = CircleShape, modifier = Modifier.size(18.dp)) {
+								Surface(color = Color.Black.copy(alpha = 0.65f), shape = badgeDotShape, modifier = Modifier.size(18.dp)) {
 									Box(contentAlignment = Alignment.Center) {
 										Icon(Icons.Default.CloudDone, null, tint = NemuriTheme.colors.healthy, modifier = Modifier.size(11.dp))
 									}
 								}
 							}
 							if (state.showSourceBadge) {
-								Surface(color = Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(6.dp)) {
+								Surface(color = Color.Black.copy(alpha = 0.65f), shape = badgeRectShape) {
 									NonWrappingBadgeText(
 										text = "MD",
 										color = NemuriTheme.colors.cyan,
@@ -1276,6 +1350,13 @@ fun ReadingSettingsScreen(
 					checked = state.isReaderDoubleTapFill,
 					onCheckedChange = viewModel::setReaderDoubleTapFill,
 				)
+				SettingsRowDivider()
+				SettingsToggleRow(
+					title = "Show Zoom Buttons (⊕ / ⊖)",
+					subtitle = "Display floating on-screen zoom controls inside the manga reader",
+					checked = state.isReaderZoomButtonsEnabled,
+					onCheckedChange = viewModel::setReaderZoomButtonsEnabled,
+				)
 			}
 		}
 
@@ -1358,13 +1439,14 @@ fun ReadingSettingsScreen(
 						val dl = state.neuralDownloadState
 						var modelsExpanded by remember { mutableStateOf(dl.activeModelId != null) }
 						val activeDownloaded = state.neuralCatalog.firstOrNull { it.isSelected && it.isDownloaded }
+						val neuralCardShape = NemuriTheme.shape(12.dp)
 						Surface(
 							color = NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
+							shape = neuralCardShape,
 							border = BorderStroke(1.dp, NemuriTheme.colors.border),
 							modifier = Modifier
 								.fillMaxWidth()
-								.clip(RoundedCornerShape(12.dp))
+								.clip(neuralCardShape)
 								.clickable { modelsExpanded = !modelsExpanded },
 						) {
 							Row(
@@ -1401,7 +1483,7 @@ fun ReadingSettingsScreen(
 								} else {
 									NemuriTheme.colors.surfaceElevated
 								},
-								shape = RoundedCornerShape(12.dp),
+								shape = neuralCardShape,
 								border = BorderStroke(
 									1.dp,
 									if (item.isSelected && item.isDownloaded) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
@@ -1498,6 +1580,7 @@ fun ReadingSettingsScreen(
 						.padding(horizontal = 16.dp, vertical = 12.dp),
 					verticalArrangement = Arrangement.spacedBy(10.dp),
 				) {
+					val epubChipShape = NemuriTheme.shape(10.dp)
 					Text(
 						text = "Paper Theme",
 						style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
@@ -1513,11 +1596,11 @@ fun ReadingSettingsScreen(
 							val selected = state.epubTheme == key
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = epubChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(epubChipShape)
 									.clickable { viewModel.setEpubTheme(key) },
 							) {
 								Text(
@@ -1545,11 +1628,11 @@ fun ReadingSettingsScreen(
 							val selected = state.epubFontFamily == key
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = epubChipShape,
 								border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 								modifier = Modifier
 									.weight(1f)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(epubChipShape)
 									.clickable { viewModel.setEpubFontFamily(key) },
 							) {
 								Text(
@@ -2197,16 +2280,17 @@ private fun ProxyConfigDialog(
 		title = { Text("Proxy Configuration") },
 		text = {
 			Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+				val proxyChipShape = NemuriTheme.shape(10.dp)
 				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 					listOf(Proxy.Type.DIRECT, Proxy.Type.HTTP, Proxy.Type.SOCKS).forEach { type ->
 						val selected = selectedType == type
 						Surface(
 							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(10.dp),
+							shape = proxyChipShape,
 							border = BorderStroke(1.dp, if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border),
 							modifier = Modifier
 								.weight(1f)
-								.clip(RoundedCornerShape(10.dp))
+								.clip(proxyChipShape)
 								.clickable { selectedType = type },
 						) {
 							Text(
@@ -2370,7 +2454,7 @@ fun AboutSettingsScreen(
 				Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
 					Surface(
 						color = NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(10.dp),
+						shape = NemuriTheme.shape(10.dp),
 						border = BorderStroke(1.dp, NemuriTheme.colors.border),
 						modifier = Modifier
 							.fillMaxWidth()

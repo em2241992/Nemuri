@@ -168,11 +168,25 @@ class LocalModelManager @Inject constructor(
 
 	fun resolveActiveReadyModel(): Pair<LocalLlmCatalogEntry, File>? {
 		val selectedId = settings.aiLocalModelId
-		getModelFile(selectedId)?.let { file ->
-			findEntry(selectedId)?.let { return it to file }
+		if (selectedId.isNotBlank()) {
+			getModelFile(selectedId)?.let { file ->
+				findEntry(selectedId)?.let { return it to file }
+			}
 		}
 		for (entry in catalog) {
-			getModelFile(entry.id)?.let { return entry to it }
+			getModelFile(entry.id)?.let { file ->
+				if (settings.aiLocalModelId != entry.id) {
+					settings.aiLocalModelId = entry.id
+				}
+				return entry to file
+			}
+		}
+		// Stale model ID on disk (e.g. user deleted .litertlm file): clear stale selection and fall back to Auto.
+		if (selectedId.isNotBlank()) {
+			settings.aiLocalModelId = ""
+		}
+		if (settings.aiMode.equals(org.koitharu.kotatsu.ai.domain.AiMode.LOCAL_MODEL.key, ignoreCase = true)) {
+			settings.aiMode = org.koitharu.kotatsu.ai.domain.AiMode.AUTO.key
 		}
 		return null
 	}
@@ -320,10 +334,15 @@ class LocalModelManager @Inject constructor(
 		val partFile = File(modelsDir, "${entry.fileName}.part")
 		val deleted = (targetFile.exists() && targetFile.delete()) || (partFile.exists() && partFile.delete())
 		if (deleted) {
-			if (settings.aiLocalModelId == modelId) {
+			if (settings.aiLocalModelId == modelId || !isModelDownloaded(settings.aiLocalModelId)) {
 				val replacement = catalog.firstOrNull { it.id != modelId && isModelDownloaded(it.id) }
 				if (replacement != null) {
 					settings.aiLocalModelId = replacement.id
+				} else {
+					settings.aiLocalModelId = ""
+					if (settings.aiMode.equals(org.koitharu.kotatsu.ai.domain.AiMode.LOCAL_MODEL.key, ignoreCase = true)) {
+						settings.aiMode = org.koitharu.kotatsu.ai.domain.AiMode.AUTO.key
+					}
 				}
 			}
 			_inventoryVersion.update { it + 1 }

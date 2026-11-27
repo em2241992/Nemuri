@@ -23,6 +23,7 @@ import org.koitharu.kotatsu.core.network.cookies.MutableCookieJar
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.ColorScheme
 import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
+import org.koitharu.kotatsu.core.prefs.DetailsUiMode
 import org.koitharu.kotatsu.core.prefs.DownloadFormat
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
@@ -83,6 +84,7 @@ data class SettingsUiState(
 	val uiScalePercent: Int = 100,
 	val isTitleOverCover: Boolean = true,
 	val mangaCardStyle: MangaCardStyle = MangaCardStyle.COMPACT,
+	val detailsUiMode: DetailsUiMode = DetailsUiMode.COMPACT,
 	val gridColumnsPortrait: Int = 3,
 	val gridColumnsLandscape: Int = 5,
 	val cardCornerRadiusDp: Int = 12,
@@ -99,7 +101,7 @@ data class SettingsUiState(
 	val isSwipeActionsEnabled: Boolean = true,
 	val isFastScrollEnabled: Boolean = true,
 	val isFastScrollLeftHanded: Boolean = false,
-	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.LONG_LISTS_ONLY,
+	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.OFF,
 	val isLastPositionPillEnabled: Boolean = true,
 	// Extensions
 	val isPrivateInstall: Boolean = false,
@@ -121,6 +123,7 @@ data class SettingsUiState(
 	val isWebtoonGapsEnabled: Boolean = false,
 	val defaultWebtoonZoomOutPercent: Int = 0,
 	val isReaderDoubleTapFill: Boolean = false,
+	val isReaderZoomButtonsEnabled: Boolean = false,
 	val readerShaderPreset: ReaderShaderPreset = ReaderShaderPreset.OFF,
 	val isReaderDescreenEnabled: Boolean = false,
 	val isReaderInkLevelsEnabled: Boolean = false,
@@ -246,6 +249,7 @@ class SettingsViewModel @Inject constructor(
 			uiScalePercent = settings.uiScalePercent,
 			isTitleOverCover = settings.isTitleOverCover,
 			mangaCardStyle = settings.mangaCardStyle,
+			detailsUiMode = settings.detailsUiMode,
 			gridColumnsPortrait = settings.gridColumnsPortrait,
 			gridColumnsLandscape = settings.gridColumnsLandscape,
 			cardCornerRadiusDp = settings.cardCornerRadiusDp,
@@ -282,6 +286,7 @@ class SettingsViewModel @Inject constructor(
 			isWebtoonGapsEnabled = settings.isWebtoonGapsEnabled,
 			defaultWebtoonZoomOutPercent = settings.defaultWebtoonZoomOutPercent,
 			isReaderDoubleTapFill = settings.isReaderDoubleTapFill,
+			isReaderZoomButtonsEnabled = settings.isReaderZoomButtonsEnabled,
 			readerShaderPreset = ReaderShaderPreset.fromKey(settings.readerShaderMode),
 			isReaderDescreenEnabled = settings.isReaderDescreenEnabled,
 			isReaderInkLevelsEnabled = settings.isReaderInkLevelsEnabled,
@@ -354,6 +359,9 @@ class SettingsViewModel @Inject constructor(
 	fun setMangaCardStyle(style: MangaCardStyle) {
 		settings.mangaCardStyle = style
 		settings.isTitleOverCover = style != MangaCardStyle.COMFORTABLE
+	}
+	fun setDetailsUiMode(mode: DetailsUiMode) {
+		settings.detailsUiMode = mode
 	}
 	fun setGridColumnsPortrait(columns: Int) {
 		settings.gridColumnsPortrait = columns.coerceIn(2, 6)
@@ -455,6 +463,9 @@ class SettingsViewModel @Inject constructor(
 	}
 	fun setReaderDoubleTapFill(enabled: Boolean) {
 		settings.isReaderDoubleTapFill = enabled
+	}
+	fun setReaderZoomButtonsEnabled(enabled: Boolean) {
+		settings.isReaderZoomButtonsEnabled = enabled
 	}
 	fun setReaderShaderPreset(preset: ReaderShaderPreset) {
 		settings.readerShaderMode = preset.key

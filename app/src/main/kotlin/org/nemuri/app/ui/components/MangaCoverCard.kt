@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -76,28 +75,29 @@ fun CornerSafeCoverProgressBar(
 	progress: Float,
 	cornerRadiusDp: Int,
 	modifier: Modifier = Modifier,
-	fillColor: Color = MaterialTheme.colorScheme.primary,
+	fillColor: Color = NemuriTheme.colors.secondary,
 	trackColor: Color = Color.Black.copy(alpha = 0.52f),
 ) {
 	val clamped = progress.coerceIn(0f, 1f)
 	if (clamped <= 0f) return
-	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val safeCorner = if (NemuriTheme.isSharpTacticalGeometry) 2 else cornerRadiusDp.coerceIn(0, 24)
 	val horizontalPad = max(8f, safeCorner * 0.50f).dp
+	val barShape = NemuriTheme.pillShape()
 	Box(
 		modifier = modifier
 			.fillMaxWidth()
 			.padding(start = horizontalPad, end = horizontalPad, bottom = 5.dp)
 			.height(3.dp)
-			.clip(CircleShape)
-			.background(trackColor, CircleShape),
+			.clip(barShape)
+			.background(trackColor, barShape),
 	) {
 		Box(
 			modifier = Modifier
 				.widthIn(min = 6.dp)
 				.fillMaxWidth(clamped.coerceAtLeast(0.04f))
 				.fillMaxHeight()
-				.clip(CircleShape)
-				.background(fillColor, CircleShape),
+				.clip(barShape)
+				.background(fillColor, barShape),
 		)
 	}
 }
@@ -216,10 +216,17 @@ fun MangaCompactGridCard(
 	sharedCoverKey: String? = null,
 	modifier: Modifier = Modifier,
 ) {
-	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
+	val safeCorner = if (isSharp) 2 else cornerRadiusDp.coerceIn(0, 24)
 	val shape = RoundedCornerShape(safeCorner.dp)
+	val badgeRectShape = NemuriTheme.shape(6.dp)
+	val badgeDotShape = NemuriTheme.pillShape()
 	val borderColor by animateColorAsState(
-		targetValue = if (isSelected) NemuriTheme.colors.cyan else Color.White.copy(alpha = 0.1f),
+		targetValue = when {
+			isSelected -> NemuriTheme.colors.cyan
+			isSharp -> NemuriTheme.colors.border
+			else -> Color.White.copy(alpha = 0.1f)
+		},
 		label = "compactCardBorder",
 	)
 	val scale by animateFloatAsState(
@@ -297,7 +304,7 @@ fun MangaCompactGridCard(
 			when {
 				inLibraryBadge -> Surface(
 					color = NemuriTheme.colors.cyan,
-					shape = RoundedCornerShape(6.dp),
+					shape = badgeRectShape,
 				) {
 					NonWrappingBadgeText(
 						text = "In Library",
@@ -307,7 +314,7 @@ fun MangaCompactGridCard(
 				}
 				showUnreadBadge && unreadCount > 0 -> Surface(
 					color = MaterialTheme.colorScheme.primary,
-					shape = RoundedCornerShape(6.dp),
+					shape = badgeRectShape,
 				) {
 					NonWrappingBadgeText(
 						text = unreadCount.toString(),
@@ -317,7 +324,7 @@ fun MangaCompactGridCard(
 				}
 				showUnreadBadge && isCaughtUp -> Surface(
 					color = NemuriTheme.colors.healthy.copy(alpha = 0.92f),
-					shape = CircleShape,
+					shape = badgeDotShape,
 					modifier = Modifier.size(20.dp),
 				) {
 					Box(contentAlignment = Alignment.Center) {
@@ -343,7 +350,7 @@ fun MangaCompactGridCard(
 			if (isSelected) {
 				Surface(
 					color = NemuriTheme.colors.cyan,
-					shape = CircleShape,
+					shape = badgeDotShape,
 					modifier = Modifier.size(22.dp),
 				) {
 					Box(contentAlignment = Alignment.Center) {
@@ -359,7 +366,7 @@ fun MangaCompactGridCard(
 			if (showDownloadedBadge && isDownloaded) {
 				Surface(
 					color = Color.Black.copy(alpha = 0.68f),
-					shape = CircleShape,
+					shape = badgeDotShape,
 					modifier = Modifier.size(20.dp),
 				) {
 					Box(contentAlignment = Alignment.Center) {
@@ -375,7 +382,7 @@ fun MangaCompactGridCard(
 			if (showSourceBadge && !sourceBadge.isNullOrBlank()) {
 				Surface(
 					color = Color.Black.copy(alpha = 0.7f),
-					shape = RoundedCornerShape(6.dp),
+					shape = badgeRectShape,
 				) {
 					NonWrappingBadgeText(
 						text = sourceBadge,
@@ -423,8 +430,11 @@ fun MangaComfortableGridCard(
 	sharedCoverKey: String? = null,
 	modifier: Modifier = Modifier,
 ) {
-	val safeCorner = cornerRadiusDp.coerceIn(0, 24)
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
+	val safeCorner = if (isSharp) 2 else cornerRadiusDp.coerceIn(0, 24)
 	val coverShape = RoundedCornerShape(safeCorner.dp)
+	val badgeRectShape = NemuriTheme.shape(6.dp)
+	val badgeDotShape = NemuriTheme.pillShape()
 	val borderColor by animateColorAsState(
 		targetValue = if (isSelected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 		label = "comfortableCardBorder",
@@ -475,7 +485,7 @@ fun MangaComfortableGridCard(
 				when {
 					inLibraryBadge -> Surface(
 						color = NemuriTheme.colors.cyan,
-						shape = RoundedCornerShape(6.dp),
+						shape = badgeRectShape,
 					) {
 						NonWrappingBadgeText(
 							text = "In Library",
@@ -485,7 +495,7 @@ fun MangaComfortableGridCard(
 					}
 					showUnreadBadge && unreadCount > 0 -> Surface(
 						color = MaterialTheme.colorScheme.primary,
-						shape = RoundedCornerShape(6.dp),
+						shape = badgeRectShape,
 					) {
 						NonWrappingBadgeText(
 							text = unreadCount.toString(),
@@ -495,7 +505,7 @@ fun MangaComfortableGridCard(
 					}
 					showUnreadBadge && isCaughtUp -> Surface(
 						color = NemuriTheme.colors.healthy.copy(alpha = 0.92f),
-						shape = CircleShape,
+						shape = badgeDotShape,
 						modifier = Modifier.size(20.dp),
 					) {
 						Box(contentAlignment = Alignment.Center) {
@@ -520,7 +530,7 @@ fun MangaComfortableGridCard(
 				if (isSelected) {
 					Surface(
 						color = NemuriTheme.colors.cyan,
-						shape = CircleShape,
+						shape = badgeDotShape,
 						modifier = Modifier.size(22.dp),
 					) {
 						Box(contentAlignment = Alignment.Center) {
@@ -536,7 +546,7 @@ fun MangaComfortableGridCard(
 				if (showDownloadedBadge && isDownloaded) {
 					Surface(
 						color = Color.Black.copy(alpha = 0.68f),
-						shape = CircleShape,
+						shape = badgeDotShape,
 						modifier = Modifier.size(20.dp),
 					) {
 						Box(contentAlignment = Alignment.Center) {
@@ -552,7 +562,7 @@ fun MangaComfortableGridCard(
 				if (showSourceBadge && !sourceBadge.isNullOrBlank()) {
 					Surface(
 						color = Color.Black.copy(alpha = 0.7f),
-						shape = RoundedCornerShape(6.dp),
+						shape = badgeRectShape,
 					) {
 						NonWrappingBadgeText(
 							text = sourceBadge,
@@ -610,19 +620,22 @@ fun MangaListRow(
 	sharedCoverKey: String? = null,
 	modifier: Modifier = Modifier,
 ) {
-	val safeRowCorner = cornerRadiusDp.coerceIn(8, 18)
-	val thumbCorner = (safeRowCorner - 2).coerceIn(4, 14)
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
+	val safeRowCorner = if (isSharp) 2 else cornerRadiusDp.coerceIn(8, 18)
+	val thumbCorner = if (isSharp) 2 else (safeRowCorner - 2).coerceIn(4, 14)
+	val rowShape = RoundedCornerShape(safeRowCorner.dp)
+	val thumbShape = RoundedCornerShape(thumbCorner.dp)
 	Surface(
 		color = if (isSelected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
-		shape = RoundedCornerShape(safeRowCorner.dp),
+		shape = rowShape,
 		modifier = modifier
 			.fillMaxWidth()
 			.border(
 				width = if (isSelected) 2.dp else 1.dp,
 				color = if (isSelected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-				shape = RoundedCornerShape(safeRowCorner.dp),
+				shape = rowShape,
 			)
-			.clip(RoundedCornerShape(safeRowCorner.dp))
+			.clip(rowShape)
 			.combinedClickable(
 				onClick = onClick,
 				onLongClick = onLongClick,
@@ -638,7 +651,7 @@ fun MangaListRow(
 				coverUrl = manga.coverUrl,
 				modifier = Modifier
 					.size(width = 52.dp, height = 74.dp)
-					.clip(RoundedCornerShape(thumbCorner.dp))
+					.clip(thumbShape)
 					.nemuriSharedCover(sharedCoverKey, thumbCorner.dp),
 			)
 			Column(
@@ -672,12 +685,12 @@ fun MangaListRow(
 					Spacer(modifier = Modifier.height(2.dp))
 					LinearProgressIndicator(
 						progress = { progress.coerceIn(0f, 1f) },
-						color = NemuriTheme.colors.cyan,
+						color = NemuriTheme.colors.secondary,
 						trackColor = NemuriTheme.colors.border,
 						modifier = Modifier
 							.fillMaxWidth()
 							.height(3.dp)
-							.clip(RoundedCornerShape(2.dp)),
+							.clip(NemuriTheme.shape(2.dp)),
 					)
 				}
 			}
@@ -700,7 +713,7 @@ fun MangaListRow(
 			if (showUnreadBadge && unreadCount > 0) {
 				Surface(
 					color = MaterialTheme.colorScheme.primary,
-					shape = RoundedCornerShape(8.dp),
+					shape = NemuriTheme.shape(8.dp),
 				) {
 					NonWrappingBadgeText(
 						text = unreadCount.toString(),
@@ -710,12 +723,13 @@ fun MangaListRow(
 				}
 			}
 			if (onQuickActionClick != null) {
+				val quickActionShape = NemuriTheme.shape(10.dp)
 				Surface(
 					color = NemuriTheme.colors.tealContainer,
-					shape = RoundedCornerShape(10.dp),
+					shape = quickActionShape,
 					modifier = Modifier
 						.size(36.dp)
-						.clip(RoundedCornerShape(10.dp))
+						.clip(quickActionShape)
 						.clickable(onClick = onQuickActionClick),
 				) {
 					Box(contentAlignment = Alignment.Center) {

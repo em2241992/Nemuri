@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
+import org.koitharu.kotatsu.core.prefs.DetailsUiMode
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
 import org.koitharu.kotatsu.core.prefs.NavLabelVisibility
@@ -47,8 +48,9 @@ data class LayoutStudioPrefs(
 	val isClassicBottomBar: Boolean = false,
 	val isFastScrollEnabled: Boolean = true,
 	val isFastScrollLeftHanded: Boolean = false,
-	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.LONG_LISTS_ONLY,
+	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.OFF,
 	val isLastPositionPillEnabled: Boolean = true,
+	val detailsUiMode: DetailsUiMode = DetailsUiMode.COMPACT,
 ) {
 	fun columnsForOrientation(isLandscape: Boolean): Int {
 		return if (isLandscape) gridColumnsLandscape else gridColumnsPortrait
@@ -107,6 +109,7 @@ fun AppSettings.toLayoutStudioPrefs(): LayoutStudioPrefs {
 		isFastScrollLeftHanded = isFastScrollLeftHanded,
 		quickScrollButtonsMode = quickScrollButtonsMode,
 		isLastPositionPillEnabled = isLastPositionPillEnabled,
+		detailsUiMode = detailsUiMode,
 	)
 }
 

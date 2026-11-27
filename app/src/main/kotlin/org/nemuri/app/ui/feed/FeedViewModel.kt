@@ -27,6 +27,8 @@ import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.exceptions.CloudFlareProtectedException
 import org.koitharu.kotatsu.core.exceptions.InteractiveActionRequiredException
+import org.koitharu.kotatsu.core.github.AppUpdateRepository
+import org.koitharu.kotatsu.core.github.AppVersion
 import org.koitharu.kotatsu.core.model.MangaHistory
 import org.koitharu.kotatsu.core.model.MangaSourceInfo
 import org.koitharu.kotatsu.core.model.getSummary
@@ -50,6 +52,7 @@ import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaListFilter
 import org.koitharu.kotatsu.parsers.model.SortOrder
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.koitharu.kotatsu.suggestions.ui.SuggestionsWorker
 import org.koitharu.kotatsu.tracker.domain.TrackingRepository
 import org.koitharu.kotatsu.tracker.domain.model.TrackingLogItem
 import org.koitharu.kotatsu.tracker.work.TrackWorker
@@ -147,12 +150,23 @@ data class FeedUiState(
 	val discoverySections: List<DiscoverySection> = emptyList(),
 	val discoveryGridItems: List<DiscoveryRecommendation> = emptyList(),
 	val discoveryGenres: List<String> = emptyList(),
+	val availableUpdate: AppVersion? = null,
+	val isDownloadingUpdate: Boolean = false,
+	val updateDownloadProgress: Float? = null,
+	val showSuggestionsOptIn: Boolean = false,
 )
 
 private data class FeedPrefsSnapshot(
 	val mode: FeedScreenMode,
 	val unreadOnlyDefault: Boolean,
 	val preferredHomeSourceName: String?,
+	val showSuggestionsOptIn: Boolean,
+)
+
+private data class FeedUpdateSnapshot(
+	val availableUpdate: AppVersion? = null,
+	val isDownloading: Boolean = false,
+	val progress: Float? = null,
 )
 
 private data class HomeSourceRawState(
@@ -183,6 +197,8 @@ class FeedViewModel @Inject constructor(
 	private val feedDiscoveryUseCase: FeedDiscoveryUseCase,
 	private val trackScheduler: TrackWorker.Scheduler,
 	private val downloadScheduler: DownloadWorker.Scheduler,
+	private val suggestionsScheduler: SuggestionsWorker.Scheduler,
+	private val appUpdateRepository: AppUpdateRepository,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
@@ -206,7 +222,9 @@ class FeedViewModel @Inject constructor(
 				key == AppSettings.KEY_FEED_MODE ||
 				key == AppSettings.KEY_FEED_HUB_MODE ||
 				key == AppSettings.KEY_FEED_UNREAD_ONLY ||
-				key == AppSettings.KEY_EXPLORE_HOME_SOURCE
+				key == AppSettings.KEY_EXPLORE_HOME_SOURCE ||
+				key == AppSettings.KEY_SUGGESTIONS_PROMPT_HANDLED ||
+				key == AppSettings.KEY_SUGGESTIONS
 		}
 		.onStart { emit(null) }
 		.map {
@@ -214,8 +232,21 @@ class FeedViewModel @Inject constructor(
 				mode = settings.feedMode,
 				unreadOnlyDefault = settings.isFeedUnreadOnly,
 				preferredHomeSourceName = settings.exploreHomeSource,
+				showSuggestionsOptIn = !settings.isSuggestionsPromptHandled,
 			)
 		}
+
+	private val updateFlow = combine(
+		appUpdateRepository.observeAvailableUpdate(),
+		appUpdateRepository.observeIsDownloading(),
+		appUpdateRepository.observeDownloadProgress(),
+	) { version, isDownloading, progress ->
+		FeedUpdateSnapshot(
+			availableUpdate = version,
+			isDownloading = isDownloading,
+			progress = progress,
+		)
+	}
 
 	private val enabledSourceOptionsFlow = sourcesRepository.observeEnabledSources()
 		.map { list ->
@@ -276,6 +307,10 @@ class FeedViewModel @Inject constructor(
 	}
 
 	init {
+		viewModelScope.launch(Dispatchers.IO) {
+			appUpdateRepository.fetchUpdate(force = false)
+		}
+
 		// Automatically resolve & load Pinned Home Source (Popular & Latest Updates) for Hub
 		viewModelScope.launch(Dispatchers.IO) {
 			combine(enabledSourceOptionsFlow, prefsFlow) { sources, prefs ->
@@ -331,7 +366,8 @@ class FeedViewModel @Inject constructor(
 	val uiState: StateFlow<FeedUiState> = combine(
 		baseFeedFlow,
 		remoteFeedFlow,
-	) { base, remote ->
+		updateFlow,
+	) { base, remote, upd ->
 		val trimmed = base.query.trim()
 		val zoneId = ZoneId.systemDefault()
 		val today = LocalDate.now(zoneId)
@@ -521,14 +557,56 @@ class FeedViewModel @Inject constructor(
 			discoverySections = discoveryFilteredSections,
 			discoveryGridItems = discoveryFilteredGrid,
 			discoveryGenres = availableGenres,
+			availableUpdate = upd.availableUpdate,
+			isDownloadingUpdate = upd.isDownloading,
+			updateDownloadProgress = upd.progress,
+			showSuggestionsOptIn = base.prefs.showSuggestionsOptIn,
 		)
 	}
 		.flowOn(Dispatchers.IO)
 		.stateIn(
 			scope = viewModelScope,
 			started = SharingStarted.WhileSubscribed(5_000),
-			initialValue = FeedUiState(mode = settings.feedMode),
+			initialValue = FeedUiState(
+				mode = settings.feedMode,
+				availableUpdate = appUpdateRepository.observeAvailableUpdate().value,
+				isDownloadingUpdate = appUpdateRepository.observeIsDownloading().value,
+				updateDownloadProgress = appUpdateRepository.observeDownloadProgress().value,
+				showSuggestionsOptIn = !settings.isSuggestionsPromptHandled,
+			),
 		)
+
+	fun installAvailableUpdate() {
+		val version = uiState.value.availableUpdate ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			appUpdateRepository.downloadAndInstallUpdate(version).onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to download update")
+			}
+		}
+	}
+
+	fun dismissAvailableUpdate() {
+		val version = uiState.value.availableUpdate ?: return
+		appUpdateRepository.dismissUpdate(version.id)
+	}
+
+	fun enablePersonalizedSuggestions() {
+		settings.isSuggestionsEnabled = true
+		settings.isSuggestionsPromptHandled = true
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching {
+				suggestionsScheduler.schedule()
+				suggestionsScheduler.startNow()
+			}
+			toastManager.show("Personalized suggestions enabled")
+		}
+		refreshDiscovery(force = true)
+	}
+
+	fun dismissSuggestionsPrompt() {
+		settings.isSuggestionsEnabled = false
+		settings.isSuggestionsPromptHandled = true
+	}
 
 	private suspend fun resolveMeaningfulReadProgress(
 		mangaId: Long,

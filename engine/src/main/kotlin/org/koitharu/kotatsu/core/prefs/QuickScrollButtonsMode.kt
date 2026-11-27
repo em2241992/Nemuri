@@ -28,6 +28,6 @@ enum class QuickScrollButtonsMode(
 	companion object {
 		fun fromKey(key: String?): QuickScrollButtonsMode =
 			entries.firstOrNull { it.key.equals(key, ignoreCase = true) || it.name.equals(key, ignoreCase = true) }
-				?: LONG_LISTS_ONLY
+				?: OFF
 	}
 }

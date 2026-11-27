@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -100,12 +101,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -116,6 +119,7 @@ import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isLocal
 import org.koitharu.kotatsu.core.nav.AppRouter
 import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
+import org.koitharu.kotatsu.core.prefs.DetailsUiMode
 import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.favourites.domain.TitleSignatureParser
@@ -180,6 +184,7 @@ fun MangaDetailsScreen(
 	var showCategorySheet by remember { mutableStateOf(false) }
 	var showDownloadSheet by remember { mutableStateOf(false) }
 	var showChaptersFilterSheet by remember { mutableStateOf(false) }
+	var showDisplayOptionsSheet by remember { mutableStateOf(false) }
 	var showStatsSheet by remember { mutableStateOf(false) }
 	var showCreateCategoryDialog by rememberSaveable { mutableStateOf(false) }
 	var newCategoryName by rememberSaveable { mutableStateOf("") }
@@ -315,7 +320,8 @@ fun MangaDetailsScreen(
 				val hasSynopsisOrTags = uiState.descriptionText.isNotBlank() || manga.tags.isNotEmpty()
 				val hasAiRecap = uiState.isRecapCardEnabled && uiState.history != null
 				val hasBranches = uiState.branches.size > 1
-				val chaptersHeaderIndex = 2 +
+				val baseHeaderItems = if (uiState.detailsUiMode == DetailsUiMode.ULTRA_COMPACT) 1 else 2
+				val chaptersHeaderIndex = baseHeaderItems +
 					(if (hasInlineBanner) 1 else 0) +
 					(if (hasSynopsisOrTags) 1 else 0) +
 					(if (hasAiRecap) 1 else 0) +
@@ -355,367 +361,92 @@ fun MangaDetailsScreen(
 							),
 						contentPadding = PaddingValues(bottom = detailsBottomPadding),
 					) {
-					// Top Hero Backdrop + Poster Header
+					// Top Hero Header (adapts across Centered Large / Compact / Ultra Compact)
 					item(key = "details_hero") {
-						Box(modifier = Modifier.fillMaxWidth()) {
-							MangaCoverImage(
-								manga = manga,
-								coverUrl = uiState.backdropUrl,
-								contentScale = ContentScale.Crop,
-								modifier = Modifier
-									.fillMaxWidth()
-									.height(250.dp)
-									.alpha(0.32f),
-							)
-							Box(
-								modifier = Modifier
-									.fillMaxWidth()
-									.height(250.dp)
-									.background(
-										Brush.verticalGradient(
-											colors = listOf(
-												NemuriTheme.colors.background.copy(alpha = 0.25f),
-												NemuriTheme.colors.background.copy(alpha = 0.85f),
-												NemuriTheme.colors.background,
+						val coverKey = sharedCoverKey ?: "details-${manga.id}"
+						val toolbar: @Composable () -> Unit = {
+							DetailsTopToolbar(
+								uiState = uiState,
+								onBack = onBack,
+								onToggleIncognito = viewModel::toggleHeaderIncognito,
+								onRefresh = { viewModel.retry(force = true) },
+								onOpenBrowser = {
+									runCatching {
+										context.startActivity(
+											AppRouter.browserIntent(
+												context = context,
+												url = uiState.publicUrl,
+												source = manga.source,
+												title = manga.title,
 											),
-										),
-									),
+										)
+									}
+								},
+								onOpenDownloads = { showDownloadSheet = true },
+								onOpenStats = {
+									viewModel.loadMangaStats()
+									showStatsSheet = true
+								},
+								onOpenMigrate = { onOpenMigrate(uiState.mangaId) },
+								onOpenDisplayOptions = { showDisplayOptionsSheet = true },
+							)
+						}
+
+						when (uiState.detailsUiMode) {
+							DetailsUiMode.EXPRESSIVE -> DetailsExpressiveHeader(
+								manga = manga,
+								uiState = uiState,
+								sharedCoverKey = coverKey,
+								toolbar = toolbar,
+								onOpenSourceBrowse = { onOpenSourceBrowse(manga.source.name, null) },
 							)
 
-							Column(
-								modifier = Modifier
-									.fillMaxWidth()
-									.statusBarsPadding(),
-							) {
-								// Top toolbar
-								Row(
-									modifier = Modifier
-										.fillMaxWidth()
-										.padding(horizontal = 6.dp, vertical = 6.dp),
-									verticalAlignment = Alignment.CenterVertically,
-								) {
-									IconButton(onClick = onBack) {
-										Icon(
-											imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-											contentDescription = "Back",
-											tint = NemuriTheme.colors.textPrimary,
-										)
-									}
-									Spacer(modifier = Modifier.weight(1f))
-									IconButton(onClick = viewModel::toggleHeaderIncognito) {
-										Surface(
-											color = if (uiState.isIncognitoActive) {
-												NemuriTheme.colors.cyan.copy(alpha = 0.22f)
-											} else {
-												Color.Transparent
-											},
-											shape = CircleShape,
-											border = if (uiState.isIncognitoActive) {
-												BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.7f))
-											} else {
-												null
-											},
-											modifier = Modifier.size(34.dp),
-										) {
-											Box(contentAlignment = Alignment.Center) {
-												Icon(
-													imageVector = Icons.Default.VisibilityOff,
-													contentDescription = "Toggle Incognito",
-													tint = if (uiState.isIncognitoActive) {
-														NemuriTheme.colors.cyan
-													} else {
-														NemuriTheme.colors.textSecondary
-													},
-													modifier = Modifier.size(19.dp),
-												)
-											}
-										}
-									}
-									if (uiState.isRefreshing) {
-										CircularProgressIndicator(
-											color = NemuriTheme.colors.cyan,
-											strokeWidth = 2.dp,
-											modifier = Modifier
-												.padding(end = 8.dp)
-												.size(18.dp),
-										)
-									} else {
-										IconButton(onClick = { viewModel.retry(force = true) }) {
-											Icon(
-												imageVector = Icons.Default.Refresh,
-												contentDescription = "Refresh",
-												tint = NemuriTheme.colors.textSecondary,
-											)
-										}
-									}
-									if (!uiState.isLocalOnly && uiState.publicUrl.isNotBlank()) {
-										IconButton(
-											onClick = {
-												runCatching {
-													context.startActivity(
-														AppRouter.browserIntent(
-															context = context,
-															url = uiState.publicUrl,
-															source = manga.source,
-															title = manga.title,
-														),
-													)
-												}
-											},
-										) {
-											Icon(
-												imageVector = Icons.Default.OpenInBrowser,
-												contentDescription = "Open in WebView",
-												tint = NemuriTheme.colors.textSecondary,
-											)
-										}
-									}
-									if (!uiState.isLocalOnly && uiState.totalBranchChapters > 0) {
-										IconButton(onClick = { showDownloadSheet = true }) {
-											Icon(
-												imageVector = Icons.Default.Download,
-												contentDescription = "Download options",
-												tint = NemuriTheme.colors.cyan,
-											)
-										}
-									}
-									IconButton(
-										onClick = {
-											viewModel.loadMangaStats()
-											showStatsSheet = true
-										},
-									) {
-										Icon(
-											imageVector = Icons.Default.BarChart,
-											contentDescription = "Reading stats",
-											tint = NemuriTheme.colors.textSecondary,
-										)
-									}
-									if (!uiState.isLocalOnly) {
-										IconButton(onClick = { onOpenMigrate(uiState.mangaId) }) {
-											Icon(
-												imageVector = Icons.Default.SwapHoriz,
-												contentDescription = "Migrate source",
-												tint = NemuriTheme.colors.textSecondary,
-											)
-										}
-									}
-								}
+							DetailsUiMode.COMPACT -> DetailsCompactHeader(
+								manga = manga,
+								uiState = uiState,
+								sharedCoverKey = coverKey,
+								toolbar = toolbar,
+								onOpenSourceBrowse = { onOpenSourceBrowse(manga.source.name, null) },
+							)
 
-								// Poster + Meta
-								Row(
-									modifier = Modifier
-										.fillMaxWidth()
-										.padding(horizontal = 16.dp, vertical = 6.dp),
-									horizontalArrangement = Arrangement.spacedBy(14.dp),
-									verticalAlignment = Alignment.Top,
-								) {
-									MangaCoverImage(
-										manga = manga,
-										coverUrl = uiState.coverUrl,
-										modifier = Modifier
-											.size(width = 114.dp, height = 166.dp)
-											.clip(RoundedCornerShape(14.dp))
-											.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
-											.nemuriSharedCover(sharedCoverKey ?: "details-${manga.id}", 14.dp),
-									)
-
-									Column(
-										modifier = Modifier.weight(1f),
-										verticalArrangement = Arrangement.spacedBy(5.dp),
-									) {
-										Row(
-											horizontalArrangement = Arrangement.spacedBy(6.dp),
-											verticalAlignment = Alignment.CenterVertically,
-										) {
-											if (uiState.formatBadge != null) {
-												Surface(
-													color = NemuriTheme.colors.tealContainer,
-													shape = RoundedCornerShape(6.dp),
-												) {
-													NonWrappingBadgeText(
-														text = uiState.formatBadge!!,
-														color = NemuriTheme.colors.cyan,
-														modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-													)
-												}
-											}
-											if (uiState.statusLabel.isNotBlank()) {
-												Surface(
-													color = NemuriTheme.colors.surfaceElevated,
-													shape = RoundedCornerShape(6.dp),
-												) {
-													NonWrappingBadgeText(
-														text = uiState.statusLabel,
-														color = NemuriTheme.colors.textSecondary,
-														modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-													)
-												}
-											}
-											if (uiState.ratingLabel != null) {
-												Text(
-													text = uiState.ratingLabel!!,
-													style = MaterialTheme.typography.labelSmall,
-													color = NemuriTheme.colors.amber,
-												)
-											}
-										}
-
-										Text(
-											text = uiState.title,
-											style = MaterialTheme.typography.titleLarge,
-											color = NemuriTheme.colors.textPrimary,
-											maxLines = 3,
-											overflow = TextOverflow.Ellipsis,
-										)
-										if (uiState.altTitle != null) {
-											Text(
-												text = uiState.altTitle!!,
-												style = MaterialTheme.typography.bodySmall,
-												color = NemuriTheme.colors.textMuted,
-												maxLines = 2,
-												overflow = TextOverflow.Ellipsis,
-											)
-										}
-										if (uiState.authorsLabel.isNotBlank()) {
-											Text(
-												text = uiState.authorsLabel,
-												style = MaterialTheme.typography.bodySmall,
-												color = NemuriTheme.colors.textSecondary,
-												maxLines = 2,
-												overflow = TextOverflow.Ellipsis,
-											)
-										}
-										if (uiState.sourceTitle.isNotBlank()) {
-											Surface(
-												color = NemuriTheme.colors.card,
-												shape = RoundedCornerShape(8.dp),
-												modifier = Modifier
-													.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(8.dp))
-													.clip(RoundedCornerShape(8.dp))
-													.clickable(enabled = !uiState.isLocalOnly) {
-														onOpenSourceBrowse(manga.source.name, null)
-													},
-											) {
-												Text(
-													text = uiState.sourceTitle,
-													style = MaterialTheme.typography.labelSmall,
-													color = NemuriTheme.colors.cyan,
-													modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-												)
-											}
-										}
-									}
-								}
-							}
+							DetailsUiMode.ULTRA_COMPACT -> DetailsUltraCompactHeader(
+								manga = manga,
+								uiState = uiState,
+								sharedCoverKey = coverKey,
+								toolbar = toolbar,
+								onStartReading = { requestOpenReader(manga, uiState.primaryChapterId) },
+								onToggleLibrary = viewModel::quickToggleLibrary,
+								onOpenCategories = { showCategorySheet = true },
+								onOpenSourceBrowse = { onOpenSourceBrowse(manga.source.name, null) },
+							)
 						}
 					}
 
-					// Primary CTA + Library Actions
-					item(key = "details_actions") {
-						Column(
-							modifier = Modifier
-								.fillMaxWidth()
-								.padding(horizontal = 16.dp, vertical = 10.dp),
-							verticalArrangement = Arrangement.spacedBy(10.dp),
-						) {
-							Row(
-								modifier = Modifier.fillMaxWidth(),
-								horizontalArrangement = Arrangement.spacedBy(10.dp),
-								verticalAlignment = Alignment.CenterVertically,
-							) {
-								Button(
-									onClick = {
-										requestOpenReader(manga, uiState.primaryChapterId)
+					// Primary CTA + Library Actions (EXPRESSIVE & COMPACT; ULTRA_COMPACT embeds inline)
+					if (uiState.detailsUiMode != DetailsUiMode.ULTRA_COMPACT) {
+						item(key = "details_actions") {
+							when (uiState.detailsUiMode) {
+								DetailsUiMode.EXPRESSIVE -> DetailsExpressiveActions(
+									uiState = uiState,
+									onStartReading = { requestOpenReader(manga, uiState.primaryChapterId) },
+									onToggleLibrary = viewModel::quickToggleLibrary,
+									onOpenCategories = { showCategorySheet = true },
+									onOpenMigrate = { onOpenMigrate(uiState.mangaId) },
+								)
+
+								else -> DetailsCompactActions(
+									uiState = uiState,
+									onStartReading = { requestOpenReader(manga, uiState.primaryChapterId) },
+									onStartIncognito = {
+										if (uiState.primaryChapterId != null) {
+											launchReaderSession(manga, uiState.primaryChapterId, incognito = true)
+										} else {
+											viewModel.toggleHeaderIncognito()
+										}
 									},
-									enabled = uiState.primaryChapterId != null,
-									shape = RoundedCornerShape(14.dp),
-									colors = ButtonDefaults.buttonColors(
-										containerColor = NemuriTheme.colors.cyan,
-										contentColor = NemuriTheme.colors.onCyan,
-									),
-									modifier = Modifier
-										.weight(1f)
-										.height(48.dp),
-								) {
-									Icon(
-										imageVector = Icons.Default.PlayArrow,
-										contentDescription = null,
-										modifier = Modifier.size(18.dp),
-									)
-									Spacer(modifier = Modifier.width(6.dp))
-									Text(
-										text = uiState.primaryActionLabel,
-										maxLines = 1,
-										overflow = TextOverflow.Ellipsis,
-									)
-								}
-
-								Surface(
-									color = if (uiState.isInLibrary) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
-									shape = RoundedCornerShape(14.dp),
-									modifier = Modifier
-										.height(48.dp)
-										.border(
-											1.dp,
-											if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-											RoundedCornerShape(14.dp),
-										)
-										.clip(RoundedCornerShape(14.dp))
-										.combinedClickable(
-											onClick = viewModel::quickToggleLibrary,
-											onLongClick = { showCategorySheet = true },
-										),
-								) {
-									Row(
-										modifier = Modifier.padding(horizontal = 14.dp),
-										verticalAlignment = Alignment.CenterVertically,
-										horizontalArrangement = Arrangement.spacedBy(6.dp),
-									) {
-										Icon(
-											imageVector = if (uiState.isInLibrary) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-											contentDescription = "Library",
-											tint = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-											modifier = Modifier.size(18.dp),
-										)
-										val catCount = uiState.memberCategoryIds.size
-										Text(
-											text = if (catCount > 1) "Saved ($catCount)" else if (uiState.isInLibrary) "In Library" else "Library",
-											style = MaterialTheme.typography.labelLarge,
-											color = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
-										)
-									}
-								}
-
-								Surface(
-									color = NemuriTheme.colors.card,
-									shape = RoundedCornerShape(14.dp),
-									modifier = Modifier
-										.size(48.dp)
-										.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
-										.clip(RoundedCornerShape(14.dp))
-										.clickable { showCategorySheet = true },
-								) {
-									Box(contentAlignment = Alignment.Center) {
-										Icon(
-											imageVector = Icons.Default.FolderOpen,
-											contentDescription = "Categories",
-											tint = NemuriTheme.colors.textSecondary,
-											modifier = Modifier.size(20.dp),
-										)
-									}
-								}
-							}
-
-							if (uiState.progressPercent > 0f) {
-								LinearProgressIndicator(
-									progress = { uiState.progressPercent.coerceIn(0f, 1f) },
-									color = NemuriTheme.colors.cyan,
-									trackColor = NemuriTheme.colors.border,
-									modifier = Modifier
-										.fillMaxWidth()
-										.height(4.dp)
-										.clip(RoundedCornerShape(2.dp)),
+									onToggleLibrary = viewModel::quickToggleLibrary,
+									onOpenCategories = { showCategorySheet = true },
+									onOpenMigrate = { onOpenMigrate(uiState.mangaId) },
 								)
 							}
 						}
@@ -771,11 +502,12 @@ fun MangaDetailsScreen(
 					// Description & Tags
 					if (uiState.descriptionText.isNotBlank() || manga.tags.isNotEmpty()) {
 						item(key = "details_synopsis") {
+							val isUltra = uiState.detailsUiMode == DetailsUiMode.ULTRA_COMPACT
 							Column(
 								modifier = Modifier
 									.fillMaxWidth()
-									.padding(horizontal = 16.dp, vertical = 6.dp),
-								verticalArrangement = Arrangement.spacedBy(10.dp),
+									.padding(horizontal = 16.dp, vertical = if (isUltra) 3.dp else 6.dp),
+								verticalArrangement = Arrangement.spacedBy(if (isUltra) 6.dp else 10.dp),
 							) {
 								if (uiState.descriptionText.isNotBlank()) {
 									val activeSynopsis = if (uiState.showTranslatedSynopsis && !uiState.translatedSynopsis.isNullOrBlank()) {
@@ -787,17 +519,17 @@ fun MangaDetailsScreen(
 										modifier = Modifier
 											.fillMaxWidth()
 											.animateContentSize(nemuriSpatialSpring()),
-										verticalArrangement = Arrangement.spacedBy(6.dp),
+										verticalArrangement = Arrangement.spacedBy(4.dp),
 									) {
 										Text(
 											text = activeSynopsis,
 											style = MaterialTheme.typography.bodyMedium,
 											color = NemuriTheme.colors.textSecondary,
-											maxLines = if (descriptionExpanded) Int.MAX_VALUE else 4,
+											maxLines = if (descriptionExpanded) Int.MAX_VALUE else if (isUltra) 2 else 4,
 											overflow = TextOverflow.Ellipsis,
 											modifier = Modifier
 												.fillMaxWidth()
-												.clip(RoundedCornerShape(10.dp))
+												.clip(NemuriTheme.shape(10.dp))
 												.clickable { descriptionExpanded = !descriptionExpanded },
 										)
 										Row(
@@ -905,10 +637,10 @@ fun MangaDetailsScreen(
 							WhereWasIRecapCard(
 								recap = uiState.aiRecap,
 								isGenerating = uiState.isGeneratingRecap,
-								aiModeLabel = uiState.aiModeLabel,
+								engineBadgeLabel = uiState.recapEngineBadgeLabel,
 								recapDepth = uiState.recapDepth,
-								onSelectDepth = viewModel::selectRecapDepth,
-								onGenerate = { viewModel.generateRecap(forceRefresh = uiState.aiRecap != null) },
+								onSelectDepth = viewModel::setRecapDepth,
+								onGenerate = { viewModel.generateRecap(forceRefresh = uiState.aiRecap != null, depthOverride = uiState.recapDepth) },
 								onOpenSettings = onOpenAiSettings,
 							)
 						}
@@ -1893,6 +1625,131 @@ fun MangaDetailsScreen(
 		}
 	}
 
+	if (showDisplayOptionsSheet) {
+		val optionShape = NemuriTheme.shape(12.dp)
+		NemuriModalSheet(
+			title = "Details Display",
+			subtitle = "Header layout & quick-scroll controls",
+			onDismiss = { showDisplayOptionsSheet = false },
+		) {
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 4.dp, vertical = 4.dp),
+				verticalArrangement = Arrangement.spacedBy(12.dp),
+			) {
+				Text(
+					text = "DETAILS LAYOUT",
+					style = MaterialTheme.typography.labelSmall,
+					color = NemuriTheme.colors.cyan,
+				)
+				listOf(
+					Triple(
+						DetailsUiMode.EXPRESSIVE,
+						"Centered Large",
+						"Atmospheric blurred cover, centered title & expressive progress card",
+					),
+					Triple(
+						DetailsUiMode.COMPACT,
+						"Compact",
+						"Side-by-side cover, chapter summary chip & split Continue / Incognito bar",
+					),
+					Triple(
+						DetailsUiMode.ULTRA_COMPACT,
+						"Ultra Compact",
+						"Minimal header strip & 2-line synopsis so chapters start immediately",
+					),
+				).forEach { (mode, title, subtitle) ->
+					val selected = uiState.detailsUiMode == mode
+					Surface(
+						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						shape = optionShape,
+						border = BorderStroke(
+							width = if (selected) 1.5.dp else 1.dp,
+							color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+						),
+						modifier = Modifier
+							.fillMaxWidth()
+							.clip(optionShape)
+							.clickable { viewModel.setDetailsUiMode(mode) },
+					) {
+						Row(
+							modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+							verticalAlignment = Alignment.CenterVertically,
+							horizontalArrangement = Arrangement.SpaceBetween,
+						) {
+							Column(
+								modifier = Modifier
+									.weight(1f)
+									.padding(end = 10.dp),
+								verticalArrangement = Arrangement.spacedBy(2.dp),
+							) {
+								Text(
+									text = title,
+									style = MaterialTheme.typography.titleSmall,
+									fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+								)
+								Text(
+									text = subtitle,
+									style = MaterialTheme.typography.labelSmall,
+									color = NemuriTheme.colors.textMuted,
+								)
+							}
+							if (selected) {
+								Icon(
+									imageVector = Icons.Default.Check,
+									contentDescription = null,
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(18.dp),
+								)
+							}
+						}
+					}
+				}
+
+				HorizontalDivider(color = NemuriTheme.colors.border)
+
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(optionShape)
+						.clickable { viewModel.setQuickScrollButtonsEnabled(!uiState.quickScrollButtonsEnabled) }
+						.padding(vertical = 2.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.SpaceBetween,
+				) {
+					Column(
+						modifier = Modifier
+							.weight(1f)
+							.padding(end = 12.dp),
+						verticalArrangement = Arrangement.spacedBy(2.dp),
+					) {
+						Text(
+							text = "Show Floating ▲ / ▼ Scroll Buttons",
+							style = MaterialTheme.typography.bodyMedium,
+							fontWeight = FontWeight.Medium,
+							color = NemuriTheme.colors.textPrimary,
+						)
+						Text(
+							text = "Display quick jump-to-top / bottom capsule on long chapter lists",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+					}
+					Switch(
+						checked = uiState.quickScrollButtonsEnabled,
+						onCheckedChange = viewModel::setQuickScrollButtonsEnabled,
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.cyan,
+						),
+					)
+				}
+			}
+		}
+	}
+
 	if (showStatsSheet) {
 		val stats = uiState.titleStats
 		NemuriModalSheet(
@@ -1967,22 +1824,1094 @@ fun MangaDetailsScreen(
 private data class PendingNsfwLaunch(val chapterId: Long?)
 
 @Composable
+private fun DetailsTopToolbar(
+	uiState: MangaDetailsUiState,
+	onBack: () -> Unit,
+	onToggleIncognito: () -> Unit,
+	onRefresh: () -> Unit,
+	onOpenBrowser: () -> Unit,
+	onOpenDownloads: () -> Unit,
+	onOpenStats: () -> Unit,
+	onOpenMigrate: () -> Unit,
+	onOpenDisplayOptions: () -> Unit,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 6.dp, vertical = 4.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+			Icon(
+				imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+				contentDescription = "Back",
+				tint = NemuriTheme.colors.textPrimary,
+			)
+		}
+		Spacer(modifier = Modifier.weight(1f))
+		IconButton(onClick = onToggleIncognito, modifier = Modifier.size(40.dp)) {
+			Surface(
+				color = if (uiState.isIncognitoActive) {
+					NemuriTheme.colors.cyan.copy(alpha = 0.22f)
+				} else {
+					Color.Transparent
+				},
+				shape = NemuriTheme.pillShape(),
+				border = if (uiState.isIncognitoActive) {
+					BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.7f))
+				} else {
+					null
+				},
+				modifier = Modifier.size(32.dp),
+			) {
+				Box(contentAlignment = Alignment.Center) {
+					Icon(
+						imageVector = Icons.Default.VisibilityOff,
+						contentDescription = "Toggle Incognito",
+						tint = if (uiState.isIncognitoActive) {
+							NemuriTheme.colors.cyan
+						} else {
+							NemuriTheme.colors.textSecondary
+						},
+						modifier = Modifier.size(18.dp),
+					)
+				}
+			}
+		}
+		if (uiState.isRefreshing) {
+			Box(
+				contentAlignment = Alignment.Center,
+				modifier = Modifier.size(40.dp),
+			) {
+				CircularProgressIndicator(
+					color = NemuriTheme.colors.cyan,
+					strokeWidth = 2.dp,
+					modifier = Modifier.size(18.dp),
+				)
+			}
+		} else {
+			IconButton(onClick = onRefresh, modifier = Modifier.size(40.dp)) {
+				Icon(
+					imageVector = Icons.Default.Refresh,
+					contentDescription = "Refresh",
+					tint = NemuriTheme.colors.textSecondary,
+					modifier = Modifier.size(20.dp),
+				)
+			}
+		}
+		if (!uiState.isLocalOnly && uiState.publicUrl.isNotBlank()) {
+			IconButton(onClick = onOpenBrowser, modifier = Modifier.size(40.dp)) {
+				Icon(
+					imageVector = Icons.Default.OpenInBrowser,
+					contentDescription = "Open in WebView",
+					tint = NemuriTheme.colors.textSecondary,
+					modifier = Modifier.size(20.dp),
+				)
+			}
+		}
+		if (!uiState.isLocalOnly && uiState.totalBranchChapters > 0) {
+			IconButton(onClick = onOpenDownloads, modifier = Modifier.size(40.dp)) {
+				Icon(
+					imageVector = Icons.Default.Download,
+					contentDescription = "Download options",
+					tint = NemuriTheme.colors.cyan,
+					modifier = Modifier.size(20.dp),
+				)
+			}
+		}
+		IconButton(onClick = onOpenStats, modifier = Modifier.size(40.dp)) {
+			Icon(
+				imageVector = Icons.Default.BarChart,
+				contentDescription = "Reading stats",
+				tint = NemuriTheme.colors.textSecondary,
+				modifier = Modifier.size(20.dp),
+			)
+		}
+		if (!uiState.isLocalOnly) {
+			IconButton(onClick = onOpenMigrate, modifier = Modifier.size(40.dp)) {
+				Icon(
+					imageVector = Icons.Default.SwapHoriz,
+					contentDescription = "Migrate source",
+					tint = NemuriTheme.colors.textSecondary,
+					modifier = Modifier.size(20.dp),
+				)
+			}
+		}
+		IconButton(onClick = onOpenDisplayOptions, modifier = Modifier.size(40.dp)) {
+			Icon(
+				imageVector = Icons.Default.Tune,
+				contentDescription = "Display options",
+				tint = NemuriTheme.colors.cyan,
+				modifier = Modifier.size(20.dp),
+			)
+		}
+	}
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DetailsExpressiveHeader(
+	manga: Manga,
+	uiState: MangaDetailsUiState,
+	sharedCoverKey: String,
+	toolbar: @Composable () -> Unit,
+	onOpenSourceBrowse: () -> Unit,
+) {
+	val coverShape = NemuriTheme.shape(16.dp)
+	val pillShape = NemuriTheme.pillShape()
+
+	Box(modifier = Modifier.fillMaxWidth()) {
+		MangaCoverImage(
+			manga = manga,
+			coverUrl = uiState.backdropUrl,
+			contentScale = ContentScale.Crop,
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(340.dp)
+				.blur(18.dp)
+				.alpha(0.38f),
+		)
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(340.dp)
+				.background(
+					Brush.verticalGradient(
+						colors = listOf(
+							NemuriTheme.colors.background.copy(alpha = 0.20f),
+							NemuriTheme.colors.background.copy(alpha = 0.72f),
+							NemuriTheme.colors.background,
+						),
+					),
+				),
+		)
+
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.statusBarsPadding(),
+			horizontalAlignment = Alignment.CenterHorizontally,
+		) {
+			toolbar()
+
+			Spacer(modifier = Modifier.height(6.dp))
+
+			Surface(
+				shape = coverShape,
+				shadowElevation = 14.dp,
+				border = BorderStroke(1.dp, NemuriTheme.colors.border),
+				modifier = Modifier.size(width = 156.dp, height = 228.dp),
+			) {
+				MangaCoverImage(
+					manga = manga,
+					coverUrl = uiState.coverUrl,
+					modifier = Modifier
+						.fillMaxSize()
+						.nemuriSharedCover(sharedCoverKey, if (NemuriTheme.isSharpTacticalGeometry) 2.dp else 16.dp),
+				)
+			}
+
+			Spacer(modifier = Modifier.height(14.dp))
+
+			Column(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 20.dp),
+				horizontalAlignment = Alignment.CenterHorizontally,
+				verticalArrangement = Arrangement.spacedBy(5.dp),
+			) {
+				Text(
+					text = uiState.title,
+					style = MaterialTheme.typography.headlineSmall,
+					fontWeight = FontWeight.Bold,
+					color = NemuriTheme.colors.textPrimary,
+					textAlign = TextAlign.Center,
+					maxLines = 3,
+					overflow = TextOverflow.Ellipsis,
+				)
+				if (uiState.altTitle != null) {
+					Text(
+						text = uiState.altTitle,
+						style = MaterialTheme.typography.bodySmall,
+						color = NemuriTheme.colors.textMuted,
+						textAlign = TextAlign.Center,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+				if (uiState.authorsLabel.isNotBlank()) {
+					Text(
+						text = uiState.authorsLabel,
+						style = MaterialTheme.typography.bodyMedium,
+						color = NemuriTheme.colors.textSecondary,
+						textAlign = TextAlign.Center,
+						maxLines = 2,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+
+				Spacer(modifier = Modifier.height(4.dp))
+
+				FlowRow(
+					horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+					verticalArrangement = Arrangement.spacedBy(6.dp),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					if (uiState.statusLabel.isNotBlank()) {
+						Surface(
+							color = NemuriTheme.colors.surfaceElevated,
+							shape = pillShape,
+							border = BorderStroke(1.dp, NemuriTheme.colors.border),
+						) {
+							NonWrappingBadgeText(
+								text = uiState.statusLabel,
+								color = NemuriTheme.colors.textSecondary,
+								modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+							)
+						}
+					}
+					if (uiState.sourceTitle.isNotBlank()) {
+						Surface(
+							color = NemuriTheme.colors.tealContainer,
+							shape = pillShape,
+							border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+							modifier = Modifier
+								.clip(pillShape)
+								.clickable(enabled = !uiState.isLocalOnly, onClick = onOpenSourceBrowse),
+						) {
+							NonWrappingBadgeText(
+								text = uiState.sourceTitle,
+								color = NemuriTheme.colors.cyan,
+								modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+							)
+						}
+					}
+					if (uiState.formatBadge != null) {
+						Surface(
+							color = NemuriTheme.colors.secondaryContainer,
+							shape = pillShape,
+						) {
+							NonWrappingBadgeText(
+								text = uiState.formatBadge,
+								color = NemuriTheme.colors.secondary,
+								modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+							)
+						}
+					}
+					if (uiState.ratingLabel != null) {
+						Surface(
+							color = NemuriTheme.colors.surfaceElevated,
+							shape = pillShape,
+							border = BorderStroke(1.dp, NemuriTheme.colors.border),
+						) {
+							NonWrappingBadgeText(
+								text = uiState.ratingLabel,
+								color = NemuriTheme.colors.amber,
+								modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailsExpressiveActions(
+	uiState: MangaDetailsUiState,
+	onStartReading: () -> Unit,
+	onToggleLibrary: () -> Unit,
+	onOpenCategories: () -> Unit,
+	onOpenMigrate: () -> Unit,
+) {
+	val btnShape = NemuriTheme.shape(12.dp)
+	val cardShape = NemuriTheme.shape(16.dp)
+	val pct = (uiState.progressPercent * 100f).roundToInt().coerceIn(0, 100)
+
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 16.dp, vertical = 10.dp),
+		verticalArrangement = Arrangement.spacedBy(10.dp),
+	) {
+		// Add to Library + Merge Row
+		Row(
+			modifier = Modifier.fillMaxWidth(),
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			Surface(
+				color = if (uiState.isInLibrary) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
+				shape = btnShape,
+				border = BorderStroke(
+					1.dp,
+					if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+				),
+				modifier = Modifier
+					.weight(1f)
+					.height(44.dp)
+					.clip(btnShape)
+					.combinedClickable(
+						onClick = onToggleLibrary,
+						onLongClick = onOpenCategories,
+					),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 12.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.Center,
+				) {
+					Icon(
+						imageVector = if (uiState.isInLibrary) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+						contentDescription = null,
+						tint = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+						modifier = Modifier.size(17.dp),
+					)
+					Spacer(modifier = Modifier.width(6.dp))
+					val catCount = uiState.memberCategoryIds.size
+					Text(
+						text = when {
+							catCount > 1 -> "Saved ($catCount)"
+							uiState.isInLibrary -> "In Library"
+							else -> "Add to Library"
+						},
+						style = MaterialTheme.typography.labelLarge,
+						fontWeight = FontWeight.SemiBold,
+						color = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+
+			Surface(
+				color = NemuriTheme.colors.card,
+				shape = btnShape,
+				border = BorderStroke(1.dp, NemuriTheme.colors.border),
+				modifier = Modifier
+					.weight(1f)
+					.height(44.dp)
+					.clip(btnShape)
+					.clickable(onClick = if (uiState.isLocalOnly) onOpenCategories else onOpenMigrate),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 12.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.Center,
+				) {
+					Icon(
+						imageVector = if (uiState.isLocalOnly) Icons.Default.FolderOpen else Icons.Default.SwapHoriz,
+						contentDescription = null,
+						tint = NemuriTheme.colors.secondary,
+						modifier = Modifier.size(17.dp),
+					)
+					Spacer(modifier = Modifier.width(6.dp))
+					Text(
+						text = if (uiState.isLocalOnly) "Categories" else "Merge / Migrate",
+						style = MaterialTheme.typography.labelLarge,
+						fontWeight = FontWeight.SemiBold,
+						color = NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+
+			if (!uiState.isLocalOnly) {
+				Surface(
+					color = NemuriTheme.colors.card,
+					shape = btnShape,
+					border = BorderStroke(1.dp, NemuriTheme.colors.border),
+					modifier = Modifier
+						.size(44.dp)
+						.clip(btnShape)
+						.clickable(onClick = onOpenCategories),
+				) {
+					Box(contentAlignment = Alignment.Center) {
+						Icon(
+							imageVector = Icons.Default.FolderOpen,
+							contentDescription = "Categories",
+							tint = NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(18.dp),
+						)
+					}
+				}
+			}
+		}
+
+		// Expressive Progress Card (Chapter X of Y • Z%) + Continue CTA
+		Surface(
+			color = NemuriTheme.colors.card,
+			shape = cardShape,
+			border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.35f)),
+			modifier = Modifier.fillMaxWidth(),
+		) {
+			Column(
+				modifier = Modifier.padding(14.dp),
+				verticalArrangement = Arrangement.spacedBy(10.dp),
+			) {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(10.dp),
+				) {
+					Column(
+						modifier = Modifier.weight(1f),
+						verticalArrangement = Arrangement.spacedBy(2.dp),
+					) {
+						val progressHeadline = if (uiState.currentChapterPosition > 0 && uiState.totalBranchChapters > 0) {
+							"Chapter ${uiState.currentChapterPosition} of ${uiState.totalBranchChapters} • $pct%"
+						} else if (uiState.totalBranchChapters > 0) {
+							"0 of ${uiState.totalBranchChapters} Chapters • 0%"
+						} else {
+							"No chapters loaded"
+						}
+						Text(
+							text = progressHeadline,
+							style = MaterialTheme.typography.titleSmall,
+							fontWeight = FontWeight.Bold,
+							color = NemuriTheme.colors.textPrimary,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+						val detailMeta = buildList {
+							if (uiState.totalBranchChapters > 0) add("${uiState.unreadChaptersCount} unread")
+							if (uiState.downloadedCount > 0) add("${uiState.downloadedCount} offline")
+						}.joinToString(" • ")
+						if (detailMeta.isNotEmpty()) {
+							Text(
+								text = detailMeta,
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.textMuted,
+							)
+						}
+					}
+
+					Button(
+						onClick = onStartReading,
+						enabled = uiState.primaryChapterId != null,
+						shape = btnShape,
+						contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+						colors = ButtonDefaults.buttonColors(
+							containerColor = NemuriTheme.colors.cyan,
+							contentColor = NemuriTheme.colors.onCyan,
+						),
+						modifier = Modifier.height(40.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.PlayArrow,
+							contentDescription = null,
+							modifier = Modifier.size(17.dp),
+						)
+						Spacer(modifier = Modifier.width(4.dp))
+						Text(
+							text = if (uiState.history != null) {
+								uiState.primaryChapterShortLabel ?: "Continue"
+							} else {
+								"Start"
+							},
+							style = MaterialTheme.typography.labelLarge,
+							fontWeight = FontWeight.Bold,
+							maxLines = 1,
+						)
+					}
+				}
+
+				LinearProgressIndicator(
+					progress = { uiState.progressPercent.coerceIn(0f, 1f) },
+					color = NemuriTheme.colors.cyan,
+					trackColor = NemuriTheme.colors.border,
+					modifier = Modifier
+						.fillMaxWidth()
+						.height(5.dp)
+						.clip(NemuriTheme.shape(3.dp)),
+				)
+			}
+		}
+	}
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DetailsCompactHeader(
+	manga: Manga,
+	uiState: MangaDetailsUiState,
+	sharedCoverKey: String,
+	toolbar: @Composable () -> Unit,
+	onOpenSourceBrowse: () -> Unit,
+) {
+	val coverShape = NemuriTheme.shape(12.dp)
+	val chipShape = NemuriTheme.shape(8.dp)
+	val pct = (uiState.progressPercent * 100f).roundToInt().coerceIn(0, 100)
+
+	Box(modifier = Modifier.fillMaxWidth()) {
+		MangaCoverImage(
+			manga = manga,
+			coverUrl = uiState.backdropUrl,
+			contentScale = ContentScale.Crop,
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(230.dp)
+				.alpha(0.28f),
+		)
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(230.dp)
+				.background(
+					Brush.verticalGradient(
+						colors = listOf(
+							NemuriTheme.colors.background.copy(alpha = 0.25f),
+							NemuriTheme.colors.background.copy(alpha = 0.85f),
+							NemuriTheme.colors.background,
+						),
+					),
+				),
+		)
+
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.statusBarsPadding(),
+		) {
+			toolbar()
+
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 16.dp, vertical = 6.dp),
+				horizontalArrangement = Arrangement.spacedBy(14.dp),
+				verticalAlignment = Alignment.Top,
+			) {
+				MangaCoverImage(
+					manga = manga,
+					coverUrl = uiState.coverUrl,
+					modifier = Modifier
+						.size(width = 108.dp, height = 158.dp)
+						.clip(coverShape)
+						.border(1.dp, NemuriTheme.colors.border, coverShape)
+						.nemuriSharedCover(sharedCoverKey, if (NemuriTheme.isSharpTacticalGeometry) 2.dp else 12.dp),
+				)
+
+				Column(
+					modifier = Modifier.weight(1f),
+					verticalArrangement = Arrangement.spacedBy(5.dp),
+				) {
+					Text(
+						text = uiState.title,
+						style = MaterialTheme.typography.titleLarge,
+						fontWeight = FontWeight.Bold,
+						color = NemuriTheme.colors.textPrimary,
+						maxLines = 3,
+						overflow = TextOverflow.Ellipsis,
+					)
+					if (uiState.authorsLabel.isNotBlank()) {
+						Text(
+							text = uiState.authorsLabel,
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.textSecondary,
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+						)
+					}
+
+					FlowRow(
+						horizontalArrangement = Arrangement.spacedBy(6.dp),
+						verticalArrangement = Arrangement.spacedBy(5.dp),
+					) {
+						if (uiState.sourceTitle.isNotBlank()) {
+							Surface(
+								color = NemuriTheme.colors.card,
+								shape = chipShape,
+								border = BorderStroke(1.dp, NemuriTheme.colors.border),
+								modifier = Modifier
+									.clip(chipShape)
+									.clickable(enabled = !uiState.isLocalOnly, onClick = onOpenSourceBrowse),
+							) {
+								val prefix = if (uiState.isLocalOnly) "" else "EXT "
+								NonWrappingBadgeText(
+									text = "$prefix${uiState.sourceTitle}",
+									color = NemuriTheme.colors.cyan,
+									modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+								)
+							}
+						}
+						if (uiState.statusLabel.isNotBlank()) {
+							Surface(
+								color = NemuriTheme.colors.surfaceElevated,
+								shape = chipShape,
+								border = BorderStroke(1.dp, NemuriTheme.colors.border),
+							) {
+								NonWrappingBadgeText(
+									text = uiState.statusLabel,
+									color = NemuriTheme.colors.textSecondary,
+									modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+								)
+							}
+						}
+						if (uiState.formatBadge != null) {
+							Surface(
+								color = NemuriTheme.colors.secondaryContainer,
+								shape = chipShape,
+							) {
+								NonWrappingBadgeText(
+									text = uiState.formatBadge,
+									color = NemuriTheme.colors.secondary,
+									modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+								)
+							}
+						}
+						if (uiState.ratingLabel != null) {
+							Text(
+								text = uiState.ratingLabel,
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.amber,
+								modifier = Modifier.padding(top = 2.dp),
+							)
+						}
+					}
+
+					if (uiState.totalBranchChapters > 0) {
+						Surface(
+							color = NemuriTheme.colors.tealContainer.copy(alpha = 0.72f),
+							shape = chipShape,
+							border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.35f)),
+						) {
+							Text(
+								text = "${uiState.totalBranchChapters} Chapters • ${uiState.unreadChaptersCount} Unread • $pct% Complete",
+								style = MaterialTheme.typography.labelSmall,
+								fontWeight = FontWeight.SemiBold,
+								color = NemuriTheme.colors.cyan,
+								maxLines = 1,
+								overflow = TextOverflow.Ellipsis,
+								modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailsCompactActions(
+	uiState: MangaDetailsUiState,
+	onStartReading: () -> Unit,
+	onStartIncognito: () -> Unit,
+	onToggleLibrary: () -> Unit,
+	onOpenCategories: () -> Unit,
+	onOpenMigrate: () -> Unit,
+) {
+	val barShape = NemuriTheme.shape(14.dp)
+	val btnShape = NemuriTheme.shape(12.dp)
+
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(horizontal = 16.dp, vertical = 8.dp),
+		verticalArrangement = Arrangement.spacedBy(8.dp),
+	) {
+		// Full-width split "▶ Continue Ch. X | Incognito" bar
+		Surface(
+			shape = barShape,
+			border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f)),
+			color = NemuriTheme.colors.surfaceElevated,
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(48.dp)
+				.clip(barShape),
+		) {
+			Row(
+				modifier = Modifier.fillMaxSize(),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Row(
+					modifier = Modifier
+						.weight(1f)
+						.fillMaxHeight()
+						.background(
+							if (uiState.primaryChapterId != null) {
+								NemuriTheme.colors.cyan
+							} else {
+								NemuriTheme.colors.surfaceElevated
+							},
+						)
+						.clickable(enabled = uiState.primaryChapterId != null, onClick = onStartReading)
+						.padding(horizontal = 14.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.Center,
+				) {
+					val fg = if (uiState.primaryChapterId != null) NemuriTheme.colors.onCyan else NemuriTheme.colors.textDim
+					Icon(
+						imageVector = Icons.Default.PlayArrow,
+						contentDescription = null,
+						tint = fg,
+						modifier = Modifier.size(18.dp),
+					)
+					Spacer(modifier = Modifier.width(6.dp))
+					val splitLabel = when {
+						uiState.primaryChapterId == null -> "No Chapters"
+						uiState.history != null -> "Continue ${uiState.primaryChapterShortLabel ?: ""}".trim()
+						else -> "Start Reading"
+					}
+					Text(
+						text = splitLabel,
+						style = MaterialTheme.typography.labelLarge,
+						fontWeight = FontWeight.Bold,
+						color = fg,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+
+				Box(
+					modifier = Modifier
+						.width(1.dp)
+						.fillMaxHeight()
+						.background(NemuriTheme.colors.border),
+				)
+
+				Row(
+					modifier = Modifier
+						.fillMaxHeight()
+						.background(
+							if (uiState.isIncognitoActive) {
+								NemuriTheme.colors.tealContainer
+							} else {
+								NemuriTheme.colors.surfaceElevated
+							},
+						)
+						.clickable(onClick = onStartIncognito)
+						.padding(horizontal = 14.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(5.dp),
+				) {
+					Icon(
+						imageVector = Icons.Default.VisibilityOff,
+						contentDescription = "Read in Incognito",
+						tint = if (uiState.isIncognitoActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+						modifier = Modifier.size(16.dp),
+					)
+					Text(
+						text = "Incognito",
+						style = MaterialTheme.typography.labelMedium,
+						fontWeight = FontWeight.SemiBold,
+						color = if (uiState.isIncognitoActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+					)
+				}
+			}
+		}
+
+		// Merge / Migrate | + Add to Library Row
+		Row(
+			modifier = Modifier.fillMaxWidth(),
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			Surface(
+				color = NemuriTheme.colors.card,
+				shape = btnShape,
+				border = BorderStroke(1.dp, NemuriTheme.colors.border),
+				modifier = Modifier
+					.weight(1f)
+					.height(42.dp)
+					.clip(btnShape)
+					.clickable(onClick = if (uiState.isLocalOnly) onOpenCategories else onOpenMigrate),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 10.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.Center,
+				) {
+					Icon(
+						imageVector = if (uiState.isLocalOnly) Icons.Default.FolderOpen else Icons.Default.SwapHoriz,
+						contentDescription = null,
+						tint = NemuriTheme.colors.secondary,
+						modifier = Modifier.size(16.dp),
+					)
+					Spacer(modifier = Modifier.width(6.dp))
+					Text(
+						text = if (uiState.isLocalOnly) "Categories" else "Merge / Migrate",
+						style = MaterialTheme.typography.labelMedium,
+						fontWeight = FontWeight.SemiBold,
+						color = NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+
+			Surface(
+				color = if (uiState.isInLibrary) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
+				shape = btnShape,
+				border = BorderStroke(
+					1.dp,
+					if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+				),
+				modifier = Modifier
+					.weight(1f)
+					.height(42.dp)
+					.clip(btnShape)
+					.combinedClickable(
+						onClick = onToggleLibrary,
+						onLongClick = onOpenCategories,
+					),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 10.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.Center,
+				) {
+					Icon(
+						imageVector = if (uiState.isInLibrary) Icons.Default.Favorite else Icons.Default.Add,
+						contentDescription = null,
+						tint = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+						modifier = Modifier.size(16.dp),
+					)
+					Spacer(modifier = Modifier.width(5.dp))
+					val catCount = uiState.memberCategoryIds.size
+					Text(
+						text = when {
+							catCount > 1 -> "Saved ($catCount)"
+							uiState.isInLibrary -> "In Library"
+							else -> "Add to Library"
+						},
+						style = MaterialTheme.typography.labelMedium,
+						fontWeight = FontWeight.SemiBold,
+						color = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+
+			if (!uiState.isLocalOnly) {
+				Surface(
+					color = NemuriTheme.colors.card,
+					shape = btnShape,
+					border = BorderStroke(1.dp, NemuriTheme.colors.border),
+					modifier = Modifier
+						.size(42.dp)
+						.clip(btnShape)
+						.clickable(onClick = onOpenCategories),
+				) {
+					Box(contentAlignment = Alignment.Center) {
+						Icon(
+							imageVector = Icons.Default.FolderOpen,
+							contentDescription = "Categories",
+							tint = NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(18.dp),
+						)
+					}
+				}
+			}
+		}
+
+		if (uiState.progressPercent > 0f) {
+			LinearProgressIndicator(
+				progress = { uiState.progressPercent.coerceIn(0f, 1f) },
+				color = NemuriTheme.colors.cyan,
+				trackColor = NemuriTheme.colors.border,
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(4.dp)
+					.clip(NemuriTheme.shape(2.dp)),
+			)
+		}
+	}
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailsUltraCompactHeader(
+	manga: Manga,
+	uiState: MangaDetailsUiState,
+	sharedCoverKey: String,
+	toolbar: @Composable () -> Unit,
+	onStartReading: () -> Unit,
+	onToggleLibrary: () -> Unit,
+	onOpenCategories: () -> Unit,
+	onOpenSourceBrowse: () -> Unit,
+) {
+	val thumbShape = NemuriTheme.shape(8.dp)
+	val pillShape = NemuriTheme.shape(10.dp)
+	val pct = (uiState.progressPercent * 100f).roundToInt().coerceIn(0, 100)
+
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.statusBarsPadding(),
+	) {
+		toolbar()
+
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(horizontal = 16.dp, vertical = 4.dp),
+			horizontalArrangement = Arrangement.spacedBy(10.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			MangaCoverImage(
+				manga = manga,
+				coverUrl = uiState.coverUrl,
+				modifier = Modifier
+					.size(width = 52.dp, height = 74.dp)
+					.clip(thumbShape)
+					.border(1.dp, NemuriTheme.colors.border, thumbShape)
+					.nemuriSharedCover(sharedCoverKey, if (NemuriTheme.isSharpTacticalGeometry) 2.dp else 8.dp),
+			)
+
+			Column(
+				modifier = Modifier.weight(1f),
+				verticalArrangement = Arrangement.spacedBy(2.dp),
+			) {
+				Text(
+					text = uiState.title,
+					style = MaterialTheme.typography.titleMedium,
+					fontWeight = FontWeight.Bold,
+					color = NemuriTheme.colors.textPrimary,
+					maxLines = 2,
+					overflow = TextOverflow.Ellipsis,
+				)
+				val metaLine = buildList {
+					if (uiState.sourceTitle.isNotBlank()) add(uiState.sourceTitle)
+					if (uiState.statusLabel.isNotBlank()) add(uiState.statusLabel)
+					if (uiState.totalBranchChapters > 0) add("${uiState.totalBranchChapters} ch")
+					if (pct > 0) add("$pct%")
+				}.joinToString(" • ")
+				if (metaLine.isNotBlank()) {
+					Text(
+						text = metaLine,
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.cyan,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+						modifier = Modifier.clickable(enabled = !uiState.isLocalOnly, onClick = onOpenSourceBrowse),
+					)
+				}
+				if (uiState.authorsLabel.isNotBlank()) {
+					Text(
+						text = uiState.authorsLabel,
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.textMuted,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+
+			// Inline Continue pill + Library icon button
+			Row(
+				horizontalArrangement = Arrangement.spacedBy(6.dp),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Surface(
+					color = if (uiState.primaryChapterId != null) {
+						NemuriTheme.colors.cyan
+					} else {
+						NemuriTheme.colors.surfaceElevated
+					},
+					shape = pillShape,
+					modifier = Modifier
+						.height(36.dp)
+						.clip(pillShape)
+						.clickable(enabled = uiState.primaryChapterId != null, onClick = onStartReading),
+				) {
+					Row(
+						modifier = Modifier.padding(horizontal = 10.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(3.dp),
+					) {
+						val fg = if (uiState.primaryChapterId != null) NemuriTheme.colors.onCyan else NemuriTheme.colors.textDim
+						Icon(
+							imageVector = Icons.Default.PlayArrow,
+							contentDescription = "Continue reading",
+							tint = fg,
+							modifier = Modifier.size(16.dp),
+						)
+						Text(
+							text = if (uiState.history != null) {
+								uiState.primaryChapterShortLabel ?: "Go"
+							} else {
+								"Read"
+							},
+							style = MaterialTheme.typography.labelMedium,
+							fontWeight = FontWeight.Bold,
+							color = fg,
+							maxLines = 1,
+						)
+					}
+				}
+
+				Surface(
+					color = if (uiState.isInLibrary) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
+					shape = pillShape,
+					border = BorderStroke(
+						1.dp,
+						if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+					),
+					modifier = Modifier
+						.size(36.dp)
+						.clip(pillShape)
+						.combinedClickable(
+							onClick = onToggleLibrary,
+							onLongClick = onOpenCategories,
+						),
+				) {
+					Box(contentAlignment = Alignment.Center) {
+						Icon(
+							imageVector = if (uiState.isInLibrary) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+							contentDescription = if (uiState.isInLibrary) "In library" else "Add to library",
+							tint = if (uiState.isInLibrary) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+							modifier = Modifier.size(17.dp),
+						)
+					}
+				}
+			}
+		}
+
+		if (uiState.progressPercent > 0f) {
+			LinearProgressIndicator(
+				progress = { uiState.progressPercent.coerceIn(0f, 1f) },
+				color = NemuriTheme.colors.cyan,
+				trackColor = NemuriTheme.colors.border,
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(horizontal = 16.dp, vertical = 4.dp)
+					.height(3.dp)
+					.clip(NemuriTheme.shape(2.dp)),
+			)
+		}
+	}
+}
+
+@Composable
 private fun WhereWasIRecapCard(
 	recap: org.koitharu.kotatsu.ai.data.MangaAiRecapEntity?,
 	isGenerating: Boolean,
-	aiModeLabel: String,
+	engineBadgeLabel: String,
 	recapDepth: RecapDepth,
 	onSelectDepth: (RecapDepth) -> Unit,
 	onGenerate: () -> Unit,
 	onOpenSettings: () -> Unit,
 ) {
+	val cardShape = NemuriTheme.shape(16.dp)
+	val pillShape = NemuriTheme.pillShape()
+	val actionShape = NemuriTheme.shape(10.dp)
+	val innerSegmentShape = NemuriTheme.shape(7.dp)
+
 	Surface(
 		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(16.dp),
+		shape = cardShape,
 		modifier = Modifier
 			.fillMaxWidth()
 			.padding(horizontal = 16.dp, vertical = 4.dp)
-			.border(1.dp, NemuriTheme.colors.mergePurple.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
+			.border(1.dp, NemuriTheme.colors.mergePurple.copy(alpha = 0.45f), cardShape),
 	) {
 		Column(
 			modifier = Modifier.padding(14.dp),
@@ -2015,10 +2944,10 @@ private fun WhereWasIRecapCard(
 						} else {
 							NemuriTheme.colors.surfaceElevated
 						},
-						shape = RoundedCornerShape(999.dp),
+						shape = pillShape,
 					) {
 						Text(
-							text = recap?.displayEngineLabel() ?: aiModeLabel,
+							text = engineBadgeLabel,
 							style = MaterialTheme.typography.labelSmall,
 							color = if (recap?.isAiGenerated == true) NemuriTheme.colors.mergePurple else NemuriTheme.colors.textMuted,
 							maxLines = 1,
@@ -2054,7 +2983,6 @@ private fun WhereWasIRecapCard(
 				)
 			}
 
-			val cachedDepth = recap?.parsedDepth()
 			Row(
 				modifier = Modifier.fillMaxWidth(),
 				verticalAlignment = Alignment.CenterVertically,
@@ -2062,64 +2990,88 @@ private fun WhereWasIRecapCard(
 			) {
 				Surface(
 					color = NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(10.dp),
-					modifier = Modifier.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(10.dp)),
+					shape = actionShape,
+					border = BorderStroke(1.dp, NemuriTheme.colors.border),
+					modifier = Modifier.height(36.dp),
 				) {
 					Row(
-						modifier = Modifier.padding(3.dp),
-						horizontalArrangement = Arrangement.spacedBy(4.dp),
+						modifier = Modifier
+							.fillMaxHeight()
+							.padding(3.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(3.dp),
 					) {
 						RecapDepth.entries.forEach { depth ->
 							val selected = recapDepth == depth
 							Surface(
 								color = if (selected) NemuriTheme.colors.tealContainer else Color.Transparent,
-								shape = RoundedCornerShape(7.dp),
+								shape = innerSegmentShape,
 								modifier = Modifier
-									.clip(RoundedCornerShape(7.dp))
+									.fillMaxHeight()
+									.clip(innerSegmentShape)
 									.clickable { onSelectDepth(depth) },
 							) {
-								Text(
-									text = depth.shortLabel,
-									style = MaterialTheme.typography.labelSmall,
-									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
-									modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-								)
+								Box(
+									contentAlignment = Alignment.Center,
+									modifier = Modifier.padding(horizontal = 11.dp),
+								) {
+									Text(
+										text = depth.shortLabel,
+										style = MaterialTheme.typography.labelMedium,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textMuted,
+										maxLines = 1,
+									)
+								}
 							}
 						}
 					}
 				}
 
-				Button(
-					onClick = onGenerate,
-					enabled = !isGenerating,
-					colors = ButtonDefaults.buttonColors(
-						containerColor = NemuriTheme.colors.tealContainer,
-						contentColor = NemuriTheme.colors.cyan,
-					),
-					shape = RoundedCornerShape(10.dp),
+				Surface(
+					color = NemuriTheme.colors.tealContainer,
+					shape = actionShape,
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+					modifier = Modifier
+						.height(36.dp)
+						.clip(actionShape)
+						.clickable(enabled = !isGenerating, onClick = onGenerate),
 				) {
-					if (isGenerating) {
-						CircularProgressIndicator(
-							color = NemuriTheme.colors.cyan,
-							strokeWidth = 2.dp,
-							modifier = Modifier.size(14.dp),
-						)
-						Spacer(Modifier.width(6.dp))
-						Text("Generating…")
-					} else {
-						Icon(
-							imageVector = Icons.Default.Refresh,
-							contentDescription = null,
-							modifier = Modifier.size(15.dp),
-						)
-						Spacer(Modifier.width(5.dp))
-						Text(
-							when {
-								recap == null -> "Catch Me Up (${recapDepth.shortLabel})"
-								cachedDepth != null && cachedDepth != recapDepth -> "Generate ${recapDepth.shortLabel}"
-								else -> "Refresh"
-							},
-						)
+					Row(
+						modifier = Modifier
+							.fillMaxHeight()
+							.padding(horizontal = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.spacedBy(6.dp),
+					) {
+						if (isGenerating) {
+							CircularProgressIndicator(
+								color = NemuriTheme.colors.cyan,
+								strokeWidth = 2.dp,
+								modifier = Modifier.size(14.dp),
+							)
+							Text(
+								text = "Generating…",
+								style = MaterialTheme.typography.labelMedium,
+								fontWeight = FontWeight.SemiBold,
+								color = NemuriTheme.colors.cyan,
+								maxLines = 1,
+							)
+						} else {
+							Icon(
+								imageVector = Icons.Default.Refresh,
+								contentDescription = null,
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(15.dp),
+							)
+							Text(
+								text = if (recap == null) "Catch Me Up" else "Refresh",
+								style = MaterialTheme.typography.labelMedium,
+								fontWeight = FontWeight.SemiBold,
+								color = NemuriTheme.colors.cyan,
+								maxLines = 1,
+							)
+						}
 					}
 				}
 			}

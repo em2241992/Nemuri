@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
@@ -66,9 +65,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koitharu.kotatsu.ai.domain.AiMode
 import org.koitharu.kotatsu.ai.domain.RecapDepth
 import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
+import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.nemuri.app.BuildConfig
+import org.nemuri.app.ui.components.AiUpscalePreviewSheet
 import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
 import org.nemuri.app.ui.components.rememberRootTabBottomPadding
@@ -100,6 +101,7 @@ fun EnhanceHubScreen(
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 	val bottomPadding = rememberRootTabBottomPadding()
 	var selectedTab by rememberSaveable { mutableStateOf(EnhanceHubTab.OVERVIEW) }
+	var showAiPreviewSheet by rememberSaveable { mutableStateOf(false) }
 
 	Column(modifier = Modifier.fillMaxSize()) {
 		NemuriTopSearchHeader(
@@ -124,18 +126,19 @@ fun EnhanceHubScreen(
 			horizontalArrangement = Arrangement.spacedBy(6.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
+			val tabShape = NemuriTheme.pillShape()
 			EnhanceHubTab.entries.forEach { tab ->
 				val selected = selectedTab == tab
 				Surface(
 					color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(999.dp),
+					shape = tabShape,
 					border = BorderStroke(
 						width = 1.dp,
 						color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 					),
 					modifier = Modifier
 						.weight(1f)
-						.clip(RoundedCornerShape(999.dp))
+						.clip(tabShape)
 						.clickable { selectedTab = tab },
 				) {
 					Text(
@@ -167,6 +170,7 @@ fun EnhanceHubScreen(
 					onOpenDuplicates = onOpenDuplicates,
 					onOpenBrokenSources = onOpenBrokenSources,
 					onOpenReadingSettings = onOpenReadingSettings,
+					onOpenAiPreview = { showAiPreviewSheet = true },
 					onOpenAiSettings = onOpenAiSettings,
 					onOpenStats = onOpenStats,
 				)
@@ -188,6 +192,7 @@ fun EnhanceHubScreen(
 					uiState = uiState,
 					viewModel = viewModel,
 					onOpenReadingSettings = onOpenReadingSettings,
+					onOpenAiPreview = { showAiPreviewSheet = true },
 				)
 
 				EnhanceHubTab.AI -> aiTabContent(
@@ -198,6 +203,34 @@ fun EnhanceHubScreen(
 			}
 		}
 	}
+
+	if (showAiPreviewSheet) {
+		AiUpscalePreviewSheet(
+			shaderConfig = ReaderShaderConfig(
+				preset = uiState.readerShaderPreset,
+				descreen = uiState.isReaderDescreenEnabled,
+				inkLevels = uiState.isReaderInkLevelsEnabled,
+			),
+			isNeuralUpscaleEnabled = uiState.isNeuralUpscaleEnabled,
+			isNeuralUpscaleSupported = uiState.isNeuralUpscaleSupported,
+			neuralAccelerator = uiState.neuralAccelerator,
+			activeDelegateLabel = uiState.activeNeuralDelegateLabel,
+			hasReadyNeuralModel = uiState.hasReadyNeuralModel,
+			isWarmBedtimeActive = uiState.isWarmBedtimePresetActive,
+			previewModel = uiState.sampleCoverUrl,
+			onSelectShaderPreset = viewModel::setReaderShaderPreset,
+			onSetInkLevels = viewModel::setReaderInkLevelsEnabled,
+			onSetDescreen = viewModel::setReaderDescreenEnabled,
+			onSetNeuralUpscaleEnabled = viewModel::setNeuralUpscaleEnabled,
+			onSelectNeuralAccelerator = viewModel::setNeuralAccelerator,
+			onApplyBedtimeWarmPreset = viewModel::applyBedtimeWarmPreset,
+			onOpenUpscalingSettings = {
+				showAiPreviewSheet = false
+				onOpenReadingSettings()
+			},
+			onDismiss = { showAiPreviewSheet = false },
+		)
+	}
 }
 
 private fun LazyListScope.overviewTabContent(
@@ -206,6 +239,7 @@ private fun LazyListScope.overviewTabContent(
 	onOpenDuplicates: () -> Unit,
 	onOpenBrokenSources: () -> Unit,
 	onOpenReadingSettings: () -> Unit,
+	onOpenAiPreview: () -> Unit,
 	onOpenAiSettings: () -> Unit,
 	onOpenStats: () -> Unit,
 ) {
@@ -259,6 +293,7 @@ private fun LazyListScope.overviewTabContent(
 			onToggleNeuralUpscale = viewModel::setNeuralUpscaleEnabled,
 			onClearCache = viewModel::clearUpscaleCache,
 			onOpenReadingSettings = onOpenReadingSettings,
+			onOpenAiPreview = onOpenAiPreview,
 			showAdvancedToggles = false,
 		)
 	}
@@ -335,7 +370,7 @@ private fun LazyListScope.duplicatesTabContent(
 				containerColor = NemuriTheme.colors.cyan,
 				contentColor = NemuriTheme.colors.onCyan,
 			),
-			shape = RoundedCornerShape(14.dp),
+			shape = NemuriTheme.shape(14.dp),
 			modifier = Modifier
 				.fillMaxWidth()
 				.height(50.dp),
@@ -391,7 +426,7 @@ private fun LazyListScope.repairTabContent(
 				containerColor = NemuriTheme.colors.cyan,
 				contentColor = NemuriTheme.colors.onCyan,
 			),
-			shape = RoundedCornerShape(14.dp),
+			shape = NemuriTheme.shape(14.dp),
 			modifier = Modifier
 				.fillMaxWidth()
 				.height(50.dp),
@@ -458,7 +493,7 @@ private fun LazyListScope.repairTabContent(
 						}
 						Surface(
 							color = NemuriTheme.colors.amber.copy(alpha = 0.16f),
-							shape = RoundedCornerShape(999.dp),
+							shape = NemuriTheme.pillShape(),
 						) {
 							Text(
 								text = "$count title(s)",
@@ -487,6 +522,7 @@ private fun LazyListScope.upscalerTabContent(
 	uiState: EnhanceHubUiState,
 	viewModel: EnhanceHubViewModel,
 	onOpenReadingSettings: () -> Unit,
+	onOpenAiPreview: () -> Unit,
 ) {
 	item {
 		SectionOverlineLabel("GPU SHADERS & NEURAL 2X SUPER-RESOLUTION")
@@ -500,6 +536,7 @@ private fun LazyListScope.upscalerTabContent(
 			onToggleNeuralUpscale = viewModel::setNeuralUpscaleEnabled,
 			onClearCache = viewModel::clearUpscaleCache,
 			onOpenReadingSettings = onOpenReadingSettings,
+			onOpenAiPreview = onOpenAiPreview,
 			showAdvancedToggles = true,
 			onToggleDescreen = viewModel::setReaderDescreenEnabled,
 			onToggleInkLevels = viewModel::setReaderInkLevelsEnabled,
@@ -514,7 +551,7 @@ private fun LazyListScope.upscalerTabContent(
 				containerColor = NemuriTheme.colors.cyan,
 				contentColor = NemuriTheme.colors.onCyan,
 			),
-			shape = RoundedCornerShape(14.dp),
+			shape = NemuriTheme.shape(14.dp),
 			modifier = Modifier
 				.fillMaxWidth()
 				.height(50.dp),
@@ -557,22 +594,23 @@ private fun LazyListScope.aiTabContent(
 				) {
 					Column(modifier = Modifier.weight(1f)) {
 						Text(
-							text = "Active Backend: ${uiState.aiModeLabel}",
+							text = "Active Backend: ${uiState.activeAiEngineLabel}",
 							style = MaterialTheme.typography.titleSmall,
 							color = NemuriTheme.colors.textPrimary,
 						)
 						Text(
-							text = "Gemini Nano (AICore) • LiteRT Local • Ollama LAN • Gemini API",
+							text = "Mode: ${uiState.aiModeLabel} • Gemini Nano • LiteRT Local • Ollama LAN • Gemini API",
 							style = MaterialTheme.typography.bodySmall,
 							color = NemuriTheme.colors.textMuted,
 						)
 					}
 					if (uiState.isLocalModelLoadedInRam) {
+						val unloadShape = NemuriTheme.pillShape()
 						Surface(
 							color = NemuriTheme.colors.healthy.copy(alpha = 0.16f),
-							shape = RoundedCornerShape(999.dp),
+							shape = unloadShape,
 							modifier = Modifier
-								.clip(RoundedCornerShape(999.dp))
+								.clip(unloadShape)
 								.clickable(onClick = viewModel::unloadLocalModelFromRam),
 						) {
 							Row(
@@ -590,17 +628,18 @@ private fun LazyListScope.aiTabContent(
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
 					verticalArrangement = Arrangement.spacedBy(6.dp),
 				) {
+					val chipShape = NemuriTheme.pillShape()
 					AiMode.entries.forEach { mode ->
 						val selected = uiState.aiMode == mode
 						Surface(
 							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(999.dp),
+							shape = chipShape,
 							border = BorderStroke(
 								1.dp,
 								if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 							),
 							modifier = Modifier
-								.clip(RoundedCornerShape(999.dp))
+								.clip(chipShape)
 								.clickable { viewModel.setAiMode(mode) },
 						) {
 							Text(
@@ -635,7 +674,7 @@ private fun LazyListScope.aiTabContent(
 				containerColor = NemuriTheme.colors.cyan,
 				contentColor = NemuriTheme.colors.onCyan,
 			),
-			shape = RoundedCornerShape(14.dp),
+			shape = NemuriTheme.shape(14.dp),
 			modifier = Modifier
 				.fillMaxWidth()
 				.height(50.dp),
@@ -681,7 +720,7 @@ private fun HubHealthHeaderRow(
 				if (BuildConfig.DEBUG || BuildConfig.VERSION_NAME.contains("beta", ignoreCase = true)) {
 					Surface(
 						color = NemuriTheme.colors.amber.copy(alpha = 0.16f),
-						shape = RoundedCornerShape(999.dp),
+						shape = NemuriTheme.pillShape(),
 						border = BorderStroke(1.dp, NemuriTheme.colors.amber.copy(alpha = 0.6f)),
 					) {
 						Text(
@@ -796,17 +835,18 @@ private fun DuplicateGuardPreferencesCard(
 					.horizontalScroll(rememberScrollState()),
 				horizontalArrangement = Arrangement.spacedBy(6.dp),
 			) {
+				val chipShape = NemuriTheme.pillShape()
 				DuplicateWinnerStrategy.entries.forEach { strategy ->
 					val selected = uiState.duplicateWinnerStrategy == strategy
 					Surface(
 						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(999.dp),
+						shape = chipShape,
 						border = BorderStroke(
 							1.dp,
 							if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 						),
 						modifier = Modifier
-							.clip(RoundedCornerShape(999.dp))
+							.clip(chipShape)
 							.clickable { onSelectWinnerStrategy(strategy) },
 					) {
 						Row(
@@ -842,13 +882,14 @@ private fun DuplicateGuardStatusCard(
 	reviewCount: Int,
 	onOpenDuplicates: () -> Unit,
 ) {
+	val cardShape = NemuriTheme.shape(16.dp)
 	Surface(
 		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(16.dp),
+		shape = cardShape,
 		border = BorderStroke(1.dp, NemuriTheme.colors.border),
 		modifier = Modifier
 			.fillMaxWidth()
-			.clip(RoundedCornerShape(16.dp))
+			.clip(cardShape)
 			.clickable(onClick = onOpenDuplicates),
 	) {
 		Column(
@@ -867,7 +908,7 @@ private fun DuplicateGuardStatusCard(
 				) {
 					Surface(
 						color = NemuriTheme.colors.tealContainer,
-						shape = RoundedCornerShape(12.dp),
+						shape = NemuriTheme.shape(12.dp),
 						modifier = Modifier.size(40.dp),
 					) {
 						Box(contentAlignment = Alignment.Center) {
@@ -956,6 +997,7 @@ private fun VisualReaderPipelineCard(
 	onToggleNeuralUpscale: (Boolean) -> Unit,
 	onClearCache: () -> Unit,
 	onOpenReadingSettings: () -> Unit,
+	onOpenAiPreview: () -> Unit,
 	showAdvancedToggles: Boolean,
 	onToggleDescreen: (Boolean) -> Unit = {},
 	onToggleInkLevels: (Boolean) -> Unit = {},
@@ -1016,6 +1058,7 @@ private fun VisualReaderPipelineCard(
 					modifier = Modifier.fillMaxWidth(),
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
 				) {
+					val presetShape = NemuriTheme.shape(10.dp)
 					listOf(
 						ReaderShaderPreset.OFF to "Off",
 						ReaderShaderPreset.ANIME4K to "Anime4K",
@@ -1025,14 +1068,14 @@ private fun VisualReaderPipelineCard(
 						val selected = uiState.readerShaderPreset == preset
 						Surface(
 							color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(10.dp),
+							shape = presetShape,
 							border = BorderStroke(
 								1.dp,
 								if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 							),
 							modifier = Modifier
 								.weight(1f)
-								.clip(RoundedCornerShape(10.dp))
+								.clip(presetShape)
 								.clickable(enabled = UpscaleEffect.isSupported || preset == ReaderShaderPreset.OFF) {
 									onSelectShaderPreset(preset)
 								},
@@ -1048,6 +1091,40 @@ private fun VisualReaderPipelineCard(
 								modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
 							)
 						}
+					}
+				}
+
+				val previewBtnShape = NemuriTheme.shape(12.dp)
+				Surface(
+					color = NemuriTheme.colors.tealContainer,
+					shape = previewBtnShape,
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.65f)),
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(top = 2.dp)
+						.clip(previewBtnShape)
+						.clickable(onClick = onOpenAiPreview),
+				) {
+					Row(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 12.dp, vertical = 10.dp),
+						verticalAlignment = Alignment.CenterVertically,
+						horizontalArrangement = Arrangement.Center,
+					) {
+						Icon(
+							imageVector = Icons.Default.AutoAwesome,
+							contentDescription = null,
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(17.dp),
+						)
+						Spacer(Modifier.width(8.dp))
+						Text(
+							text = "Interactive AI Upscaling Preview",
+							style = MaterialTheme.typography.labelLarge,
+							fontWeight = FontWeight.Bold,
+							color = NemuriTheme.colors.cyan,
+						)
 					}
 				}
 			}
@@ -1160,7 +1237,7 @@ private fun AiBrainOverviewCard(
 				) {
 					Surface(
 						color = NemuriTheme.colors.mergePurple.copy(alpha = 0.16f),
-						shape = RoundedCornerShape(10.dp),
+						shape = NemuriTheme.shape(10.dp),
 						modifier = Modifier.size(38.dp),
 					) {
 						Box(contentAlignment = Alignment.Center) {
@@ -1184,12 +1261,14 @@ private fun AiBrainOverviewCard(
 							)
 							Surface(
 								color = NemuriTheme.colors.mergePurple.copy(alpha = 0.16f),
-								shape = RoundedCornerShape(999.dp),
+								shape = NemuriTheme.pillShape(),
 							) {
 								Text(
-									text = uiState.aiModeLabel,
+									text = uiState.activeAiEngineLabel,
 									style = MaterialTheme.typography.labelSmall,
 									color = NemuriTheme.colors.mergePurple,
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
 									modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
 								)
 							}
@@ -1206,7 +1285,7 @@ private fun AiBrainOverviewCard(
 					onClick = onTestAiBackend,
 					enabled = !uiState.isTestingAi,
 					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.65f)),
-					shape = RoundedCornerShape(10.dp),
+					shape = NemuriTheme.shape(10.dp),
 					contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
 				) {
 					if (uiState.isTestingAi) {
@@ -1233,7 +1312,7 @@ private fun AiBrainOverviewCard(
 			uiState.aiTestResult?.let { res ->
 				Surface(
 					color = if (res.ok) NemuriTheme.colors.healthy.copy(alpha = 0.14f) else NemuriTheme.colors.danger.copy(alpha = 0.14f),
-					shape = RoundedCornerShape(10.dp),
+					shape = NemuriTheme.shape(10.dp),
 					border = BorderStroke(
 						1.dp,
 						if (res.ok) NemuriTheme.colors.healthy.copy(alpha = 0.5f) else NemuriTheme.colors.danger.copy(alpha = 0.5f),
@@ -1293,18 +1372,19 @@ private fun AiBrainOverviewCard(
 				modifier = Modifier.fillMaxWidth(),
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 			) {
+				val depthShape = NemuriTheme.shape(10.dp)
 				RecapDepth.entries.forEach { depth ->
 					val selected = uiState.aiRecapDepth == depth
 					Surface(
 						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(10.dp),
+						shape = depthShape,
 						border = BorderStroke(
 							1.dp,
 							if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 						),
 						modifier = Modifier
 							.weight(1f)
-							.clip(RoundedCornerShape(10.dp))
+							.clip(depthShape)
 							.clickable { onSelectRecapDepth(depth) },
 					) {
 						Row(
@@ -1389,7 +1469,7 @@ private fun AiBrainOverviewCard(
 				}
 				Surface(
 					color = NemuriTheme.colors.tealContainer,
-					shape = RoundedCornerShape(8.dp),
+					shape = NemuriTheme.shape(8.dp),
 					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f)),
 				) {
 					Text(
@@ -1405,7 +1485,7 @@ private fun AiBrainOverviewCard(
 			OutlinedButton(
 				onClick = onOpenAiSettings,
 				border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)),
-				shape = RoundedCornerShape(12.dp),
+				shape = NemuriTheme.shape(12.dp),
 				modifier = Modifier.fillMaxWidth(),
 			) {
 				Icon(
@@ -1434,7 +1514,7 @@ private fun InlineStatPill(
 ) {
 	Surface(
 		color = NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(12.dp),
+		shape = NemuriTheme.shape(12.dp),
 		border = BorderStroke(1.dp, NemuriTheme.colors.border),
 		modifier = modifier,
 	) {
@@ -1465,7 +1545,7 @@ private fun InlineStatPill(
 private fun OnDeviceSafetyBanner() {
 	Surface(
 		color = NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(16.dp),
+		shape = NemuriTheme.shape(16.dp),
 		border = BorderStroke(1.dp, NemuriTheme.colors.border),
 		modifier = Modifier.fillMaxWidth(),
 	) {
@@ -1504,12 +1584,13 @@ private fun TelemetryKpiCard(
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
+	val kpiShape = NemuriTheme.shape(14.dp)
 	Surface(
 		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(14.dp),
+		shape = kpiShape,
 		modifier = modifier
-			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(14.dp))
-			.clip(RoundedCornerShape(14.dp))
+			.border(1.dp, NemuriTheme.colors.border, kpiShape)
+			.clip(kpiShape)
 			.clickable(onClick = onClick),
 	) {
 		Column(
@@ -1542,13 +1623,14 @@ private fun EnhanceToolCard(
 	badgeTint: Color = NemuriTheme.colors.cyan,
 	onClick: () -> Unit,
 ) {
+	val toolCardShape = NemuriTheme.shape(16.dp)
 	Surface(
 		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(16.dp),
+		shape = toolCardShape,
 		modifier = Modifier
 			.fillMaxWidth()
-			.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(16.dp))
-			.clip(RoundedCornerShape(16.dp))
+			.border(1.dp, NemuriTheme.colors.border, toolCardShape)
+			.clip(toolCardShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -1557,7 +1639,7 @@ private fun EnhanceToolCard(
 		) {
 			Surface(
 				color = NemuriTheme.colors.tealContainer,
-				shape = RoundedCornerShape(12.dp),
+				shape = NemuriTheme.shape(12.dp),
 				modifier = Modifier.size(42.dp),
 			) {
 				Box(contentAlignment = Alignment.Center) {
@@ -1586,7 +1668,7 @@ private fun EnhanceToolCard(
 					if (!badge.isNullOrBlank()) {
 						Surface(
 							color = badgeTint.copy(alpha = 0.16f),
-							shape = RoundedCornerShape(999.dp),
+							shape = NemuriTheme.pillShape(),
 						) {
 							Text(
 								text = badge,

@@ -23,6 +23,8 @@ import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.db.TABLE_FAVOURITES
 import org.koitharu.kotatsu.core.db.TABLE_FAVOURITE_CATEGORIES
+import org.koitharu.kotatsu.core.github.AppUpdateRepository
+import org.koitharu.kotatsu.core.github.AppVersion
 import org.koitharu.kotatsu.core.model.FavouriteCategory
 import org.koitharu.kotatsu.core.model.getTitle
 import org.koitharu.kotatsu.core.model.isNovelSource
@@ -79,6 +81,15 @@ data class LibraryUiState(
 	val isTrackerRunning: Boolean = false,
 	val showAllCategoryTab: Boolean = true,
 	val isLoaded: Boolean = false,
+	val availableUpdate: AppVersion? = null,
+	val isDownloadingUpdate: Boolean = false,
+	val updateDownloadProgress: Float? = null,
+)
+
+private data class LibraryUpdateSnapshot(
+	val availableUpdate: AppVersion? = null,
+	val isDownloading: Boolean = false,
+	val progress: Float? = null,
 )
 
 private data class LibraryControls(
@@ -114,12 +125,31 @@ class LibraryViewModel @Inject constructor(
 	private val trackingRepository: TrackingRepository,
 	private val downloadScheduler: DownloadWorker.Scheduler,
 	private val trackScheduler: TrackWorker.Scheduler,
+	private val appUpdateRepository: AppUpdateRepository,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
 
 	private val controls = MutableStateFlow(LibraryControls())
 	private val selectedIdsFlow = MutableStateFlow<Set<Long>>(emptySet())
+
+	init {
+		viewModelScope.launch(Dispatchers.IO) {
+			appUpdateRepository.fetchUpdate(force = false)
+		}
+	}
+
+	private val updateFlow = combine(
+		appUpdateRepository.observeAvailableUpdate(),
+		appUpdateRepository.observeIsDownloading(),
+		appUpdateRepository.observeDownloadProgress(),
+	) { version, isDownloading, progress ->
+		LibraryUpdateSnapshot(
+			availableUpdate = version,
+			isDownloading = isDownloading,
+			progress = progress,
+		)
+	}
 
 	private val prefsFlow = settings.observeChanges()
 		.filter { key ->
@@ -199,7 +229,8 @@ class LibraryViewModel @Inject constructor(
 		},
 		controls,
 		selectedIdsFlow,
-	) { (list, supp, prefs), ctrl, selected ->
+		updateFlow,
+	) { (list, supp, prefs), ctrl, selected, upd ->
 		val effectiveCatId = resolveCategoryId(ctrl.categoryId, supp.categories, prefs.showAllTab)
 		val effectiveSort = supp.categories.firstOrNull { it.id == effectiveCatId }?.order ?: prefs.allSortOrder
 		val q = ctrl.query.trim()
@@ -241,6 +272,9 @@ class LibraryViewModel @Inject constructor(
 			isTrackerRunning = supp.isTrackerRunning,
 			showAllCategoryTab = prefs.showAllTab,
 			isLoaded = true,
+			availableUpdate = upd.availableUpdate,
+			isDownloadingUpdate = upd.isDownloading,
+			updateDownloadProgress = upd.progress,
 		)
 	}
 		.flowOn(Dispatchers.IO)
@@ -252,8 +286,25 @@ class LibraryViewModel @Inject constructor(
 				gridColumns = gridColumnsFromPref(settings.gridSize),
 				sortOrder = settings.allFavoritesSortOrder,
 				showAllCategoryTab = settings.isAllFavouritesVisible,
+				availableUpdate = appUpdateRepository.observeAvailableUpdate().value,
+				isDownloadingUpdate = appUpdateRepository.observeIsDownloading().value,
+				updateDownloadProgress = appUpdateRepository.observeDownloadProgress().value,
 			),
 		)
+
+	fun installAvailableUpdate() {
+		val version = uiState.value.availableUpdate ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			appUpdateRepository.downloadAndInstallUpdate(version).onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to download update")
+			}
+		}
+	}
+
+	fun dismissAvailableUpdate() {
+		val version = uiState.value.availableUpdate ?: return
+		appUpdateRepository.dismissUpdate(version.id)
+	}
 
 	fun selectCategory(categoryId: Long) {
 		selectedIdsFlow.value = emptySet()

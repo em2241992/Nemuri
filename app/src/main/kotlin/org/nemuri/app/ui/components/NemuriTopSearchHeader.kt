@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -147,16 +146,18 @@ fun NemuriTopSearchHeader(
 			horizontalArrangement = Arrangement.spacedBy(6.dp),
 		) {
 			val hasActiveFilters = activeFilterCount > 0
+			val searchBarShape = NemuriTheme.shape(24.dp)
+			val innerButtonShape = NemuriTheme.shape(17.dp)
 			Surface(
 				color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.78f),
-				shape = RoundedCornerShape(24.dp),
+				shape = searchBarShape,
 				modifier = Modifier
 					.weight(1f)
 					.height(44.dp)
 					.border(
 						width = 1.dp,
 						color = if (hasActiveFilters) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-						shape = RoundedCornerShape(24.dp),
+						shape = searchBarShape,
 					),
 			) {
 				Row(
@@ -166,7 +167,7 @@ fun NemuriTopSearchHeader(
 					Box(
 						modifier = Modifier
 							.size(34.dp)
-							.clip(RoundedCornerShape(17.dp))
+							.clip(innerButtonShape)
 							.clickable(onClick = onSearchIconClick),
 						contentAlignment = Alignment.Center,
 					) {
@@ -223,7 +224,7 @@ fun NemuriTopSearchHeader(
 						Box(
 							modifier = Modifier
 								.size(32.dp)
-								.clip(RoundedCornerShape(16.dp))
+								.clip(innerButtonShape)
 								.clickable { searchField.clear() },
 							contentAlignment = Alignment.Center,
 						) {
@@ -240,7 +241,7 @@ fun NemuriTopSearchHeader(
 						Box(
 							modifier = Modifier
 								.size(32.dp)
-								.clip(RoundedCornerShape(16.dp))
+								.clip(innerButtonShape)
 								.clickable(onClick = onPillTrailingClick),
 							contentAlignment = Alignment.Center,
 						) {
@@ -280,12 +281,17 @@ fun HeaderSquareAction(
 	showBadgeDot: Boolean = false,
 	tint: androidx.compose.ui.graphics.Color = NemuriTheme.colors.textSecondary,
 ) {
+	val actionShape = NemuriTheme.shape(14.dp)
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
 	Surface(
 		color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
-		shape = RoundedCornerShape(12.dp),
+		shape = actionShape,
 		modifier = Modifier
 			.size(40.dp)
-			.clip(RoundedCornerShape(12.dp))
+			.then(
+				if (isSharp) Modifier.border(1.dp, NemuriTheme.colors.border, actionShape) else Modifier,
+			)
+			.clip(actionShape)
 			.clickable(onClick = onClick),
 	) {
 		Box(contentAlignment = Alignment.Center) {

@@ -99,6 +99,7 @@ import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.ListMode
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
+import org.koitharu.kotatsu.core.prefs.QuickScrollButtonsMode
 import org.koitharu.kotatsu.core.prefs.SelectionMenuStyle
 import kotlin.math.roundToInt
 import org.koitharu.kotatsu.list.domain.ListSortOrder
@@ -113,6 +114,7 @@ import org.nemuri.app.ui.components.NemuriListNavigationOverlay
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
+import org.nemuri.app.ui.components.NemuriUpdateBanner
 import org.nemuri.app.ui.components.gridDragRangeSelect
 import org.nemuri.app.ui.components.listDragRangeSelect
 import org.nemuri.app.ui.components.pinchToStepColumns
@@ -223,11 +225,26 @@ fun LibraryScreen(
 				)
 			}
 
+			uiState.availableUpdate?.let { update ->
+				if (!isSelectionMode) {
+					NemuriUpdateBanner(
+						version = update,
+						isDownloading = uiState.isDownloadingUpdate,
+						downloadProgress = uiState.updateDownloadProgress,
+						onInstall = viewModel::installAvailableUpdate,
+						onDismiss = viewModel::dismissAvailableUpdate,
+					)
+				}
+			}
+
 			// Row 1: Categories Row inside subtle tonal container track with Folder icon badge
 			if (uiState.categories.isNotEmpty() || uiState.items.isNotEmpty() || uiState.totalLibraryCount > 0) {
+				val trackShape = NemuriTheme.shape(16.dp)
+				val badgeShape = NemuriTheme.shape(10.dp)
+				val pillShape = NemuriTheme.pillShape()
 				Surface(
 					color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
-					shape = RoundedCornerShape(16.dp),
+					shape = trackShape,
 					border = BorderStroke(1.dp, NemuriTheme.colors.border),
 					modifier = Modifier
 						.fillMaxWidth()
@@ -242,7 +259,7 @@ fun LibraryScreen(
 					) {
 						Surface(
 							color = NemuriTheme.colors.tealContainer,
-							shape = RoundedCornerShape(10.dp),
+							shape = badgeShape,
 							border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
 							modifier = Modifier.size(30.dp),
 						) {
@@ -294,10 +311,10 @@ fun LibraryScreen(
 							}
 							Surface(
 								color = NemuriTheme.colors.card,
-								shape = RoundedCornerShape(999.dp),
+								shape = pillShape,
 								modifier = Modifier
-									.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(999.dp))
-									.clip(RoundedCornerShape(999.dp))
+									.border(1.dp, NemuriTheme.colors.border, pillShape)
+									.clip(pillShape)
 									.clickable {
 										newCategoryName = ""
 										showCreateCategoryDialog = true
@@ -327,10 +344,12 @@ fun LibraryScreen(
 				}
 			}
 
-			// Row 2: Status Filters inside matching tonal container track for visual consistency with Row 1
+			// Row 2: Status Filters inside matching tonal container track with Veri-Lys secondary accent badge
+			val statusTrackShape = NemuriTheme.shape(16.dp)
+			val statusBadgeShape = NemuriTheme.shape(10.dp)
 			Surface(
 				color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
-				shape = RoundedCornerShape(16.dp),
+				shape = statusTrackShape,
 				border = BorderStroke(1.dp, NemuriTheme.colors.border),
 				modifier = Modifier
 					.fillMaxWidth()
@@ -344,16 +363,16 @@ fun LibraryScreen(
 					horizontalArrangement = Arrangement.spacedBy(8.dp),
 				) {
 					Surface(
-						color = NemuriTheme.colors.tealContainer,
-						shape = RoundedCornerShape(10.dp),
-						border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
+						color = NemuriTheme.colors.secondaryContainer,
+						shape = statusBadgeShape,
+						border = BorderStroke(1.dp, NemuriTheme.colors.secondary.copy(alpha = 0.45f)),
 						modifier = Modifier.size(30.dp),
 					) {
 						Box(contentAlignment = Alignment.Center) {
 							Icon(
 								imageVector = Icons.Default.FilterList,
 								contentDescription = "Status filters",
-								tint = NemuriTheme.colors.cyan,
+								tint = NemuriTheme.colors.secondary,
 								modifier = Modifier.size(16.dp),
 							)
 						}
@@ -988,6 +1007,18 @@ fun LibraryScreen(
 					checked = layoutPrefs.showBottomProgressBar,
 					onCheckedChange = { appSettings.showBottomProgressBar = it },
 				)
+				LibraryBadgeToggleRow(
+					title = "Floating ▲ / ▼ Scroll Buttons",
+					subtitle = "Show quick jump-to-top / bottom capsule on long lists",
+					checked = layoutPrefs.quickScrollButtonsMode != QuickScrollButtonsMode.OFF,
+					onCheckedChange = { enabled ->
+						appSettings.quickScrollButtonsMode = if (enabled) {
+							QuickScrollButtonsMode.LONG_LISTS_ONLY
+						} else {
+							QuickScrollButtonsMode.OFF
+						}
+					},
+				)
 
 				HorizontalDivider(color = NemuriTheme.colors.border)
 
@@ -1169,16 +1200,17 @@ private fun LibraryCategoryPill(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val pillShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.card,
-		shape = RoundedCornerShape(999.dp),
+		shape = pillShape,
 		modifier = Modifier
 			.border(
 				1.dp,
 				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-				RoundedCornerShape(999.dp),
+				pillShape,
 			)
-			.clip(RoundedCornerShape(999.dp))
+			.clip(pillShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -1196,15 +1228,19 @@ private fun LibraryCategoryPill(
 			)
 			if (count != null) {
 				Surface(
-					color = if (selected) NemuriTheme.colors.onCyan.copy(alpha = 0.18f) else NemuriTheme.colors.surfaceElevated,
-					shape = RoundedCornerShape(999.dp),
+					color = if (selected) {
+						NemuriTheme.colors.onCyan.copy(alpha = 0.20f)
+					} else {
+						NemuriTheme.colors.secondaryContainer
+					},
+					shape = pillShape,
 				) {
 					Text(
 						text = count.toString(),
 						style = MaterialTheme.typography.labelSmall,
 						fontSize = 10.sp,
 						fontWeight = FontWeight.Bold,
-						color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.textMuted,
+						color = if (selected) NemuriTheme.colors.onCyan else NemuriTheme.colors.secondary,
 						maxLines = 1,
 						modifier = Modifier.padding(horizontal = 5.dp, vertical = 0.5.dp),
 					)
@@ -1222,16 +1258,17 @@ private fun LibraryStatusChip(
 	onClick: () -> Unit,
 ) {
 	val activeTint = dotColor ?: NemuriTheme.colors.cyan
+	val pillShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) activeTint.copy(alpha = 0.16f) else Color.Transparent,
-		shape = RoundedCornerShape(999.dp),
+		shape = pillShape,
 		modifier = Modifier
 			.border(
 				1.dp,
 				if (selected) activeTint else NemuriTheme.colors.border.copy(alpha = 0.85f),
-				RoundedCornerShape(999.dp),
+				pillShape,
 			)
-			.clip(RoundedCornerShape(999.dp))
+			.clip(pillShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -1264,16 +1301,17 @@ private fun LibraryChip(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val pillShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(999.dp),
+		shape = pillShape,
 		modifier = Modifier
 			.border(
 				1.dp,
 				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-				RoundedCornerShape(999.dp),
+				pillShape,
 			)
-			.clip(RoundedCornerShape(999.dp))
+			.clip(pillShape)
 			.clickable(onClick = onClick),
 	) {
 		Text(
@@ -1293,17 +1331,18 @@ private fun LibrarySheetCompactRow(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val rowShape = NemuriTheme.shape(12.dp)
 	Surface(
 		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(12.dp),
+		shape = rowShape,
 		modifier = Modifier
 			.fillMaxWidth()
 			.border(
 				1.dp,
 				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-				RoundedCornerShape(12.dp),
+				rowShape,
 			)
-			.clip(RoundedCornerShape(12.dp))
+			.clip(rowShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(

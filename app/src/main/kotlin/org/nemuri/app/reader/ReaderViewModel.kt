@@ -191,6 +191,7 @@ data class ReaderUiState(
 	val doublePagesSensitivity: Float = 0.5f,
 	val boundsRevision: Int = 0,
 	val showPageNumbers: Boolean = false,
+	val isZoomButtonsEnabled: Boolean = false,
 	val chapterStartPageNumber: Int = 1,
 	val chapterEndPageNumber: Int = 1,
 	val chapterTotalPages: Int = 0,
@@ -270,6 +271,7 @@ class ReaderViewModel @Inject constructor(
 				isDoubleOnFoldable = settings.isReaderDoubleOnFoldable,
 				doublePagesSensitivity = settings.readerDoublePagesSensitivity,
 				showPageNumbers = settings.isPagesNumbersEnabled,
+				isZoomButtonsEnabled = settings.isReaderZoomButtonsEnabled,
 				epubTheme = settings.epubTheme,
 				epubFontSize = settings.epubFontSize,
 				epubLineHeight = settings.epubLineHeight,
@@ -464,6 +466,31 @@ class ReaderViewModel @Inject constructor(
 	fun setShowPageNumbers(enabled: Boolean) {
 		settings.setPagesNumbersEnabled(enabled)
 		_uiState.update { it.copy(showPageNumbers = enabled) }
+	}
+
+	fun setZoomButtonsEnabled(enabled: Boolean) {
+		settings.isReaderZoomButtonsEnabled = enabled
+		_uiState.update { it.copy(isZoomButtonsEnabled = enabled) }
+	}
+
+	fun applyBedtimeWarmPreset(enabled: Boolean) {
+		if (enabled) {
+			val cur = _uiState.value.colorFilter
+			setColorFilter(cur.copy(contrast = cur.contrast.coerceAtLeast(0.14f), isBookBackground = true))
+			setColorWarmth(0.55f)
+			if (UpscaleEffect.isSupported) {
+				setShaderPreset(ReaderShaderPreset.FSR_1)
+				setShaderInkLevels(true)
+				setShaderDescreen(false)
+			}
+		} else {
+			val cur = _uiState.value.colorFilter
+			if (cur.isBookBackground || _uiState.value.colorWarmth > WARMTH_SYNC_THRESHOLD) {
+				val nextContrast = if (kotlin.math.abs(cur.contrast - 0.14f) < 0.02f) 0f else cur.contrast
+				setColorFilter(cur.copy(contrast = nextContrast, isBookBackground = false))
+				setColorWarmth(0f)
+			}
+		}
 	}
 
 	fun setVolumeButtonsEnabled(enabled: Boolean) {

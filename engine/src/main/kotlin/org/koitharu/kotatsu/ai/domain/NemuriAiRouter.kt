@@ -14,9 +14,55 @@ class NemuriAiRouter @Inject constructor(
 	private val remoteAiClient: RemoteAiClient,
 ) {
 
-	fun currentMode(): AiMode = AiMode.fromKey(settings.aiMode)
+	fun hasReadyLocalModel(): Boolean = localLlmClient.hasReadyModel()
+
+	/**
+	 * Verifies that if LOCAL_MODEL is selected, a real `.litertlm` file exists on disk.
+	 * If the user deleted the model file, automatically clears stale mode and falls back to AUTO.
+	 */
+	fun sanitizeDeletedLocalModel(): AiMode {
+		val raw = AiMode.fromKey(settings.aiMode)
+		if (raw == AiMode.LOCAL_MODEL && !localLlmClient.hasReadyModel()) {
+			settings.aiMode = AiMode.AUTO.key
+			return AiMode.AUTO
+		}
+		return raw
+	}
+
+	fun currentMode(): AiMode = sanitizeDeletedLocalModel()
 
 	fun isAiEnabled(): Boolean = currentMode() != AiMode.OFF
+
+	suspend fun resolveActiveEngineDisplayLabel(): String = when (currentMode()) {
+		AiMode.OFF -> "Off"
+		AiMode.GEMINI_NANO -> {
+			val diag = geminiNanoClient.checkDiagnostics()
+			if (diag.availability == NanoAvailability.AVAILABLE) {
+				if (diag.supportsOpenPrompt) "Gemini Nano (On-Device)" else "Gemini Nano Summarizer"
+			} else {
+				"Gemini Nano (${diag.availability.name.lowercase().replaceFirstChar { it.uppercase() }})"
+			}
+		}
+		AiMode.LOCAL_MODEL -> localLlmClient.activeModelLabel()
+		AiMode.REMOTE_OPENAI -> remoteEngineLabel()
+		AiMode.GEMINI_API -> "Gemini (${settings.aiGeminiModel})"
+		AiMode.AUTO -> {
+			val diag = geminiNanoClient.checkDiagnostics()
+			when {
+				diag.availability == NanoAvailability.AVAILABLE && diag.supportsOpenPrompt ->
+					"Gemini Nano (On-Device)"
+				diag.availability == NanoAvailability.AVAILABLE && diag.supportsSummarization ->
+					"Gemini Nano Summarizer"
+				secretStore.hasGeminiApiKey() ->
+					"Gemini (${settings.aiGeminiModel})"
+				hasRemoteConfigured() ->
+					remoteEngineLabel()
+				localLlmClient.hasReadyModel() ->
+					localLlmClient.activeModelLabel()
+				else -> "Auto (Reading Trail)"
+			}
+		}
+	}
 
 	suspend fun checkNanoAvailability(): NanoAvailability = geminiNanoClient.checkAvailability()
 

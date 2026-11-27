@@ -29,15 +29,43 @@ class WhereWasIRecapUseCase @Inject constructor(
 	private val mangaRepositoryFactoryProvider: Provider<MangaRepository.Factory>,
 ) {
 
+	private val depthMemoryCache = java.util.concurrent.ConcurrentHashMap<String, MangaAiRecapEntity>()
+
+	private fun cacheKey(mangaId: Long, chapterId: Long, readCount: Int, depth: RecapDepth): String =
+		"$mangaId:$chapterId:$readCount:${depth.key}"
+
+	private fun isStaleDeletedLocalLabel(engineUsed: String): Boolean {
+		if (aiRouter.hasReadyLocalModel()) return false
+		val lower = engineUsed.lowercase()
+		return lower.startsWith("local ") || ".litertlm" in lower || ".gguf" in lower
+	}
+
 	fun observeCached(mangaId: Long): Flow<MangaAiRecapEntity?> =
 		db.getMangaAiRecapDao().observe(mangaId)
 
 	suspend fun clearCache(mangaId: Long) = withContext(Dispatchers.IO) {
+		val prefix = "$mangaId:"
+		depthMemoryCache.keys.removeAll { it.startsWith(prefix) }
 		db.getMangaAiRecapDao().delete(mangaId)
 	}
 
 	suspend fun clearAllCaches() = withContext(Dispatchers.IO) {
+		depthMemoryCache.clear()
 		db.getMangaAiRecapDao().deleteAll()
+	}
+
+	fun getCachedForDepth(
+		mangaId: Long,
+		chapterId: Long,
+		readCount: Int,
+		depth: RecapDepth,
+	): MangaAiRecapEntity? {
+		val cached = depthMemoryCache[cacheKey(mangaId, chapterId, readCount, depth)] ?: return null
+		if (isStaleDeletedLocalLabel(cached.engineUsed)) {
+			depthMemoryCache.remove(cacheKey(mangaId, chapterId, readCount, depth))
+			return null
+		}
+		return cached
 	}
 
 	suspend fun generateRecap(
@@ -77,14 +105,33 @@ class WhereWasIRecapUseCase @Inject constructor(
 		}
 		val readCount = readChapters.size
 
+		// Sanitize deleted local .litertlm models before checking cache or generating
+		aiRouter.sanitizeDeletedLocalModel()
+
+		val memKey = cacheKey(manga.id, targetChapterId, readCount, depth)
+		if (!forceRefresh) {
+			depthMemoryCache[memKey]?.let { memCached ->
+				if (!isStaleDeletedLocalLabel(memCached.engineUsed) &&
+					(memCached.isAiGenerated || !aiRouter.isAiEnabled())
+				) {
+					dao.upsert(memCached)
+					return@withContext memCached
+				} else {
+					depthMemoryCache.remove(memKey)
+				}
+			}
+		}
+
 		val existing = dao.find(manga.id)
 		if (!forceRefresh &&
 			existing != null &&
 			existing.lastChapterId == targetChapterId &&
 			existing.chaptersReadCount == readCount &&
 			existing.parsedDepth() == depth &&
+			!isStaleDeletedLocalLabel(existing.engineUsed) &&
 			(existing.isAiGenerated || !aiRouter.isAiEnabled())
 		) {
+			depthMemoryCache[memKey] = existing
 			return@withContext existing
 		}
 
@@ -121,14 +168,16 @@ class WhereWasIRecapUseCase @Inject constructor(
 		val aiResult = if (aiRouter.isAiEnabled()) {
 			val systemPrompt = when (depth) {
 				RecapDepth.BRIEF ->
-					"You write Nemuri's spoiler-safe 'Where Was I?' refresher for returning readers. " +
-						"Write a crisp, atmospheric 2-sentence hook in natural prose reminding the reader of the story's core premise and their current stopping point at $lastReadChapterTitle. " +
-						"Do NOT use robotic section labels like 'Premise:' or 'Stopping Point:', and NEVER reveal or hint at anything occurring after $lastReadChapterTitle."
+					"You write Nemuri's spoiler-safe 'Where Was I?' quick hook for a returning reader. " +
+						"Respond in STRICTLY 2 punchy sentences (~35–55 words total): name who the lead is, the core hook, and the exact checkpoint (Paused at $lastReadChapterTitle). " +
+						"Zero filler, zero bullet lists, zero headers, and NEVER reveal or hint at anything occurring after $lastReadChapterTitle."
 
 				RecapDepth.DETAILED ->
-					"You write Nemuri's 'Where Was I?' story recap in natural, engaging prose for a returning reader paused at $lastReadChapterTitle. " +
-						"Explicitly name concrete characters, key relationships, faction conflicts, abilities, and concrete plot events established up to and including $lastReadChapterTitle. " +
-						"Write cohesive paragraphs or flowing sentences with ZERO robotic headers (never write 'Premise:', 'Stopping Point:', or 'Summary:'). " +
+					"You write Nemuri's deep, structured 'Where Was I?' story recap for a returning reader paused at $lastReadChapterTitle. " +
+						"Format your answer into 3 clearly titled bullet sections so it is dramatically richer than a short blurb:\n" +
+						"• Characters & Dynamics: Name the protagonist, key allies/rivals, abilities, and relationships established so far.\n" +
+						"• Story Progression So Far: Weave concrete plot beats and chapter/volume milestones from the read chapters leading up to $lastReadChapterTitle.\n" +
+						"• Where You Left Off: Anchor the exact current stakes and tension right at $lastReadChapterTitle.\n" +
 						"STRICT SPOILER QUARANTINE: NEVER mention, foreshadow, or hint at any events, twists, or character fates occurring AFTER $lastReadChapterTitle."
 			}
 
@@ -149,8 +198,8 @@ class WhereWasIRecapUseCase @Inject constructor(
 					appendLine(narrativeStorySheet)
 					appendLine()
 					append(
-						"Write a crisp 2-sentence atmospheric hook for \"${manga.title}\" anchored at $lastReadChapterTitle. " +
-							"Keep the prose natural with zero 'Premise:' labels and zero spoilers past $lastReadChapterTitle.",
+						"Write STRICTLY 2 punchy sentences (~35–55 words) for \"${manga.title}\": who the lead is, the core hook, " +
+							"and the exact checkpoint (Paused at $lastReadChapterTitle). Zero filler and zero spoilers past $lastReadChapterTitle.",
 					)
 				}
 
@@ -158,9 +207,9 @@ class WhereWasIRecapUseCase @Inject constructor(
 					appendLine(narrativeStorySheet)
 					appendLine()
 					append(
-						"Write a rich 4-6 sentence natural-prose recap of \"${manga.title}\" covering concrete characters, key relationships, " +
-							"faction conflicts, and plot events up to and including $lastReadChapterTitle. " +
-							"Do not use headers like 'Premise:' or 'Stopping Point:', and strictly forbid anything after $lastReadChapterTitle.",
+						"Write a structured 3-part breakdown for \"${manga.title}\" using these exact bullet headings: " +
+							"• Characters & Dynamics, • Story Progression So Far, and • Where You Left Off (anchored at $lastReadChapterTitle). " +
+							"Weave concrete character details and read chapter milestones up to $lastReadChapterTitle with ZERO spoilers after $lastReadChapterTitle.",
 					)
 				}
 			}
@@ -169,7 +218,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 				systemPrompt = systemPrompt,
 				userPrompt = rawUserPrompt,
 				articleText = narrativeStorySheet,
-				maxTokens = if (depth == RecapDepth.BRIEF) 200 else 520,
+				maxTokens = if (depth == RecapDepth.BRIEF) 140 else 550,
 				recapDepth = depth,
 			).getOrNull()
 		} else {
@@ -186,6 +235,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 				isAiGenerated = true,
 				updatedAt = System.currentTimeMillis(),
 			)
+			depthMemoryCache[memKey] = entity
 			dao.upsert(entity)
 			return@withContext entity
 		}
@@ -196,8 +246,10 @@ class WhereWasIRecapUseCase @Inject constructor(
 			existing.isAiGenerated &&
 			existing.lastChapterId == targetChapterId &&
 			existing.parsedDepth() == depth &&
+			!isStaleDeletedLocalLabel(existing.engineUsed) &&
 			!forceRefresh
 		) {
+			depthMemoryCache[memKey] = existing
 			return@withContext existing
 		}
 
@@ -208,6 +260,7 @@ class WhereWasIRecapUseCase @Inject constructor(
 			currentChapter = currentChapter,
 			recentTitles = recentTitles,
 			novelExcerpt = novelExcerpt,
+			depth = depth,
 		)
 		val fallbackEntity = MangaAiRecapEntity(
 			mangaId = manga.id,
@@ -218,7 +271,8 @@ class WhereWasIRecapUseCase @Inject constructor(
 			isAiGenerated = false,
 			updatedAt = System.currentTimeMillis(),
 		)
-		if (existing == null || !existing.isAiGenerated) {
+		depthMemoryCache[memKey] = fallbackEntity
+		if (existing == null || !existing.isAiGenerated || isStaleDeletedLocalLabel(existing.engineUsed)) {
 			dao.upsert(fallbackEntity)
 		}
 		fallbackEntity
@@ -231,23 +285,51 @@ class WhereWasIRecapUseCase @Inject constructor(
 		currentChapter: MangaChapter?,
 		recentTitles: List<String>,
 		novelExcerpt: String,
+		depth: RecapDepth = RecapDepth.BRIEF,
 	): String = buildString {
-		if (currentChapter != null) {
-			val curName = currentChapter.title?.takeIf { it.isNotBlank() } ?: "Chapter ${currentChapter.number}"
-			append("Last read: $curName")
+		val curName = currentChapter?.let { ch ->
+			ch.title?.takeIf { it.isNotBlank() } ?: "Chapter ${ch.number}"
+		}
+		if (depth == RecapDepth.BRIEF) {
+			if (premisePlain.isNotBlank()) {
+				val firstSentence = premisePlain.substringBefore('.').trim().take(150)
+				append(firstSentence)
+				if (!firstSentence.endsWith(".") && !firstSentence.endsWith("!") && !firstSentence.endsWith("?")) append(".")
+				append(" ")
+			}
+			if (curName != null) {
+				append("Paused at $curName")
+				if (totalCount > 0) append(" ($readCount/$totalCount read)")
+				append(".")
+			} else {
+				append("Open a chapter to anchor your recap position.")
+			}
+			return@buildString
+		}
+
+		// Detailed structured fallback matching the 3-part format
+		append("• Characters & Dynamics: ")
+		if (premisePlain.isNotBlank()) {
+			append(premisePlain.take(360))
+			if (premisePlain.length > 360) append("…")
+		} else {
+			append("Series synopsis unavailable on this source.")
+		}
+		append("\n• Story Progression So Far: ")
+		if (recentTitles.size > 1) {
+			append(recentTitles.takeLast(6).joinToString(" → ") { it.substringAfter(": ") })
+		} else if (curName != null) {
+			append("Began reading at $curName.")
+		} else {
+			append("No chapters read yet.")
+		}
+		append("\n• Where You Left Off: ")
+		if (curName != null) {
+			append("Paused at $curName")
 			if (totalCount > 0) append(" ($readCount of $totalCount read)")
 			append(".")
 		} else {
-			append("Reading trail ready — open a chapter to anchor your recap position.")
-		}
-		if (recentTitles.size > 1) {
-			append("\nRecent: ")
-			append(recentTitles.takeLast(4).joinToString(" → ") { it.substringAfter(": ") })
-		}
-		if (premisePlain.isNotBlank()) {
-			append("\n\nPremise: ")
-			append(premisePlain.take(260))
-			if (premisePlain.length > 260) append("…")
+			append("Open a chapter to anchor your checkpoint.")
 		}
 		if (novelExcerpt.isNotBlank()) {
 			append("\n\nExcerpt: \"")

@@ -58,6 +58,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -87,6 +89,7 @@ import org.koitharu.kotatsu.core.prefs.CoverAspectRatio
 import org.koitharu.kotatsu.core.prefs.FeedScreenMode
 import org.koitharu.kotatsu.core.prefs.GridGutterDensity
 import org.koitharu.kotatsu.core.prefs.MangaCardStyle
+import org.koitharu.kotatsu.core.prefs.QuickScrollButtonsMode
 import org.koitharu.kotatsu.parsers.model.Manga
 import org.nemuri.app.browser.CloudFlareActivity
 import org.nemuri.app.browser.NemuriBrowserActivity
@@ -101,7 +104,9 @@ import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriListNavigationOverlay
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
+import org.nemuri.app.ui.components.NemuriSuggestionsOptInCard
 import org.nemuri.app.ui.components.NemuriTopSearchHeader
+import org.nemuri.app.ui.components.NemuriUpdateBanner
 import org.nemuri.app.ui.components.NonWrappingBadgeText
 import org.nemuri.app.ui.components.SnappingSwipeRow
 import org.nemuri.app.ui.components.cornerSafeBadgeInset
@@ -170,6 +175,16 @@ fun FeedScreen(
 			onTuneClick = { showFeedDisplaySheet = true },
 			onSettingsClick = onOpenSettings,
 		)
+
+		uiState.availableUpdate?.let { update ->
+			NemuriUpdateBanner(
+				version = update,
+				isDownloading = uiState.isDownloadingUpdate,
+				downloadProgress = uiState.updateDownloadProgress,
+				onInstall = viewModel::installAvailableUpdate,
+				onDismiss = viewModel::dismissAvailableUpdate,
+			)
+		}
 
 		// Row 1: 4 Equal-Width Persisted Mode Tabs (Hub | Updates | Gallery | For You)
 		Row(
@@ -287,6 +302,8 @@ fun FeedScreen(
 								viewModel.removeLogEntry(entry.logId)
 							}
 						},
+						onEnableSuggestions = viewModel::enablePersonalizedSuggestions,
+						onDismissSuggestions = viewModel::dismissSuggestionsPrompt,
 					)
 				}
 			}
@@ -354,6 +371,8 @@ fun FeedScreen(
 						onOpenDetails = onOpenDetails,
 						onOpenExplore = onOpenExplore,
 						onRefresh = { viewModel.refreshDiscovery(force = true) },
+						onEnableSuggestions = viewModel::enablePersonalizedSuggestions,
+						onDismissSuggestions = viewModel::dismissSuggestionsPrompt,
 					)
 				}
 			}
@@ -535,6 +554,52 @@ fun FeedScreen(
 							}
 						}
 					}
+				}
+
+				val quickButtonsEnabled = layoutPrefs.quickScrollButtonsMode != QuickScrollButtonsMode.OFF
+				HorizontalDivider(color = NemuriTheme.colors.border)
+				Row(
+					modifier = Modifier
+						.fillMaxWidth()
+						.clip(NemuriTheme.shape(10.dp))
+						.clickable {
+							appSettings.quickScrollButtonsMode = if (quickButtonsEnabled) {
+								QuickScrollButtonsMode.OFF
+							} else {
+								QuickScrollButtonsMode.LONG_LISTS_ONLY
+							}
+						}
+						.padding(vertical = 2.dp),
+					horizontalArrangement = Arrangement.SpaceBetween,
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+						Text(
+							text = "Floating ▲ / ▼ Scroll Buttons",
+							style = MaterialTheme.typography.bodyMedium,
+							fontWeight = FontWeight.Medium,
+							color = NemuriTheme.colors.textPrimary,
+						)
+						Text(
+							text = "Show quick jump-to-top / bottom capsule on long lists",
+							style = MaterialTheme.typography.labelSmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+					}
+					Switch(
+						checked = quickButtonsEnabled,
+						onCheckedChange = { enabled ->
+							appSettings.quickScrollButtonsMode = if (enabled) {
+								QuickScrollButtonsMode.LONG_LISTS_ONLY
+							} else {
+								QuickScrollButtonsMode.OFF
+							}
+						},
+						colors = SwitchDefaults.colors(
+							checkedThumbColor = NemuriTheme.colors.onCyan,
+							checkedTrackColor = NemuriTheme.colors.cyan,
+						),
+					)
 				}
 
 				if (uiState.enabledSources.isNotEmpty() || uiState.totalCount > 0) {
@@ -740,12 +805,13 @@ private fun FeedThumbActionPill(
 	modifier: Modifier = Modifier,
 ) {
 	val hasClearAction = readFeedCount > 0 || showClearWhenAllUnread
+	val capsuleShape = NemuriTheme.pillShape()
 	Surface(
 		color = NemuriTheme.colors.dock.copy(alpha = 0.95f),
-		shape = CircleShape,
+		shape = capsuleShape,
 		shadowElevation = 10.dp,
 		border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f)),
-		modifier = modifier.clip(CircleShape),
+		modifier = modifier.clip(capsuleShape),
 	) {
 		Row(
 			modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
@@ -755,7 +821,7 @@ private fun FeedThumbActionPill(
 			// 1. Check / Syncing
 			Row(
 				modifier = Modifier
-					.clip(CircleShape)
+					.clip(capsuleShape)
 					.clickable(onClick = onCheckNow)
 					.padding(horizontal = 10.dp, vertical = 6.dp),
 				verticalAlignment = Alignment.CenterVertically,
@@ -795,7 +861,7 @@ private fun FeedThumbActionPill(
 				)
 				Row(
 					modifier = Modifier
-						.clip(CircleShape)
+						.clip(capsuleShape)
 						.clickable(onClick = onMarkAllRead)
 						.padding(horizontal = 9.dp, vertical = 6.dp),
 					verticalAlignment = Alignment.CenterVertically,
@@ -828,7 +894,7 @@ private fun FeedThumbActionPill(
 				)
 				Row(
 					modifier = Modifier
-						.clip(CircleShape)
+						.clip(capsuleShape)
 						.combinedClickable(
 							onClick = {
 								if (readFeedCount > 0) onClearRead() else onOpenClearAllDialog()
@@ -882,8 +948,11 @@ private fun FeedHubView(
 	onOpenClearAllDialog: () -> Unit,
 	onDownloadEntry: (FeedEntryItem) -> Unit,
 	onMarkOrDismissEntry: (FeedEntryItem) -> Unit,
+	onEnableSuggestions: () -> Unit,
+	onDismissSuggestions: () -> Unit,
 ) {
-	val hasAnyContent = uiState.continueReading.isNotEmpty() ||
+	val hasAnyContent = uiState.showSuggestionsOptIn ||
+		uiState.continueReading.isNotEmpty() ||
 		uiState.hubUpdates.isNotEmpty() ||
 		uiState.homeSource != null ||
 		uiState.discoveryPreview.isNotEmpty() ||
@@ -920,6 +989,15 @@ private fun FeedHubView(
 				contentPadding = PaddingValues(top = 8.dp, bottom = bottomPadding),
 				verticalArrangement = Arrangement.spacedBy(18.dp),
 			) {
+				if (uiState.showSuggestionsOptIn) {
+					item(key = "hub_suggestions_optin") {
+						NemuriSuggestionsOptInCard(
+							onEnable = onEnableSuggestions,
+							onDismiss = onDismissSuggestions,
+							modifier = Modifier.padding(horizontal = 16.dp),
+						)
+					}
+				}
 				// 1. Continue Reading Row
 				if (uiState.continueReading.isNotEmpty()) {
 					item(key = "hub_continue_header") {
@@ -1279,6 +1357,7 @@ private fun HubHomeSourceBar(
 	onPickHomeSource: () -> Unit,
 	onRefresh: () -> Unit,
 ) {
+	val sourcePillShape = NemuriTheme.pillShape()
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -1288,15 +1367,15 @@ private fun HubHomeSourceBar(
 	) {
 		Surface(
 			color = if (isExplicitlyPinned) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-			shape = RoundedCornerShape(999.dp),
+			shape = sourcePillShape,
 			modifier = Modifier
 				.weight(1f, fill = false)
 				.border(
 					1.dp,
 					if (isExplicitlyPinned) NemuriTheme.colors.cyan.copy(alpha = 0.6f) else NemuriTheme.colors.border,
-					RoundedCornerShape(999.dp),
+					sourcePillShape,
 				)
-				.clip(RoundedCornerShape(999.dp))
+				.clip(sourcePillShape)
 				.clickable(onClick = onPickHomeSource),
 		) {
 			Row(
@@ -1697,14 +1776,24 @@ private fun FeedForYouView(
 	onOpenDetails: (Manga, String?) -> Unit,
 	onOpenExplore: () -> Unit,
 	onRefresh: () -> Unit,
+	onEnableSuggestions: () -> Unit,
+	onDismissSuggestions: () -> Unit,
 ) {
 	if (uiState.enabledSources.isEmpty()) {
-		Box(
+		Column(
 			modifier = Modifier
 				.fillMaxSize()
-				.verticalScroll(rememberScrollState()),
-			contentAlignment = Alignment.Center,
+				.verticalScroll(rememberScrollState())
+				.padding(bottom = bottomPadding),
+			verticalArrangement = Arrangement.spacedBy(12.dp),
 		) {
+			if (uiState.showSuggestionsOptIn) {
+				NemuriSuggestionsOptInCard(
+					onEnable = onEnableSuggestions,
+					onDismiss = onDismissSuggestions,
+					modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+				)
+			}
 			NemuriEmptyState(
 				icon = Icons.Default.Explore,
 				title = "Enable a source to unlock For You",
@@ -1716,7 +1805,7 @@ private fun FeedForYouView(
 		return
 	}
 
-	if (uiState.isDiscoveryLoading && uiState.discoverySections.isEmpty() && uiState.discoveryGridItems.isEmpty()) {
+	if (uiState.isDiscoveryLoading && uiState.discoverySections.isEmpty() && uiState.discoveryGridItems.isEmpty() && !uiState.showSuggestionsOptIn) {
 		NemuriLoadingState(message = "Curating personalized picks across your sources…")
 		return
 	}
@@ -1734,8 +1823,11 @@ private fun FeedForYouView(
 
 	val listState = rememberLazyListState()
 	val scrollAdapter = rememberNemuriScrollAdapter(listState)
-	val forYouCalloutLabels = remember(uiState.discoveryGenres, uiState.discoverySections, gridRows) {
+	val forYouCalloutLabels = remember(uiState.showSuggestionsOptIn, uiState.discoveryGenres, uiState.discoverySections, gridRows) {
 		buildList {
+			if (uiState.showSuggestionsOptIn) {
+				add("Suggestions")
+			}
 			if (uiState.discoveryGenres.isNotEmpty()) {
 				add("Taste")
 			}
@@ -1768,6 +1860,15 @@ private fun FeedForYouView(
 				),
 			contentPadding = PaddingValues(top = 8.dp, bottom = bottomPadding),
 		) {
+			if (uiState.showSuggestionsOptIn) {
+				item(key = "fy_suggestions_optin") {
+					NemuriSuggestionsOptInCard(
+						onEnable = onEnableSuggestions,
+						onDismiss = onDismissSuggestions,
+						modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+					)
+				}
+			}
 			// Interactive TASTE PROFILE Genre Filter Row
 			if (uiState.discoveryGenres.isNotEmpty()) {
 				item(key = "fy_profile_banner") {
@@ -1974,15 +2075,16 @@ private fun TasteGenreFilterChip(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val chipShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.tealContainer,
-		shape = RoundedCornerShape(999.dp),
+		shape = chipShape,
 		border = BorderStroke(
 			1.dp,
 			if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.cyan.copy(alpha = 0.42f),
 		),
 		modifier = Modifier
-			.clip(RoundedCornerShape(999.dp))
+			.clip(chipShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -2237,17 +2339,18 @@ private fun FeedModePill(
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
+	val pillShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) MaterialTheme.colorScheme.primaryContainer else NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(999.dp),
+		shape = pillShape,
 		modifier = modifier
 			.height(36.dp)
 			.border(
 				1.dp,
 				if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-				RoundedCornerShape(999.dp),
+				pillShape,
 			)
-			.clip(RoundedCornerShape(999.dp))
+			.clip(pillShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -2270,7 +2373,7 @@ private fun FeedModePill(
 				Spacer(modifier = Modifier.width(4.dp))
 				Surface(
 					color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.tealContainer,
-					shape = RoundedCornerShape(999.dp),
+					shape = pillShape,
 				) {
 					Text(
 						text = if (badgeCount > 99) "99+" else badgeCount.toString(),
@@ -2294,16 +2397,17 @@ private fun FeedFilterChip(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val chipShape = NemuriTheme.pillShape()
 	Surface(
 		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
-		shape = RoundedCornerShape(999.dp),
+		shape = chipShape,
 		modifier = Modifier
 			.border(
 				1.dp,
 				if (selected) NemuriTheme.colors.cyan.copy(alpha = 0.7f) else NemuriTheme.colors.border,
-				RoundedCornerShape(999.dp),
+				chipShape,
 			)
-			.clip(RoundedCornerShape(999.dp))
+			.clip(chipShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -2342,17 +2446,18 @@ private fun FeedEntryCard(
 ) {
 	val manga = entry.logItem.manga
 	val isNew = entry.logItem.isNew
+	val cardShape = NemuriTheme.shape(14.dp)
 	Surface(
 		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(14.dp),
+		shape = cardShape,
 		modifier = Modifier
 			.fillMaxWidth()
 			.border(
 				1.dp,
 				if (isNew) NemuriTheme.colors.cyan.copy(alpha = 0.45f) else NemuriTheme.colors.border,
-				RoundedCornerShape(14.dp),
+				cardShape,
 			)
-			.clip(RoundedCornerShape(14.dp))
+			.clip(cardShape)
 			.clickable(onClick = onOpenLatestChapter),
 	) {
 		Row(

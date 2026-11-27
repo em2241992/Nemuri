@@ -35,8 +35,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -358,13 +356,14 @@ fun NemuriSmartScrollPill(
 			SmartScrollPillMode.GO_TO_TOP -> "⌃ Top"
 			SmartScrollPillMode.LAST_POSITION -> "⌄ Last position"
 		}
+		val pillShape = NemuriTheme.pillShape()
 		Surface(
 			color = NemuriTheme.colors.dock.copy(alpha = 0.95f),
-			shape = CircleShape,
+			shape = pillShape,
 			shadowElevation = 10.dp,
 			border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.58f)),
 			modifier = Modifier
-				.clip(CircleShape)
+				.clip(pillShape)
 				.clickable {
 					haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
 					when (displayedMode) {
@@ -541,6 +540,7 @@ fun BoxScope.NemuriFastScroller(
 						}
 					},
 			) {
+				val railShape = NemuriTheme.pillShape()
 				// Subtle vertical track rail
 				Box(
 					modifier = Modifier
@@ -548,7 +548,7 @@ fun BoxScope.NemuriFastScroller(
 						.padding(horizontal = 6.dp)
 						.width(3.dp)
 						.fillMaxHeight()
-						.clip(CircleShape)
+						.clip(railShape)
 						.background(NemuriTheme.colors.border.copy(alpha = if (isDragging) 0.68f else 0.36f)),
 				)
 
@@ -565,10 +565,10 @@ fun BoxScope.NemuriFastScroller(
 						.padding(horizontal = 4.dp)
 						.width(thumbWidth)
 						.height(thumbHeightDp)
-						.clip(CircleShape)
+						.clip(railShape)
 						.background(
 							if (isDragging) NemuriTheme.colors.cyan else NemuriTheme.colors.cyan.copy(alpha = 0.82f),
-							CircleShape,
+							railShape,
 						),
 				)
 			}
@@ -588,7 +588,7 @@ fun BoxScope.NemuriFastScroller(
 				) {
 					Surface(
 						color = NemuriTheme.colors.dock.copy(alpha = 0.97f),
-						shape = RoundedCornerShape(12.dp),
+						shape = NemuriTheme.shape(12.dp),
 						shadowElevation = 12.dp,
 						border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.68f)),
 						modifier = Modifier.widthIn(min = 42.dp, max = 180.dp),
@@ -652,14 +652,15 @@ fun NemuriQuickScrollButtons(
 		exit = fadeOut(nemuriEffectsSpring()) + scaleOut(nemuriFastSpatialSpring(), targetScale = 0.88f),
 		modifier = modifier,
 	) {
+		val capsuleShape = NemuriTheme.pillShape()
 		Surface(
-			color = NemuriTheme.colors.dock.copy(alpha = 0.93f),
-			shape = RoundedCornerShape(999.dp),
+			color = NemuriTheme.colors.secondaryContainer.copy(alpha = 0.94f),
+			shape = capsuleShape,
 			shadowElevation = 8.dp,
-			border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.38f)),
+			border = BorderStroke(1.dp, NemuriTheme.colors.secondary.copy(alpha = 0.55f)),
 			modifier = Modifier
 				.width(38.dp)
-				.clip(RoundedCornerShape(999.dp)),
+				.clip(capsuleShape),
 		) {
 			Column(
 				horizontalAlignment = Alignment.CenterHorizontally,
@@ -686,14 +687,14 @@ fun NemuriQuickScrollButtons(
 					Icon(
 						imageVector = Icons.Rounded.KeyboardArrowUp,
 						contentDescription = "Step up (long-press for top)",
-						tint = NemuriTheme.colors.cyan,
+						tint = NemuriTheme.colors.secondary,
 						modifier = Modifier.size(20.dp),
 					)
 				}
 
 				HorizontalDivider(
 					thickness = 1.dp,
-					color = NemuriTheme.colors.border,
+					color = NemuriTheme.colors.secondary.copy(alpha = 0.28f),
 					modifier = Modifier.padding(horizontal = 6.dp),
 				)
 
@@ -719,7 +720,7 @@ fun NemuriQuickScrollButtons(
 					Icon(
 						imageVector = Icons.Rounded.KeyboardArrowDown,
 						contentDescription = "Step down (long-press for bottom)",
-						tint = NemuriTheme.colors.cyan,
+						tint = NemuriTheme.colors.secondary,
 						modifier = Modifier.size(20.dp),
 					)
 				}

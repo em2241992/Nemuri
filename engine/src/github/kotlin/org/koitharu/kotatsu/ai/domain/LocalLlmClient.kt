@@ -57,12 +57,21 @@ class LocalLlmClient @Inject constructor(
 	private var loadedBackendLabel: String = "CPU"
 	private var loadedRequestedAccel: LocalLlmAccelerator? = null
 
-	fun hasReadyModel(): Boolean = isRuntimeSupported && modelManager.resolveActiveReadyModel() != null
+	fun hasReadyModel(): Boolean {
+		if (!isRuntimeSupported) return false
+		val loadedPath = loadedModelPath
+		if (loadedPath != null && !File(loadedPath).isFile) {
+			idleScope.launch { unloadNow() }
+		}
+		val resolved = modelManager.resolveActiveReadyModel()
+		return resolved != null && resolved.second.isFile
+	}
 
 	fun activeModelLabel(): String {
-		val (entry, _) = modelManager.resolveActiveReadyModel()
+		val (entry, file) = modelManager.resolveActiveReadyModel()
+			?.takeIf { it.second.isFile }
 			?: return "Local LLM (Not downloaded)"
-		val accel = if (loadedEngine != null) {
+		val accel = if (loadedEngine != null && loadedModelPath == file.absolutePath) {
 			loadedBackendLabel
 		} else {
 			LocalLlmAccelerator.fromKey(settings.aiLocalAccelerator).name

@@ -27,8 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -64,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -171,15 +170,16 @@ fun NemuriFloatingDockBar(
 				horizontalArrangement = Arrangement.Center,
 				verticalAlignment = Alignment.CenterVertically,
 			) {
+				val dockShape = NemuriTheme.shape(28.dp)
 				Surface(
 					color = dockSurface.copy(alpha = 0.96f),
 					tonalElevation = 4.dp,
 					shadowElevation = 12.dp,
-					shape = RoundedCornerShape(28.dp),
+					shape = dockShape,
 					modifier = Modifier
 						.weight(1f, fill = isAlwaysStacked)
 						.height(barHeight)
-						.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(28.dp))
+						.border(1.dp, NemuriTheme.colors.border, dockShape)
 						.yorhaTacticalBrackets(inset = 4.dp),
 				) {
 					Row(
@@ -338,13 +338,14 @@ private fun DockTabPill(
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
 	val containerColor by animateColorAsState(
 		targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
 		animationSpec = nemuriEffectsSpring(),
 		label = "dockPillContainer",
 	)
 	val borderColor by animateColorAsState(
-		targetValue = if (selected) NemuriTheme.colors.cyan.copy(alpha = 0.42f) else Color.Transparent,
+		targetValue = if (selected) NemuriTheme.colors.cyan.copy(alpha = if (isSharp) 0.68f else 0.42f) else Color.Transparent,
 		animationSpec = nemuriEffectsSpring(),
 		label = "dockPillBorder",
 	)
@@ -355,7 +356,7 @@ private fun DockTabPill(
 	)
 	val isAlwaysStacked = labelVisibility == NavLabelVisibility.ALWAYS
 	val showInlineLabel = labelVisibility == NavLabelVisibility.SELECTED_ONLY && selected
-	val pillShape = RoundedCornerShape(22.dp)
+	val pillShape = NemuriTheme.shape(22.dp)
 
 	// Unclipped outer Box so top-right corner badges NEVER sit between icon & label or get clipped
 	Box(
@@ -478,10 +479,18 @@ private fun ClassicBarTabItem(
 	)
 	val pillWidth = if (showLabel) 54.dp else 48.dp
 	val pillHeight = if (showLabel) 28.dp else 34.dp
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
+	val itemShape = NemuriTheme.shape(14.dp)
+	val indicatorShape = NemuriTheme.shape(16.dp)
+	val indicatorBorderColor by animateColorAsState(
+		targetValue = if (selected && isSharp) NemuriTheme.colors.cyan.copy(alpha = 0.62f) else Color.Transparent,
+		animationSpec = nemuriEffectsSpring(),
+		label = "classicIndicatorBorder",
+	)
 
 	Column(
 		modifier = modifier
-			.clip(RoundedCornerShape(14.dp))
+			.clip(itemShape)
 			.clickable(onClick = onClick)
 			.padding(vertical = 4.dp),
 		horizontalAlignment = Alignment.CenterHorizontally,
@@ -492,8 +501,9 @@ private fun ClassicBarTabItem(
 			Box(
 				modifier = Modifier
 					.size(width = pillWidth, height = pillHeight)
-					.clip(RoundedCornerShape(16.dp))
-					.background(indicatorColor),
+					.clip(indicatorShape)
+					.background(indicatorColor)
+					.border(1.dp, indicatorBorderColor, indicatorShape),
 				contentAlignment = Alignment.Center,
 			) {
 				Icon(
@@ -537,20 +547,24 @@ private fun NavCornerBadge(
 	borderRingColor: Color,
 	modifier: Modifier = Modifier,
 ) {
+	val badgeShape = NemuriTheme.pillShape()
+	val ringWidth = if (NemuriTheme.isSharpTacticalGeometry) 1.dp else 1.5.dp
 	when {
 		badgeCount > 0 -> {
 			val label = if (badgeCount > 99) "99+" else badgeCount.toString()
+			val badgeBg = NemuriTheme.colors.secondary
+			val badgeTextColor = if (badgeBg.luminance() > 0.36f) Color(0xFF120E1F) else Color.White
 			Box(
 				modifier = modifier
 					.defaultMinSize(minWidth = 17.dp, minHeight = 16.dp)
-					.background(NemuriTheme.colors.cyan, RoundedCornerShape(999.dp))
-					.border(1.5.dp, borderRingColor, RoundedCornerShape(999.dp))
+					.background(badgeBg, badgeShape)
+					.border(ringWidth, borderRingColor, badgeShape)
 					.padding(horizontal = 4.dp, vertical = 1.dp),
 				contentAlignment = Alignment.Center,
 			) {
 				Text(
 					text = label,
-					color = NemuriTheme.colors.onCyan,
+					color = badgeTextColor,
 					fontSize = 9.sp,
 					lineHeight = 10.sp,
 					fontWeight = FontWeight.ExtraBold,
@@ -564,8 +578,8 @@ private fun NavCornerBadge(
 			Box(
 				modifier = modifier
 					.size(9.dp)
-					.background(NemuriTheme.colors.cyan, CircleShape)
-					.border(1.5.dp, borderRingColor, CircleShape),
+					.background(NemuriTheme.colors.cyan, badgeShape)
+					.border(ringWidth, borderRingColor, badgeShape),
 			)
 		}
 	}
@@ -583,16 +597,18 @@ fun ContinueReadingFab(
 	val fill = if (isIncognito) NemuriTheme.colors.surfaceElevated else MaterialTheme.colorScheme.primary
 	val iconTint = if (isIncognito) NemuriTheme.colors.cyan else MaterialTheme.colorScheme.onPrimary
 	val borderColor = if (isIncognito) NemuriTheme.colors.cyan else MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+	val fabShape = NemuriTheme.shape(28.dp)
+	val incognitoBadgeShape = NemuriTheme.pillShape()
 
 	Box(modifier = modifier) {
 		Surface(
 			color = fill,
-			shape = RoundedCornerShape(28.dp),
+			shape = fabShape,
 			shadowElevation = 12.dp,
 			modifier = Modifier
 				.size(fabSize)
-				.border(if (isIncognito) 2.dp else 1.dp, borderColor, RoundedCornerShape(28.dp))
-				.clip(RoundedCornerShape(28.dp))
+				.border(if (isIncognito) 2.dp else 1.dp, borderColor, fabShape)
+				.clip(fabShape)
 				.combinedClickable(
 					onClick = onClick,
 					onLongClick = onLongClick,
@@ -610,11 +626,11 @@ fun ContinueReadingFab(
 		if (isIncognito) {
 			Surface(
 				color = NemuriTheme.colors.cyan,
-				shape = CircleShape,
+				shape = incognitoBadgeShape,
 				modifier = Modifier
 					.size(18.dp)
 					.align(Alignment.TopEnd)
-					.border(1.5.dp, NemuriTheme.colors.dock, CircleShape),
+					.border(if (NemuriTheme.isSharpTacticalGeometry) 1.dp else 1.5.dp, NemuriTheme.colors.dock, incognitoBadgeShape),
 			) {
 				Box(contentAlignment = Alignment.Center) {
 					Icon(
@@ -638,13 +654,14 @@ private fun ContinuePeekCard(
 	onDismiss: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
+	val cardShape = NemuriTheme.shape(22.dp)
 	Surface(
 		color = NemuriTheme.colors.sheet.copy(alpha = 0.98f),
-		shape = RoundedCornerShape(22.dp),
+		shape = cardShape,
 		shadowElevation = 18.dp,
 		modifier = modifier
 			.widthIn(min = 276.dp, max = 328.dp)
-			.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f), RoundedCornerShape(22.dp))
+			.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.45f), cardShape)
 			.yorhaTacticalBrackets(),
 	) {
 		Column(
@@ -688,7 +705,7 @@ private fun ContinuePeekCard(
 						containerColor = NemuriTheme.colors.cyan,
 						contentColor = NemuriTheme.colors.onCyan,
 					),
-					shape = RoundedCornerShape(12.dp),
+					shape = NemuriTheme.shape(12.dp),
 					modifier = Modifier.fillMaxWidth(),
 				) {
 					Icon(
@@ -718,11 +735,13 @@ private fun ContinuePeekCard(
 					style = MaterialTheme.typography.labelSmall,
 					color = NemuriTheme.colors.textDim,
 				)
+				val recentRowShape = NemuriTheme.shape(10.dp)
+				val recentCoverShape = NemuriTheme.shape(6.dp)
 				recentReads.drop(1).take(3).forEach { manga ->
 					Row(
 						modifier = Modifier
 							.fillMaxWidth()
-							.clip(RoundedCornerShape(10.dp))
+							.clip(recentRowShape)
 							.clickable { onOpenManga(manga) }
 							.padding(vertical = 4.dp, horizontal = 6.dp),
 						verticalAlignment = Alignment.CenterVertically,
@@ -733,7 +752,7 @@ private fun ContinuePeekCard(
 							coverUrl = manga.coverUrl,
 							modifier = Modifier
 								.size(width = 28.dp, height = 38.dp)
-								.clip(RoundedCornerShape(6.dp)),
+								.clip(recentCoverShape),
 						)
 						Text(
 							text = manga.title,

@@ -36,6 +36,7 @@ import org.koitharu.kotatsu.parsers.model.Manga
 import org.koitharu.kotatsu.parsers.model.MangaSource
 import org.koitharu.kotatsu.parsers.model.SortOrder
 import org.koitharu.kotatsu.settings.sources.catalog.ExtensionStoreManager
+import org.koitharu.kotatsu.suggestions.ui.SuggestionsWorker
 import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.NemuriToastManager
 import javax.inject.Inject
@@ -76,6 +77,7 @@ data class ExploreUiState(
 	val hasExtensionUpdates: Boolean = false,
 	val isFindingRandom: Boolean = false,
 	val homeSourceName: String? = null,
+	val showSuggestionsOptIn: Boolean = false,
 )
 
 @HiltViewModel
@@ -84,6 +86,7 @@ class ExploreViewModel @Inject constructor(
 	private val sourcesRepository: MangaSourcesRepository,
 	private val exploreRepository: ExploreRepository,
 	private val extensionStoreManager: ExtensionStoreManager,
+	private val suggestionsScheduler: SuggestionsWorker.Scheduler,
 	private val settings: AppSettings,
 	private val toastManager: NemuriToastManager,
 ) : ViewModel() {
@@ -106,7 +109,9 @@ class ExploreViewModel @Inject constructor(
 					key == AppSettings.KEY_EXPLORE_HOME_SOURCE ||
 					key == AppSettings.KEY_HIDDEN_SOURCE_LANGUAGES ||
 					key == AppSettings.KEY_MIHON_HIDDEN_PACKAGES ||
-					key == AppSettings.KEY_LN_HIDDEN_PLUGINS
+					key == AppSettings.KEY_LN_HIDDEN_PLUGINS ||
+					key == AppSettings.KEY_SUGGESTIONS_PROMPT_HANDLED ||
+					key == AppSettings.KEY_SUGGESTIONS
 			}
 			.onStart { emit(null) },
 		languageRefreshTrigger,
@@ -118,6 +123,7 @@ class ExploreViewModel @Inject constructor(
 			isNovelTabFirst = settings.isNovelTabFirst,
 			preferredHomeSourceName = settings.exploreHomeSource,
 			languages = sourcesRepository.getSourceLanguages(),
+			showSuggestionsOptIn = !settings.isSuggestionsPromptHandled,
 		)
 	}
 
@@ -190,6 +196,7 @@ class ExploreViewModel @Inject constructor(
 			hasExtensionUpdates = hasUpdates,
 			isFindingRandom = findingRandom,
 			homeSourceName = resolvedHomeName,
+			showSuggestionsOptIn = prefs.showSuggestionsOptIn,
 		)
 	}
 		.flowOn(Dispatchers.IO)
@@ -199,6 +206,7 @@ class ExploreViewModel @Inject constructor(
 			initialValue = ExploreUiState(
 				isSourcesGridMode = settings.isSourcesGridMode,
 				sourcesGridColumns = settings.sourcesGridColumns,
+				showSuggestionsOptIn = !settings.isSuggestionsPromptHandled,
 			),
 		)
 
@@ -206,8 +214,29 @@ class ExploreViewModel @Inject constructor(
 		selectedKindFlow.value = kind
 	}
 
+	fun setSourcesGridMode(gridMode: Boolean) {
+		settings.isSourcesGridMode = gridMode
+	}
+
 	fun toggleSourcesGridMode() {
 		settings.isSourcesGridMode = !settings.isSourcesGridMode
+	}
+
+	fun enablePersonalizedSuggestions() {
+		settings.isSuggestionsEnabled = true
+		settings.isSuggestionsPromptHandled = true
+		viewModelScope.launch(Dispatchers.IO) {
+			runCatching {
+				suggestionsScheduler.schedule()
+				suggestionsScheduler.startNow()
+			}
+			toastManager.show("Personalized suggestions enabled")
+		}
+	}
+
+	fun dismissSuggestionsPrompt() {
+		settings.isSuggestionsEnabled = false
+		settings.isSuggestionsPromptHandled = true
 	}
 
 	fun setSourcesGridColumns(columns: Int) {
@@ -331,5 +360,6 @@ class ExploreViewModel @Inject constructor(
 		val isNovelTabFirst: Boolean,
 		val preferredHomeSourceName: String?,
 		val languages: List<SourceLanguage>,
+		val showSuggestionsOptIn: Boolean,
 	)
 }

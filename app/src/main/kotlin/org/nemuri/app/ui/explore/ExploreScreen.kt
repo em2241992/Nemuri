@@ -95,6 +95,7 @@ import org.nemuri.app.navigation.MangaTransferCache
 import org.nemuri.app.ui.components.HeaderSquareAction
 import org.nemuri.app.ui.components.NemuriEmptyState
 import org.nemuri.app.ui.components.NemuriModalSheet
+import org.nemuri.app.ui.components.NemuriSuggestionsOptInCard
 import org.nemuri.app.ui.components.NonWrappingBadgeText
 import org.nemuri.app.ui.components.rememberRootTabBottomPadding
 import org.nemuri.app.ui.components.rememberSyncedTextField
@@ -128,13 +129,11 @@ fun ExploreScreen(
 	var languagePickerTile by remember { mutableStateOf<ExploreSourceTile?>(null) }
 
 	Column(modifier = Modifier.fillMaxSize()) {
-		// Top Search Header with dedicated Grid <-> List toggle, Tune, and Settings
+		// Top Search Header with consolidated Tune (Display / Filter) and Settings icons
 		ExploreTopBar(
 			query = uiState.sourceQuery,
 			onQueryChange = viewModel::setSourceQuery,
-			isGridMode = uiState.isSourcesGridMode,
 			onSearchSubmit = { onOpenGlobalSearch(uiState.sourceQuery.trim()) },
-			onToggleGridMode = viewModel::toggleSourcesGridMode,
 			onTuneClick = { showSortAndLanguageSheet = true },
 			onSettingsClick = onOpenSettings,
 		)
@@ -213,6 +212,15 @@ fun ExploreScreen(
 			horizontalArrangement = Arrangement.spacedBy(10.dp),
 			verticalArrangement = Arrangement.spacedBy(if (uiState.isSourcesGridMode) 14.dp else 10.dp),
 		) {
+			if (uiState.showSuggestionsOptIn) {
+				item(key = "explore_suggestions_optin", span = { GridItemSpan(maxLineSpan) }) {
+					NemuriSuggestionsOptInCard(
+						onEnable = viewModel::enablePersonalizedSuggestions,
+						onDismiss = viewModel::dismissSuggestionsPrompt,
+						modifier = Modifier.padding(bottom = 4.dp),
+					)
+				}
+			}
 			if (uiState.isLoadingSources && uiState.sources.isEmpty()) {
 				item(span = { GridItemSpan(maxLineSpan) }) {
 					Row(
@@ -335,20 +343,74 @@ fun ExploreScreen(
 	}
 
 	if (showSortAndLanguageSheet) {
+		val sheetCardShape = NemuriTheme.shape(12.dp)
 		NemuriModalSheet(
-			title = "Explore Layout & Languages",
-			subtitle = "Grid density, ordering & enabled source languages",
+			title = "Explore Display & Filter",
+			subtitle = "Source layout, columns, ordering & languages",
 			onDismiss = { showSortAndLanguageSheet = false },
 		) {
 			LazyColumn(
 				modifier = Modifier
 					.fillMaxWidth()
-					.heightIn(max = 460.dp),
+					.heightIn(max = 480.dp),
 				verticalArrangement = Arrangement.spacedBy(8.dp),
 				contentPadding = PaddingValues(bottom = 12.dp),
 			) {
+				item {
+					Text(
+						text = "SOURCE LAYOUT",
+						style = MaterialTheme.typography.labelSmall,
+						color = NemuriTheme.colors.cyan,
+					)
+					Spacer(modifier = Modifier.height(6.dp))
+					Row(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						listOf(
+							Triple(true, "Grid", Icons.Default.GridView),
+							Triple(false, "List", Icons.AutoMirrored.Filled.ViewList),
+						).forEach { (isGrid, label, icon) ->
+							val selected = uiState.isSourcesGridMode == isGrid
+							Surface(
+								color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = sheetCardShape,
+								border = BorderStroke(
+									width = if (selected) 1.5.dp else 1.dp,
+									color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier
+									.weight(1f)
+									.clip(sheetCardShape)
+									.clickable { viewModel.setSourcesGridMode(isGrid) },
+							) {
+								Row(
+									modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+									horizontalArrangement = Arrangement.Center,
+									verticalAlignment = Alignment.CenterVertically,
+								) {
+									Icon(
+										imageVector = icon,
+										contentDescription = null,
+										tint = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										modifier = Modifier.size(17.dp),
+									)
+									Spacer(modifier = Modifier.width(6.dp))
+									Text(
+										text = label,
+										style = MaterialTheme.typography.labelLarge,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+									)
+								}
+							}
+						}
+					}
+				}
+
 				if (uiState.isSourcesGridMode) {
 					item {
+						Spacer(modifier = Modifier.height(2.dp))
 						Text(
 							text = "GRID COLUMNS",
 							style = MaterialTheme.typography.labelSmall,
@@ -363,14 +425,14 @@ fun ExploreScreen(
 								val selected = uiState.sourcesGridColumns == cols
 								Surface(
 									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-									shape = RoundedCornerShape(12.dp),
+									shape = sheetCardShape,
 									border = BorderStroke(
 										1.dp,
 										if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 									),
 									modifier = Modifier
 										.weight(1f)
-										.clip(RoundedCornerShape(12.dp))
+										.clip(sheetCardShape)
 										.clickable { viewModel.setSourcesGridColumns(cols) },
 								) {
 									Text(
@@ -398,15 +460,15 @@ fun ExploreScreen(
 					val selected = uiState.sortOrder == order
 					Surface(
 						color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(12.dp),
+						shape = sheetCardShape,
 						modifier = Modifier
 							.fillMaxWidth()
 							.border(
 								1.dp,
 								if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-								RoundedCornerShape(12.dp),
+								sheetCardShape,
 							)
-							.clip(RoundedCornerShape(12.dp))
+							.clip(sheetCardShape)
 							.clickable { viewModel.setSortOrder(order) },
 					) {
 						Row(
@@ -447,11 +509,11 @@ fun ExploreScreen(
 					items(uiState.languages, key = { it.code }) { lang ->
 						Surface(
 							color = NemuriTheme.colors.surfaceElevated,
-							shape = RoundedCornerShape(12.dp),
+							shape = sheetCardShape,
 							modifier = Modifier
 								.fillMaxWidth()
-								.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp))
-								.clip(RoundedCornerShape(12.dp))
+								.border(1.dp, NemuriTheme.colors.border, sheetCardShape)
+								.clip(sheetCardShape)
 								.clickable { viewModel.toggleLanguage(lang.code) },
 						) {
 							Row(
@@ -636,12 +698,12 @@ fun ExploreScreen(
 private fun ExploreTopBar(
 	query: String,
 	onQueryChange: (String) -> Unit,
-	isGridMode: Boolean,
 	onSearchSubmit: () -> Unit,
-	onToggleGridMode: () -> Unit,
 	onTuneClick: () -> Unit,
 	onSettingsClick: () -> Unit,
 ) {
+	val searchShape = NemuriTheme.shape(24.dp)
+	val pillShape = NemuriTheme.pillShape()
 	Surface(
 		color = NemuriTheme.colors.background,
 		modifier = Modifier.fillMaxWidth(),
@@ -657,11 +719,11 @@ private fun ExploreTopBar(
 		) {
 			Surface(
 				color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.78f),
-				shape = RoundedCornerShape(24.dp),
+				shape = searchShape,
 				modifier = Modifier
 					.weight(1f)
 					.height(44.dp)
-					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(24.dp)),
+					.border(1.dp, NemuriTheme.colors.border, searchShape),
 			) {
 				Row(
 					modifier = Modifier.padding(horizontal = 8.dp),
@@ -670,7 +732,7 @@ private fun ExploreTopBar(
 					Box(
 						modifier = Modifier
 							.size(34.dp)
-							.clip(RoundedCornerShape(17.dp))
+							.clip(pillShape)
 							.clickable(onClick = onSearchSubmit),
 						contentAlignment = Alignment.Center,
 					) {
@@ -715,7 +777,7 @@ private fun ExploreTopBar(
 						Box(
 							modifier = Modifier
 								.size(32.dp)
-								.clip(RoundedCornerShape(16.dp))
+								.clip(pillShape)
 								.clickable { searchField.clear() },
 							contentAlignment = Alignment.Center,
 						) {
@@ -726,28 +788,13 @@ private fun ExploreTopBar(
 								modifier = Modifier.size(18.dp),
 							)
 						}
-					} else {
-						Box(
-							modifier = Modifier
-								.size(34.dp)
-								.clip(RoundedCornerShape(17.dp))
-								.clickable(onClick = onToggleGridMode),
-							contentAlignment = Alignment.Center,
-						) {
-							Icon(
-								imageVector = if (isGridMode) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
-								contentDescription = if (isGridMode) "Switch to list view" else "Switch to grid view",
-								tint = NemuriTheme.colors.cyan,
-								modifier = Modifier.size(19.dp),
-							)
-						}
 					}
 				}
 			}
 
 			HeaderSquareAction(
 				icon = Icons.Default.Tune,
-				contentDescription = "Sort & language options",
+				contentDescription = "Display & filter options",
 				onClick = onTuneClick,
 			)
 
@@ -776,10 +823,13 @@ private fun ExploreSegmentedTabs(
 	} else {
 		listOf(ExploreCatalogKind.MANGA, ExploreCatalogKind.NOVELS)
 	}
+	val containerShape = NemuriTheme.shape(16.dp)
+	val tabShape = NemuriTheme.shape(12.dp)
+	val badgePillShape = NemuriTheme.pillShape()
 
 	Surface(
 		color = NemuriTheme.colors.surfaceElevated.copy(alpha = 0.72f),
-		shape = RoundedCornerShape(16.dp),
+		shape = containerShape,
 		border = BorderStroke(1.dp, NemuriTheme.colors.border),
 		modifier = modifier
 			.fillMaxWidth()
@@ -806,7 +856,7 @@ private fun ExploreSegmentedTabs(
 				Surface(
 					onClick = { onSelectKind(kind) },
 					color = bg,
-					shape = RoundedCornerShape(12.dp),
+					shape = tabShape,
 					border = if (selected) {
 						BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f))
 					} else {
@@ -838,7 +888,7 @@ private fun ExploreSegmentedTabs(
 				Surface(
 					onClick = onOpenManage,
 					color = androidx.compose.ui.graphics.Color.Transparent,
-					shape = RoundedCornerShape(12.dp),
+					shape = tabShape,
 					modifier = Modifier
 						.fillMaxWidth()
 						.height(38.dp),
@@ -868,11 +918,11 @@ private fun ExploreSegmentedTabs(
 				if (hasExtensionUpdates) {
 					Surface(
 						color = NemuriTheme.colors.cyan,
-						shape = RoundedCornerShape(999.dp),
+						shape = badgePillShape,
 						modifier = Modifier
 							.align(Alignment.TopEnd)
 							.offset(x = (-4).dp, y = (-2).dp)
-							.border(1.5.dp, NemuriTheme.colors.surfaceElevated, RoundedCornerShape(999.dp)),
+							.border(1.5.dp, NemuriTheme.colors.surfaceElevated, badgePillShape),
 					) {
 						Text(
 							text = "UPD",
@@ -901,7 +951,7 @@ private fun ExploreUtilityChip(
 		onClick = onClick,
 		enabled = !isLoading,
 		color = if (highlighted) NemuriTheme.colors.tealContainer else NemuriTheme.colors.card,
-		shape = RoundedCornerShape(999.dp),
+		shape = NemuriTheme.pillShape(),
 		border = BorderStroke(
 			1.dp,
 			if (highlighted) NemuriTheme.colors.cyan.copy(alpha = 0.55f) else NemuriTheme.colors.border,
@@ -944,11 +994,12 @@ private fun ExploreSourceSquircleGridCell(
 	onClick: () -> Unit,
 	onLongClick: () -> Unit,
 ) {
-	val squircleShape = RoundedCornerShape(18.dp)
+	val squircleShape = NemuriTheme.shape(18.dp)
+	val cellShape = NemuriTheme.shape(14.dp)
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
-			.clip(RoundedCornerShape(14.dp))
+			.clip(cellShape)
 			.combinedClickable(
 				onClick = onClick,
 				onLongClick = onLongClick,
@@ -1059,9 +1110,11 @@ private fun ExploreSourceListCard(
 	onLongClick: () -> Unit,
 	onTogglePin: () -> Unit,
 ) {
+	val cardShape = NemuriTheme.shape(16.dp)
+	val iconShape = NemuriTheme.shape(12.dp)
 	Surface(
 		color = NemuriTheme.colors.card,
-		shape = RoundedCornerShape(16.dp),
+		shape = cardShape,
 		modifier = Modifier
 			.fillMaxWidth()
 			.border(
@@ -1071,9 +1124,9 @@ private fun ExploreSourceListCard(
 					tile.isPinned -> NemuriTheme.colors.cyan.copy(alpha = 0.42f)
 					else -> NemuriTheme.colors.border
 				},
-				RoundedCornerShape(16.dp),
+				cardShape,
 			)
-			.clip(RoundedCornerShape(16.dp))
+			.clip(cardShape)
 			.combinedClickable(
 				onClick = onClick,
 				onLongClick = onLongClick,
@@ -1086,10 +1139,10 @@ private fun ExploreSourceListCard(
 		) {
 			Surface(
 				color = NemuriTheme.colors.surfaceElevated,
-				shape = RoundedCornerShape(12.dp),
+				shape = iconShape,
 				modifier = Modifier
 					.size(42.dp)
-					.border(1.dp, NemuriTheme.colors.border, RoundedCornerShape(12.dp)),
+					.border(1.dp, NemuriTheme.colors.border, iconShape),
 			) {
 				SubcomposeAsyncImage(
 					model = tile.sourceInfo.mangaSource.faviconUri(),

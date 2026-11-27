@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.net.Uri
@@ -116,6 +117,8 @@ import androidx.compose.material.icons.filled.SlowMotionVideo
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -224,6 +227,7 @@ import org.nemuri.app.browser.WebViewChallengeAction
 import org.nemuri.app.browser.toBrowserIntent
 import org.nemuri.app.browser.toWebViewChallengeAction
 import org.nemuri.app.navigation.EXTRA_OPEN_MIGRATE_MANGA_ID
+import org.nemuri.app.ui.components.AiUpscalePreviewSheet
 import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.components.NemuriCapsuleToastHost
 import org.nemuri.app.ui.components.NemuriErrorState
@@ -425,12 +429,16 @@ private fun ReaderRootScreen(
 	var showHud by remember { mutableStateOf(false) }
 	var showChaptersSheet by remember { mutableStateOf(false) }
 	var showSettingsSheet by remember { mutableStateOf(false) }
+	var showAiPreviewSheet by remember { mutableStateOf(false) }
+	var aiPreviewPage by remember { mutableStateOf<ReaderPage?>(null) }
 	var quickActionPage by remember { mutableStateOf<ReaderPage?>(null) }
 	var compareSplitPage by remember { mutableStateOf<ReaderPage?>(null) }
+	var zoomCommandToken by remember { mutableStateOf(0) }
+	var zoomCommandDelta by remember { mutableStateOf(0) }
 
-	LaunchedEffect(showHud, showChaptersSheet, showSettingsSheet, quickActionPage) {
+	LaunchedEffect(showHud, showChaptersSheet, showSettingsSheet, showAiPreviewSheet, quickActionPage) {
 		onSystemBarsVisibilityChange(
-			showHud || showChaptersSheet || showSettingsSheet || quickActionPage != null,
+			showHud || showChaptersSheet || showSettingsSheet || showAiPreviewSheet || quickActionPage != null,
 		)
 	}
 
@@ -580,6 +588,8 @@ private fun ReaderRootScreen(
 				MangaReaderViewport(
 					uiState = uiState,
 					viewModel = viewModel,
+					zoomCommandToken = zoomCommandToken,
+					zoomCommandDelta = zoomCommandDelta,
 					onRegisterVolumeHandler = onRegisterVolumeHandler,
 					onToggleHud = { showHud = !showHud },
 					onLongPressPage = { page ->
@@ -669,7 +679,7 @@ private fun ReaderRootScreen(
 							if (uiState.isIncognito) {
 								Surface(
 									color = NemuriTheme.colors.cyan.copy(alpha = 0.18f),
-									shape = RoundedCornerShape(999.dp),
+									shape = NemuriTheme.pillShape(),
 									border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f)),
 								) {
 									Text(
@@ -681,6 +691,23 @@ private fun ReaderRootScreen(
 									)
 								}
 							}
+						}
+					}
+					if (!uiState.isTextMode) {
+						val isAiVisualActive = uiState.shaderConfig.isActive ||
+							(uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel) ||
+							uiState.colorFilter.isBookBackground
+						IconButton(
+							onClick = {
+								aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
+								showAiPreviewSheet = true
+							},
+						) {
+							Icon(
+								imageVector = Icons.Default.AutoAwesome,
+								contentDescription = "AI upscaling preview",
+								tint = if (isAiVisualActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+							)
 						}
 					}
 					IconButton(onClick = viewModel::toggleBookmark) {
@@ -822,9 +849,11 @@ private fun ReaderRootScreen(
 			} else {
 				uiState.autoScrollPageDelaySec > 1
 			}
+			val autoScrollPillShape = NemuriTheme.pillShape()
+			val autoScrollBtnShape = if (NemuriTheme.isSharpTacticalGeometry) NemuriTheme.shape(2.dp) else CircleShape
 			Surface(
 				color = NemuriTheme.colors.dock.copy(alpha = 0.95f),
-				shape = RoundedCornerShape(999.dp),
+				shape = autoScrollPillShape,
 				border = BorderStroke(
 					1.dp,
 					if (uiState.isAutoScrollPaused) NemuriTheme.colors.amber.copy(alpha = 0.6f) else NemuriTheme.colors.cyan.copy(alpha = 0.6f),
@@ -842,10 +871,10 @@ private fun ReaderRootScreen(
 						} else {
 							NemuriTheme.colors.tealContainer
 						},
-						shape = CircleShape,
+						shape = autoScrollBtnShape,
 						modifier = Modifier
 							.size(32.dp)
-							.clip(CircleShape)
+							.clip(autoScrollBtnShape)
 							.clickable { viewModel.setAutoScrollPaused(!uiState.isAutoScrollPaused) },
 					) {
 						Box(contentAlignment = Alignment.Center) {
@@ -859,11 +888,11 @@ private fun ReaderRootScreen(
 					}
 					Surface(
 						color = NemuriTheme.colors.surfaceElevated,
-						shape = CircleShape,
+						shape = autoScrollBtnShape,
 						border = BorderStroke(1.dp, NemuriTheme.colors.border),
 						modifier = Modifier
 							.size(28.dp)
-							.clip(CircleShape)
+							.clip(autoScrollBtnShape)
 							.clickable(enabled = canSlowDown) {
 								if (isContinuousScroll) {
 									viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed - 0.1f)
@@ -897,11 +926,11 @@ private fun ReaderRootScreen(
 					)
 					Surface(
 						color = NemuriTheme.colors.surfaceElevated,
-						shape = CircleShape,
+						shape = autoScrollBtnShape,
 						border = BorderStroke(1.dp, NemuriTheme.colors.border),
 						modifier = Modifier
 							.size(28.dp)
-							.clip(CircleShape)
+							.clip(autoScrollBtnShape)
 							.clickable(enabled = canSpeedUp) {
 								if (isContinuousScroll) {
 									viewModel.setAutoScrollSpeed(uiState.autoScrollSpeed + 0.1f)
@@ -934,7 +963,79 @@ private fun ReaderRootScreen(
 			}
 		}
 
-		// Minimal Bottom HUD Pill (Prev Chapter | Next Chapter | 3-Tab Navigator | Reader & Enhance Sheet)
+		// Floating Vertical ⊕ | ⊖ Zoom Capsule in lower-right margin (opt-in, default OFF)
+		val zoomCapsuleVisible = !uiState.isTextMode &&
+			!uiState.isLoading &&
+			uiState.pages.isNotEmpty() &&
+			uiState.isZoomButtonsEnabled &&
+			!showChaptersSheet &&
+			!showSettingsSheet &&
+			!showAiPreviewSheet
+		val zoomBottomPadding = when {
+			showHud && uiState.scrubberEdge == ReaderScrubberEdge.BOTTOM -> 142.dp
+			showHud -> 88.dp
+			uiState.showPageNumbers -> 48.dp
+			else -> 18.dp
+		}
+		AnimatedVisibility(
+			visible = zoomCapsuleVisible,
+			enter = fadeIn(),
+			exit = fadeOut(),
+			modifier = Modifier
+				.align(Alignment.BottomEnd)
+				.navigationBarsPadding()
+				.padding(end = 12.dp, bottom = zoomBottomPadding),
+		) {
+			val zoomCapsuleShape = NemuriTheme.pillShape()
+			Surface(
+				color = NemuriTheme.colors.dock.copy(alpha = 0.90f),
+				shape = zoomCapsuleShape,
+				border = BorderStroke(1.dp, NemuriTheme.colors.border.copy(alpha = 0.85f)),
+				shadowElevation = 10.dp,
+			) {
+				Column(
+					horizontalAlignment = Alignment.CenterHorizontally,
+					modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp),
+				) {
+					IconButton(
+						onClick = {
+							zoomCommandDelta = 1
+							zoomCommandToken += 1
+						},
+						modifier = Modifier.size(36.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.ZoomIn,
+							contentDescription = "Zoom in",
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(20.dp),
+						)
+					}
+					Box(
+						modifier = Modifier
+							.width(22.dp)
+							.height(1.dp)
+							.background(NemuriTheme.colors.border),
+					)
+					IconButton(
+						onClick = {
+							zoomCommandDelta = -1
+							zoomCommandToken += 1
+						},
+						modifier = Modifier.size(36.dp),
+					) {
+						Icon(
+							imageVector = Icons.Default.ZoomOut,
+							contentDescription = "Zoom out",
+							tint = NemuriTheme.colors.textPrimary,
+							modifier = Modifier.size(20.dp),
+						)
+					}
+				}
+			}
+		}
+
+		// Minimal Bottom HUD Pill (Prev Chapter | Next Chapter | Chapters | ✨ AI Preview | Reader & Enhance Sheet)
 		AnimatedVisibility(
 			visible = showHud,
 			enter = fadeIn() + slideInVertically { it },
@@ -950,9 +1051,15 @@ private fun ReaderRootScreen(
 					uiState.colorWarmth > 0.01f ||
 					(uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel)
 				)
+			val isUpscaleOrWarmActive = !uiState.isTextMode && (
+				uiState.shaderConfig.isActive ||
+					(uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel) ||
+					uiState.colorFilter.isBookBackground
+				)
+			val hudPillShape = NemuriTheme.pillShape()
 			Surface(
 				color = NemuriTheme.colors.dock.copy(alpha = 0.95f),
-				shape = RoundedCornerShape(999.dp),
+				shape = hudPillShape,
 				border = BorderStroke(1.dp, NemuriTheme.colors.border),
 				shadowElevation = 14.dp,
 			) {
@@ -996,15 +1103,15 @@ private fun ReaderRootScreen(
 
 					Surface(
 						color = NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(999.dp),
+						shape = hudPillShape,
 						modifier = Modifier
-							.clip(RoundedCornerShape(999.dp))
+							.clip(hudPillShape)
 							.clickable { showChaptersSheet = true },
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+							modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
 							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(6.dp),
+							horizontalArrangement = Arrangement.spacedBy(5.dp),
 						) {
 							Icon(
 								imageVector = Icons.Default.FormatListBulleted,
@@ -1022,16 +1129,40 @@ private fun ReaderRootScreen(
 						}
 					}
 
+					if (!uiState.isTextMode) {
+						Surface(
+							color = if (isUpscaleOrWarmActive) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+							shape = hudPillShape,
+							border = if (isUpscaleOrWarmActive) BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.65f)) else null,
+							modifier = Modifier
+								.size(34.dp)
+								.clip(hudPillShape)
+								.clickable {
+									aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
+									showAiPreviewSheet = true
+								},
+						) {
+							Box(contentAlignment = Alignment.Center) {
+								Icon(
+									imageVector = Icons.Default.AutoAwesome,
+									contentDescription = "AI upscaling preview",
+									tint = NemuriTheme.colors.cyan,
+									modifier = Modifier.size(17.dp),
+								)
+							}
+						}
+					}
+
 					Surface(
 						color = if (isEnhanceActive) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-						shape = RoundedCornerShape(999.dp),
+						shape = hudPillShape,
 						border = if (isEnhanceActive) BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)) else null,
 						modifier = Modifier
-							.clip(RoundedCornerShape(999.dp))
+							.clip(hudPillShape)
 							.clickable { showSettingsSheet = true },
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+							modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(6.dp),
 						) {
@@ -1068,7 +1199,7 @@ private fun ReaderRootScreen(
 		if (!showHud && !uiState.isLoading && !uiState.isTextMode && uiState.showPageNumbers && uiState.chapterTotalPages > 0) {
 			Surface(
 				color = Color.Black.copy(alpha = 0.56f),
-				shape = RoundedCornerShape(999.dp),
+				shape = NemuriTheme.pillShape(),
 				modifier = Modifier
 					.align(Alignment.BottomEnd)
 					.navigationBarsPadding()
@@ -1115,7 +1246,8 @@ private fun ReaderRootScreen(
 			viewModel = viewModel,
 			onOpenCompareSplit = {
 				quickActionPage = null
-				compareSplitPage = activeQuickPage
+				aiPreviewPage = activeQuickPage
+				showAiPreviewSheet = true
 			},
 			onDismiss = { quickActionPage = null },
 		)
@@ -1135,6 +1267,53 @@ private fun ReaderRootScreen(
 		)
 	}
 
+	if (showAiPreviewSheet) {
+		val targetPreviewPage = aiPreviewPage ?: uiState.pages.getOrNull(uiState.currentPageIndex)
+		var resolvedRawUri by remember(targetPreviewPage?.id) { mutableStateOf<Uri?>(null) }
+		var resolvedEnhancedUri by remember(targetPreviewPage?.id, uiState.neuralRevision) { mutableStateOf<Uri?>(null) }
+		LaunchedEffect(targetPreviewPage?.id, uiState.neuralRevision, uiState.isNeuralUpscaleEnabled, uiState.hasReadyNeuralModel) {
+			if (targetPreviewPage != null) {
+				val raw = viewModel.loadRawPageImage(targetPreviewPage).getOrNull()?.first
+				resolvedRawUri = raw
+				resolvedEnhancedUri = if (uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel) {
+					viewModel.loadPageImage(targetPreviewPage, false).getOrNull()?.first
+				} else {
+					null
+				}
+			} else {
+				resolvedRawUri = null
+				resolvedEnhancedUri = null
+			}
+		}
+		AiUpscalePreviewSheet(
+			shaderConfig = uiState.shaderConfig,
+			isNeuralUpscaleEnabled = uiState.isNeuralUpscaleEnabled,
+			isNeuralUpscaleSupported = uiState.isNeuralUpscaleSupported,
+			neuralAccelerator = uiState.neuralAccelerator,
+			activeDelegateLabel = uiState.activeNeuralDelegate,
+			hasReadyNeuralModel = uiState.hasReadyNeuralModel,
+			isWarmBedtimeActive = uiState.colorFilter.isBookBackground || uiState.colorWarmth > 0.05f,
+			previewUri = resolvedRawUri,
+			enhancedPreviewUri = resolvedEnhancedUri,
+			previewModel = targetPreviewPage?.toMangaPage(),
+			onSelectShaderPreset = viewModel::setShaderPreset,
+			onSetInkLevels = viewModel::setShaderInkLevels,
+			onSetDescreen = viewModel::setShaderDescreen,
+			onSetNeuralUpscaleEnabled = viewModel::setNeuralUpscaleEnabled,
+			onSelectNeuralAccelerator = viewModel::setNeuralAccelerator,
+			onApplyBedtimeWarmPreset = viewModel::applyBedtimeWarmPreset,
+			onOpenUpscalingSettings = {
+				showAiPreviewSheet = false
+				aiPreviewPage = null
+				showSettingsSheet = true
+			},
+			onDismiss = {
+				showAiPreviewSheet = false
+				aiPreviewPage = null
+			},
+		)
+	}
+
 	if (showSettingsSheet) {
 		ReaderSettingsModalSheet(
 			uiState = uiState,
@@ -1146,6 +1325,11 @@ private fun ReaderRootScreen(
 			onAutoScrollStarted = {
 				showSettingsSheet = false
 				showHud = false
+			},
+			onOpenAiPreview = {
+				showSettingsSheet = false
+				aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
+				showAiPreviewSheet = true
 			},
 			onDismiss = { showSettingsSheet = false },
 		)
@@ -1202,6 +1386,8 @@ private fun resolveTapZoneAction(
 private fun MangaReaderViewport(
 	uiState: ReaderUiState,
 	viewModel: ReaderViewModel,
+	zoomCommandToken: Int,
+	zoomCommandDelta: Int,
 	onRegisterVolumeHandler: (((Boolean) -> Unit)?) -> Unit,
 	onToggleHud: () -> Unit,
 	onLongPressPage: (ReaderPage) -> Unit,
@@ -1240,6 +1426,17 @@ private fun MangaReaderViewport(
 		val listState = rememberLazyListState()
 		var webtoonZoom by remember { mutableStateOf(1f) }
 		var webtoonPanX by remember { mutableStateOf(0f) }
+		var webtoonViewportWidthPx by remember { mutableStateOf(1f) }
+
+		LaunchedEffect(zoomCommandToken) {
+			if (zoomCommandToken > 0 && zoomCommandDelta != 0) {
+				val step = if (zoomCommandDelta > 0) 0.35f else -0.35f
+				val nextZoom = (webtoonZoom + step).coerceIn(0.65f, 3.5f)
+				webtoonZoom = nextZoom
+				val maxPan = ((nextZoom - 1f).coerceAtLeast(0f) * webtoonViewportWidthPx * 0.5f).coerceAtLeast(0f)
+				webtoonPanX = if (nextZoom <= 1.02f) 0f else webtoonPanX.coerceIn(-maxPan, maxPan)
+			}
+		}
 
 		LaunchedEffect(uiState.isAutoScrollEnabled, uiState.isAutoScrollPaused, uiState.autoScrollSpeed) {
 			if (!uiState.isAutoScrollEnabled || uiState.isAutoScrollPaused) return@LaunchedEffect
@@ -1300,6 +1497,7 @@ private fun MangaReaderViewport(
 		BoxWithConstraints(
 			modifier = Modifier
 				.fillMaxSize()
+				.onSizeChanged { webtoonViewportWidthPx = it.width.toFloat().coerceAtLeast(1f) }
 				.pointerInput(Unit) {
 					awaitEachGesture {
 						do {
@@ -1307,8 +1505,8 @@ private fun MangaReaderViewport(
 							if (event.changes.size >= 2) {
 								val zoomChange = event.calculateZoom()
 								val pan = event.calculatePan()
-								val nextZoom = (webtoonZoom * zoomChange).coerceIn(1f, 2.8f)
-								val maxPan = ((nextZoom - 1f) * size.width * 0.5f).coerceAtLeast(0f)
+								val nextZoom = (webtoonZoom * zoomChange).coerceIn(0.65f, 3.5f)
+								val maxPan = ((nextZoom - 1f).coerceAtLeast(0f) * size.width * 0.5f).coerceAtLeast(0f)
 								webtoonZoom = nextZoom
 								webtoonPanX = if (nextZoom <= 1.02f) 0f else (webtoonPanX + pan.x).coerceIn(-maxPan, maxPan)
 								event.changes.forEach { it.consume() }
@@ -1543,11 +1741,15 @@ private fun MangaReaderViewport(
 			val slot = spreadSlots.getOrNull(slotIdx) ?: return
 			val firstPage = pages.getOrNull(slot.primaryIndex) ?: return
 			val secondPage = slot.secondaryIndex?.let { pages.getOrNull(it) }
+			val isCurrentSlot = slotIdx == pagerState.currentPage
 			if (secondPage == null) {
 				SsivPageView(
 					page = firstPage,
 					bitmapConfig = bitmapConfig,
 					isWebtoon = false,
+					isActivePage = isCurrentSlot,
+					zoomCommandToken = zoomCommandToken,
+					zoomCommandDelta = zoomCommandDelta,
 					isDoubleTapSmartZoom = currentSmartZoom,
 					shaderConfig = uiState.shaderConfig,
 					colorFilter = uiState.colorFilter,
@@ -1571,6 +1773,9 @@ private fun MangaReaderViewport(
 						page = leftPage,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						isActivePage = isCurrentSlot,
+						zoomCommandToken = zoomCommandToken,
+						zoomCommandDelta = zoomCommandDelta,
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						colorFilter = uiState.colorFilter,
@@ -1589,6 +1794,9 @@ private fun MangaReaderViewport(
 						page = rightPage,
 						bitmapConfig = bitmapConfig,
 						isWebtoon = false,
+						isActivePage = isCurrentSlot,
+						zoomCommandToken = zoomCommandToken,
+						zoomCommandDelta = zoomCommandDelta,
 						isDoubleTapSmartZoom = currentSmartZoom,
 						shaderConfig = uiState.shaderConfig,
 						colorFilter = uiState.colorFilter,
@@ -1669,6 +1877,9 @@ private fun SsivPageView(
 	onLongPress: () -> Unit = {},
 	fallbackUrl: String? = null,
 	onFindAlternative: (() -> Unit)? = null,
+	isActivePage: Boolean = false,
+	zoomCommandToken: Int = 0,
+	zoomCommandDelta: Int = 0,
 	modifier: Modifier = Modifier,
 ) {
 	val context = LocalContext.current
@@ -1760,6 +1971,7 @@ private fun SsivPageView(
 					val isLowRam = (ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
 						?.isLowRamDevice == true
 					ReaderSubsamplingImageView(ctx, isWebtoon).apply {
+						ssivState(this).lastHandledZoomToken = zoomCommandToken
 						isEagerLoadingEnabled = !isLowRam
 						panLimit = SubsamplingScaleImageView.PAN_LIMIT_INSIDE
 						minimumScaleType = if (isWebtoon) {
@@ -1834,6 +2046,23 @@ private fun SsivPageView(
 					}
 					if (ssiv.isReady) {
 						configureSsivScaleAndZoom(ssiv, isWebtoon, isDoubleTapSmartZoom)
+					}
+					if (!isActivePage || isWebtoon) {
+						holder.lastHandledZoomToken = zoomCommandToken
+					} else if (zoomCommandToken > 0 &&
+						zoomCommandDelta != 0 &&
+						holder.lastHandledZoomToken != zoomCommandToken &&
+						ssiv.isReady
+					) {
+						holder.lastHandledZoomToken = zoomCommandToken
+						val factor = if (zoomCommandDelta > 0) 1.35f else (1f / 1.35f)
+						val nextScale = (ssiv.scale * factor).coerceIn(ssiv.minScale, ssiv.maxScale)
+						val targetCenter = ssiv.viewToSourceCoord(ssiv.width * 0.5f, ssiv.height * 0.5f)
+							?: PointF(ssiv.sWidth * 0.5f, ssiv.sHeight * 0.5f)
+						ssiv.animateScaleAndCenter(nextScale, targetCenter)
+							?.withDuration(220L)
+							?.withInterruptible(true)
+							?.start()
 					}
 					applyShaderToSsiv(ssiv, shaderConfig, colorFilter, colorWarmth)
 				},
@@ -3295,19 +3524,20 @@ private fun ReaderQuickActionTile(
 	highlightTint: Color = NemuriTheme.colors.cyan,
 	enabled: Boolean = true,
 ) {
+	val tileShape = NemuriTheme.shape(12.dp)
 	Surface(
 		color = when {
 			!enabled -> NemuriTheme.colors.surfaceElevated.copy(alpha = 0.45f)
 			highlighted -> highlightTint.copy(alpha = 0.16f)
 			else -> NemuriTheme.colors.surfaceElevated
 		},
-		shape = RoundedCornerShape(12.dp),
+		shape = tileShape,
 		border = BorderStroke(
 			width = if (highlighted) 1.5.dp else 1.dp,
 			color = if (highlighted) highlightTint else NemuriTheme.colors.border,
 		),
 		modifier = modifier
-			.clip(RoundedCornerShape(12.dp))
+			.clip(tileShape)
 			.clickable(enabled = enabled, onClick = onClick),
 	) {
 		Column(
@@ -3390,12 +3620,12 @@ private fun ReaderScrubberEdgeSnapOverlay(targetEdge: ReaderScrubberEdge) {
 		}
 		Box(
 			modifier = barModifier
-				.clip(CircleShape)
+				.clip(NemuriTheme.pillShape())
 				.background(cyan.copy(alpha = 0.72f)),
 		)
 		Surface(
 			color = NemuriTheme.colors.dock.copy(alpha = 0.92f),
-			shape = RoundedCornerShape(999.dp),
+			shape = NemuriTheme.pillShape(),
 			border = BorderStroke(1.dp, cyan.copy(alpha = 0.65f)),
 			modifier = Modifier.align(Alignment.Center),
 		) {
@@ -3496,6 +3726,11 @@ private fun ReaderMovableCapsuleScrubber(
 			)
 		}
 
+	val navButtonShape = NemuriTheme.shape(14.dp)
+	val verticalCapsuleShape = NemuriTheme.shape(20.dp)
+	val horizontalNavShape = NemuriTheme.shape(13.dp)
+	val horizontalCapsuleShape = NemuriTheme.shape(21.dp)
+
 	if (edge.isVertical) {
 		Column(
 			modifier = dragSnapModifier,
@@ -3504,7 +3739,7 @@ private fun ReaderMovableCapsuleScrubber(
 		) {
 			Surface(
 				color = capsuleBg,
-				shape = RoundedCornerShape(14.dp),
+				shape = navButtonShape,
 				border = capsuleBorder,
 				modifier = Modifier.size(40.dp),
 			) {
@@ -3526,7 +3761,7 @@ private fun ReaderMovableCapsuleScrubber(
 
 			Surface(
 				color = capsuleBg,
-				shape = RoundedCornerShape(20.dp),
+				shape = verticalCapsuleShape,
 				border = capsuleBorder,
 				modifier = Modifier
 					.width(40.dp)
@@ -3613,7 +3848,7 @@ private fun ReaderMovableCapsuleScrubber(
 
 			Surface(
 				color = capsuleBg,
-				shape = RoundedCornerShape(14.dp),
+				shape = navButtonShape,
 				border = capsuleBorder,
 				modifier = Modifier.size(40.dp),
 			) {
@@ -3643,7 +3878,7 @@ private fun ReaderMovableCapsuleScrubber(
 			val rightEnabled = if (isRtl) canGoPrevChapter else canGoNextChapter
 			Surface(
 				color = capsuleBg,
-				shape = RoundedCornerShape(13.dp),
+				shape = horizontalNavShape,
 				border = capsuleBorder,
 				modifier = Modifier.size(42.dp),
 			) {
@@ -3663,7 +3898,7 @@ private fun ReaderMovableCapsuleScrubber(
 
 			Surface(
 				color = capsuleBg,
-				shape = RoundedCornerShape(21.dp),
+				shape = horizontalCapsuleShape,
 				border = capsuleBorder,
 				modifier = Modifier
 					.weight(1f)
@@ -3765,7 +4000,7 @@ private fun ReaderMovableCapsuleScrubber(
 
 			Surface(
 				color = capsuleBg,
-				shape = RoundedCornerShape(13.dp),
+				shape = horizontalNavShape,
 				border = capsuleBorder,
 				modifier = Modifier.size(42.dp),
 			) {
@@ -3795,10 +4030,10 @@ private fun ReaderSettingsModalSheet(
 	onToggleManualRotate: () -> Unit,
 	onResetAutoRotate: () -> Unit,
 	onAutoScrollStarted: () -> Unit,
+	onOpenAiPreview: () -> Unit,
 	onDismiss: () -> Unit,
 ) {
 	val context = LocalContext.current
-	var showShaderPreview by remember { mutableStateOf(false) }
 	val isColorCorrectionActive = !uiState.colorFilter.isEmpty || uiState.colorWarmth > 0.01f
 	var showColorFilterControls by rememberSaveable { mutableStateOf(isColorCorrectionActive) }
 	var showAdvancedLayoutControls by rememberSaveable { mutableStateOf(false) }
@@ -4280,6 +4515,12 @@ private fun ReaderSettingsModalSheet(
 					checked = uiState.showPageNumbers,
 					onCheckedChange = viewModel::setShowPageNumbers,
 				)
+				ReaderInlineSwitchRow(
+					title = "Show Zoom Buttons (⊕ / ⊖)",
+					subtitle = "Show floating zoom-in and zoom-out capsule in the lower-right margin",
+					checked = uiState.isZoomButtonsEnabled,
+					onCheckedChange = viewModel::setZoomButtonsEnabled,
+				)
 			}
 
 			Text(
@@ -4635,30 +4876,26 @@ private fun ReaderSettingsModalSheet(
 				)
 
 				if ((UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) && currentPage != null) {
+					val previewCtaShape = NemuriTheme.shape(10.dp)
 					Button(
-						onClick = { showShaderPreview = true },
+						onClick = onOpenAiPreview,
 						colors = ButtonDefaults.buttonColors(
-							containerColor = NemuriTheme.colors.surfaceElevated,
+							containerColor = NemuriTheme.colors.tealContainer,
 							contentColor = NemuriTheme.colors.cyan,
 						),
-						shape = RoundedCornerShape(10.dp),
+						shape = previewCtaShape,
 						modifier = Modifier
 							.fillMaxWidth()
-							.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+							.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f), previewCtaShape),
 					) {
-						Text("Compare Split (Before / After Preview)")
-					}
-					if (showShaderPreview) {
-						ShaderSplitPreviewDialog(
-							page = currentPage,
-							config = uiState.shaderConfig,
-							isNeuralActive = uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel,
-							neuralModelLabel = uiState.activeNeuralModelLabel,
-							neuralRevision = uiState.neuralRevision,
-							loadOriginalPage = viewModel::loadRawPageImage,
-							loadEnhancedPage = viewModel::loadPageImage,
-							onDismiss = { showShaderPreview = false },
+						Icon(
+							imageVector = Icons.Default.AutoAwesome,
+							contentDescription = null,
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(16.dp),
 						)
+						Spacer(Modifier.width(6.dp))
+						Text("Interactive AI Upscaling Preview")
 					}
 				}
 
@@ -4868,16 +5105,17 @@ private fun ReaderCompactChoiceRow(
 	selected: Boolean,
 	onClick: () -> Unit,
 ) {
+	val choiceShape = NemuriTheme.shape(10.dp)
 	Surface(
 		color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-		shape = RoundedCornerShape(10.dp),
+		shape = choiceShape,
 		border = BorderStroke(
 			1.dp,
 			if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
 		),
 		modifier = Modifier
 			.fillMaxWidth()
-			.clip(RoundedCornerShape(10.dp))
+			.clip(choiceShape)
 			.clickable(onClick = onClick),
 	) {
 		Row(
@@ -5194,6 +5432,7 @@ private data class AppliedShaderState(
 private class SsivHolderState(
 	var imageKey: String? = null,
 	var shaderState: AppliedShaderState? = null,
+	var lastHandledZoomToken: Int = 0,
 )
 
 private fun ssivState(ssiv: SubsamplingScaleImageView): SsivHolderState =

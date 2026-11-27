@@ -56,7 +56,9 @@ import org.koitharu.kotatsu.core.network.BaseHttpClient
 import org.koitharu.kotatsu.core.parser.MangaRepository
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import org.koitharu.kotatsu.core.prefs.ChaptersSortOrder
+import org.koitharu.kotatsu.core.prefs.DetailsUiMode
 import org.koitharu.kotatsu.core.prefs.DuplicateWinnerStrategy
+import org.koitharu.kotatsu.core.prefs.QuickScrollButtonsMode
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.core.ui.util.reverseAsync
 import org.koitharu.kotatsu.core.util.ext.getDisplayMessage
@@ -174,6 +176,8 @@ data class MangaDetailsUiState(
 	val isGeneratingRecap: Boolean = false,
 	val isRecapCardEnabled: Boolean = true,
 	val aiModeLabel: String = "Auto",
+	val activeAiEngineLabel: String = "Auto",
+	val recapEngineBadgeLabel: String = "Auto",
 	val recapDepth: RecapDepth = RecapDepth.DETAILED,
 	val translatedSynopsis: String? = null,
 	val isTranslatingSynopsis: Boolean = false,
@@ -183,6 +187,11 @@ data class MangaDetailsUiState(
 	val incognitoForNsfw: TriStateOption = TriStateOption.ASK,
 	val isAdultTitle: Boolean = false,
 	val duplicateWinnerStrategy: DuplicateWinnerStrategy = DuplicateWinnerStrategy.MOST_CHAPTERS,
+	val detailsUiMode: DetailsUiMode = DetailsUiMode.COMPACT,
+	val quickScrollButtonsEnabled: Boolean = false,
+	val currentChapterPosition: Int = 0,
+	val unreadChaptersCount: Int = 0,
+	val primaryChapterShortLabel: String? = null,
 )
 
 private data class SynopsisTranslationState(
@@ -250,15 +259,28 @@ class MangaDetailsViewModel @Inject constructor(
 	private val titleStatsFlow = MutableStateFlow(MangaTitleStats())
 	private val generatingRecapFlow = MutableStateFlow(false)
 	private val selectedRecapDepthFlow = MutableStateFlow<RecapDepth?>(null)
+	private val depthPreviewRecapFlow = MutableStateFlow<MangaAiRecapEntity?>(null)
+	private val activeAiEngineLabelFlow = MutableStateFlow(AiMode.fromKey(settings.aiMode).label)
+	private val hasReadyLocalModelFlow = MutableStateFlow(false)
 	private val translationStateFlow = MutableStateFlow(SynopsisTranslationState())
 	private val sessionIncognitoFlow = MutableStateFlow(false)
 	private var recapJob: Job? = null
 	private var translateJob: Job? = null
+	private var aiLabelJob: Job? = null
+	private var autoSanitizedStaleRecapMangaId: Long = 0L
 
-	private val _uiState = MutableStateFlow(MangaDetailsUiState())
+	private val _uiState = MutableStateFlow(
+		MangaDetailsUiState(
+			detailsUiMode = settings.detailsUiMode,
+			quickScrollButtonsEnabled = settings.quickScrollButtonsMode != QuickScrollButtonsMode.OFF,
+			activeAiEngineLabel = AiMode.fromKey(settings.aiMode).label,
+			recapEngineBadgeLabel = AiMode.fromKey(settings.aiMode).label,
+		),
+	)
 	val uiState: StateFlow<MangaDetailsUiState> = _uiState.asStateFlow()
 
 	init {
+		refreshActiveAiEngineLabel()
 		viewModelScope.launch {
 			localStorageChanges.collectLatest { downloaded ->
 				rawDetailsFlow.update { current ->
@@ -278,8 +300,40 @@ class MangaDetailsViewModel @Inject constructor(
 		}
 	}
 
+	private fun refreshActiveAiEngineLabel() {
+		aiLabelJob?.cancel()
+		aiLabelJob = viewModelScope.launch(Dispatchers.IO) {
+			val router = aiRouterProvider.get()
+			runCatchingCancellable { router.sanitizeDeletedLocalModel() }
+			val hasLocal = runCatchingCancellable { router.hasReadyLocalModel() }.getOrDefault(false)
+			hasReadyLocalModelFlow.value = hasLocal
+			val resolved = runCatchingCancellable { router.resolveActiveEngineDisplayLabel() }
+				.getOrElse { AiMode.fromKey(settings.aiMode).label }
+			activeAiEngineLabelFlow.value = resolved
+		}
+	}
+
+	private fun isDeletedLocalEngineLabel(label: String, hasReadyLocal: Boolean): Boolean {
+		if (hasReadyLocal) return false
+		val lower = label.lowercase()
+		return lower.startsWith("local ") || ".litertlm" in lower || ".gguf" in lower
+	}
+
+	fun setDetailsUiMode(mode: DetailsUiMode) {
+		settings.detailsUiMode = mode
+	}
+
+	fun setQuickScrollButtonsEnabled(enabled: Boolean) {
+		settings.quickScrollButtonsMode = if (enabled) {
+			QuickScrollButtonsMode.LONG_LISTS_ONLY
+		} else {
+			QuickScrollButtonsMode.OFF
+		}
+	}
+
 	fun bind(mangaId: Long, sourceName: String?) {
 		if (boundMangaId == mangaId && rawDetailsFlow.value != null) {
+			refreshActiveAiEngineLabel()
 			return
 		}
 		boundMangaId = mangaId
@@ -289,10 +343,13 @@ class MangaDetailsViewModel @Inject constructor(
 		translateJob?.cancel()
 		generatingRecapFlow.value = false
 		selectedRecapDepthFlow.value = null
+		depthPreviewRecapFlow.value = null
+		autoSanitizedStaleRecapMangaId = 0L
 		translationStateFlow.value = SynopsisTranslationState()
 		sessionIncognitoFlow.value = false
 		selectedChaptersFlow.value = emptySet()
 		relatedFlow.value = emptyList()
+		refreshActiveAiEngineLabel()
 
 		val cachedManga = MangaTransferCache.get(mangaId)
 		val savedOrder = settings.getChaptersSortOrder(mangaId)
@@ -658,12 +715,43 @@ class MangaDetailsViewModel @Inject constructor(
 		}
 	}
 
-	fun selectRecapDepth(depth: RecapDepth) {
+	fun setRecapDepth(depth: RecapDepth) {
 		selectedRecapDepthFlow.value = depth
 		settings.aiRecapDepth = depth.key
+		val details = rawDetailsFlow.value
+		val state = uiState.value
+		if (details != null && state.history != null) {
+			val branchChapters = details.chapters[state.selectedBranch] ?: details.allChapters
+			val orderedAscending = if (branchChapters.size >= 2 && branchChapters.first().number > branchChapters.last().number) {
+				branchChapters.asReversed()
+			} else {
+				branchChapters
+			}
+			val currentChapterId = state.history.chapterId
+			val rawIndex = orderedAscending.indexOfFirst { it.id == currentChapterId }
+			val effectiveIndex = when {
+				orderedAscending.isEmpty() -> -1
+				rawIndex >= 0 -> rawIndex
+				else -> 0
+			}
+			val readCount = if (effectiveIndex >= 0) effectiveIndex + 1 else 0
+			val targetChapterId = if (rawIndex >= 0) orderedAscending[rawIndex].id else currentChapterId
+			val cachedForDepth = recapUseCaseProvider.get().getCachedForDepth(
+				mangaId = details.toManga().id,
+				chapterId = targetChapterId,
+				readCount = readCount,
+				depth = depth,
+			)
+			if (cachedForDepth != null) {
+				depthPreviewRecapFlow.value = cachedForDepth
+			}
+			generateRecap(forceRefresh = false, depthOverride = depth)
+		}
 	}
 
-	fun generateRecap(forceRefresh: Boolean = false) {
+	fun selectRecapDepth(depth: RecapDepth) = setRecapDepth(depth)
+
+	fun generateRecap(forceRefresh: Boolean = false, depthOverride: RecapDepth? = null) {
 		val details = rawDetailsFlow.value ?: return
 		val state = uiState.value
 		val manga = details.toManga()
@@ -673,11 +761,18 @@ class MangaDetailsViewModel @Inject constructor(
 		} else {
 			branchChapters
 		}
-		val requestedDepth = state.recapDepth
+		val requestedDepth = depthOverride ?: state.recapDepth
 		recapJob?.cancel()
 		recapJob = viewModelScope.launch(Dispatchers.IO) {
 			generatingRecapFlow.value = true
 			runCatchingCancellable {
+				val router = aiRouterProvider.get()
+				router.sanitizeDeletedLocalModel()
+				val hasLocal = router.hasReadyLocalModel()
+				hasReadyLocalModelFlow.value = hasLocal
+				activeAiEngineLabelFlow.value = runCatchingCancellable {
+					router.resolveActiveEngineDisplayLabel()
+				}.getOrElse { AiMode.fromKey(settings.aiMode).label }
 				recapUseCaseProvider.get().generateRecap(
 					manga = manga,
 					orderedChapters = orderedAscending,
@@ -686,6 +781,8 @@ class MangaDetailsViewModel @Inject constructor(
 					forceRefresh = forceRefresh,
 					depthOverride = requestedDepth,
 				)
+			}.onSuccess { generated ->
+				depthPreviewRecapFlow.value = generated
 			}.onFailure { err ->
 				toastManager.show(err.localizedMessage ?: "Failed to build recap")
 			}
@@ -696,6 +793,7 @@ class MangaDetailsViewModel @Inject constructor(
 	fun clearRecap() {
 		val id = boundMangaId
 		if (id == 0L) return
+		depthPreviewRecapFlow.value = null
 		viewModelScope.launch(Dispatchers.IO) {
 			recapUseCaseProvider.get().clearCache(id)
 		}
@@ -904,7 +1002,9 @@ class MangaDetailsViewModel @Inject constructor(
 					it == AppSettings.KEY_REVERSE_CHAPTERS ||
 					it == AppSettings.KEY_INCOGNITO_MODE ||
 					it == AppSettings.KEY_INCOGNITO_NSFW ||
-					it == AppSettings.KEY_DUPLICATE_WINNER_STRATEGY
+					it == AppSettings.KEY_DUPLICATE_WINNER_STRATEGY ||
+					it == AppSettings.KEY_DETAILS_UI ||
+					it == AppSettings.KEY_QUICK_SCROLL_BUTTONS
 			}
 			.onStart { emit(null) }
 
@@ -940,25 +1040,66 @@ class MangaDetailsViewModel @Inject constructor(
 				it == null ||
 					it == AppSettings.KEY_AI_MODE ||
 					it == AppSettings.KEY_AI_SHOW_RECAP_CARD ||
-					it == AppSettings.KEY_AI_RECAP_DEPTH
+					it == AppSettings.KEY_AI_RECAP_DEPTH ||
+					it == AppSettings.KEY_AI_LOCAL_MODEL_ID ||
+					it == AppSettings.KEY_AI_GEMINI_MODEL ||
+					it == AppSettings.KEY_AI_REMOTE_URL ||
+					it == AppSettings.KEY_AI_REMOTE_MODEL
 			}
 			.onStart { emit(null) }
 
-		val recapBundleFlow = combine(
+		val recapSourcesFlow = combine(
 			recapUseCaseProvider.get().observeCached(mangaId).catch { emit(null) },
+			depthPreviewRecapFlow,
 			generatingRecapFlow,
 			selectedRecapDepthFlow,
 			aiPrefFlow,
-		) { recap, isGen, selectedDepth, _ ->
+		) { dbRecap, previewRecap, isGen, selectedDepth, changedKey ->
+			if (changedKey != null) {
+				refreshActiveAiEngineLabel()
+			}
 			val effectiveDepth = selectedDepth
-				?: recap?.parsedDepth()
+				?: dbRecap?.parsedDepth()
 				?: RecapDepth.fromKey(settings.aiRecapDepth)
+			val effectiveRecap = when {
+				selectedDepth != null && previewRecap != null && previewRecap.parsedDepth() == selectedDepth -> previewRecap
+				else -> dbRecap
+			}
 			RecapMetaBundle(
-				recap = recap,
+				recap = effectiveRecap,
 				isGenerating = isGen,
 				isCardEnabled = settings.isAiShowRecapCard,
 				aiModeLabel = AiMode.fromKey(settings.aiMode).label,
+				activeAiEngineLabel = activeAiEngineLabelFlow.value,
+				recapEngineBadgeLabel = activeAiEngineLabelFlow.value,
 				recapDepth = effectiveDepth,
+			)
+		}
+
+		val recapBundleFlow = combine(
+			recapSourcesFlow,
+			activeAiEngineLabelFlow,
+			hasReadyLocalModelFlow,
+		) { bundle, activeEngineLabel, hasReadyLocal ->
+			val rawLabel = bundle.recap?.displayEngineLabel()
+			val isGhostLocal = rawLabel != null && isDeletedLocalEngineLabel(rawLabel, hasReadyLocal)
+			val sanitizedBadge = if (rawLabel.isNullOrBlank() || isGhostLocal) {
+				activeEngineLabel
+			} else {
+				rawLabel
+			}
+			if (isGhostLocal &&
+				bundle.recap != null &&
+				!bundle.isGenerating &&
+				autoSanitizedStaleRecapMangaId != mangaId &&
+				rawDetailsFlow.value != null
+			) {
+				autoSanitizedStaleRecapMangaId = mangaId
+				generateRecap(forceRefresh = true, depthOverride = bundle.recapDepth)
+			}
+			bundle.copy(
+				activeAiEngineLabel = activeEngineLabel,
+				recapEngineBadgeLabel = sanitizedBadge,
 			)
 		}
 
@@ -991,6 +1132,8 @@ class MangaDetailsViewModel @Inject constructor(
 				isGeneratingRecap = recapBundle.isGenerating,
 				isRecapCardEnabled = recapBundle.isCardEnabled,
 				aiModeLabel = recapBundle.aiModeLabel,
+				activeAiEngineLabel = recapBundle.activeAiEngineLabel,
+				recapEngineBadgeLabel = recapBundle.recapEngineBadgeLabel,
 				recapDepth = recapBundle.recapDepth,
 			)
 		}.combine(translationStateFlow) { meta, trans ->
@@ -1002,6 +1145,8 @@ class MangaDetailsViewModel @Inject constructor(
 				isGlobalIncognito = settings.isIncognitoModeEnabled,
 				incognitoForNsfw = settings.incognitoModeForNsfw,
 				winnerStrategy = settings.duplicateWinnerStrategy,
+				detailsUiMode = settings.detailsUiMode,
+				quickScrollButtonsEnabled = settings.quickScrollButtonsMode != QuickScrollButtonsMode.OFF,
 			)
 		}
 
@@ -1139,6 +1284,20 @@ class MangaDetailsViewModel @Inject constructor(
 					}
 					)
 
+				val currentChapterPosition = if (currentIndex >= 0) currentIndex + 1 else 0
+				val unreadChaptersCount = if (currentIndex >= 0) {
+					(branchChapters.size - (currentIndex + 1)).coerceAtLeast(0)
+				} else {
+					branchChapters.size
+				}
+				val primaryChapterShortLabel = primaryChapter?.let { ch ->
+					when {
+						ch.number > 0f && ch.number % 1f == 0f -> "Ch. ${ch.number.toInt()}"
+						ch.number > 0f -> "Ch. ${ch.number.toBigDecimal().stripTrailingZeros().toPlainString()}"
+						else -> chapterDisplayName(ch)
+					}
+				}
+
 				MangaDetailsUiState(
 					mangaId = mangaId,
 					manga = manga,
@@ -1187,6 +1346,8 @@ class MangaDetailsViewModel @Inject constructor(
 					isGeneratingRecap = meta.isGeneratingRecap,
 					isRecapCardEnabled = meta.isRecapCardEnabled,
 					aiModeLabel = meta.aiModeLabel,
+					activeAiEngineLabel = meta.activeAiEngineLabel,
+					recapEngineBadgeLabel = meta.recapEngineBadgeLabel,
 					recapDepth = meta.recapDepth,
 					translatedSynopsis = meta.translationState.translatedText,
 					isTranslatingSynopsis = meta.translationState.isTranslating,
@@ -1196,6 +1357,11 @@ class MangaDetailsViewModel @Inject constructor(
 					incognitoForNsfw = meta.incognitoForNsfw,
 					isAdultTitle = isAdultTitle,
 					duplicateWinnerStrategy = meta.winnerStrategy,
+					detailsUiMode = meta.detailsUiMode,
+					quickScrollButtonsEnabled = meta.quickScrollButtonsEnabled,
+					currentChapterPosition = currentChapterPosition,
+					unreadChaptersCount = unreadChaptersCount,
+					primaryChapterShortLabel = primaryChapterShortLabel,
 				)
 			}.flowOn(Dispatchers.Default)
 				.collect { state ->
@@ -1223,12 +1389,16 @@ class MangaDetailsViewModel @Inject constructor(
 		val isGeneratingRecap: Boolean = false,
 		val isRecapCardEnabled: Boolean = true,
 		val aiModeLabel: String = "Auto",
+		val activeAiEngineLabel: String = "Auto",
+		val recapEngineBadgeLabel: String = "Auto",
 		val recapDepth: RecapDepth = RecapDepth.DETAILED,
 		val translationState: SynopsisTranslationState = SynopsisTranslationState(),
 		val isSessionIncognito: Boolean = false,
 		val isGlobalIncognito: Boolean = false,
 		val incognitoForNsfw: TriStateOption = TriStateOption.ASK,
 		val winnerStrategy: DuplicateWinnerStrategy = DuplicateWinnerStrategy.MOST_CHAPTERS,
+		val detailsUiMode: DetailsUiMode = DetailsUiMode.COMPACT,
+		val quickScrollButtonsEnabled: Boolean = false,
 	)
 
 	private data class RecapMetaBundle(
@@ -1236,6 +1406,8 @@ class MangaDetailsViewModel @Inject constructor(
 		val isGenerating: Boolean,
 		val isCardEnabled: Boolean,
 		val aiModeLabel: String,
+		val activeAiEngineLabel: String,
+		val recapEngineBadgeLabel: String,
 		val recapDepth: RecapDepth,
 	)
 }
