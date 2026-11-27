@@ -648,6 +648,19 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		get() = prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
 		set(value) = prefs.edit { putLong(KEY_LAST_UPDATE_CHECK_AT, value) }
 
+	var visibleNavTabs: Set<String>
+		get() {
+			val raw = prefs.getString(KEY_VISIBLE_NAV_TABS, null)
+			if (raw.isNullOrBlank()) return DEFAULT_VISIBLE_NAV_TABS
+			val parsed = raw.split(',').map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+			return parsed.ifEmpty { DEFAULT_VISIBLE_NAV_TABS }
+		}
+		set(value) = prefs.edit {
+			val sanitized = value.map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+				.ifEmpty { setOf("LIBRARY") }
+			putString(KEY_VISIBLE_NAV_TABS, sanitized.joinToString(","))
+		}
+
 	val isReaderControlAlwaysLTR: Boolean
 		get() = prefs.getBoolean(KEY_READER_CONTROL_LTR, false)
 
@@ -2114,6 +2127,9 @@ class AppSettings @Inject constructor(@ApplicationContext context: Context) {
 		const val KEY_SUGGESTIONS_PROMPT_HANDLED = "suggestions_prompt_handled"
 		const val KEY_DISMISSED_UPDATE_ID = "dismissed_github_update_id"
 		const val KEY_LAST_UPDATE_CHECK_AT = "last_github_update_check_at"
+		const val KEY_VISIBLE_NAV_TABS = "ui_visible_nav_tabs"
+
+		val DEFAULT_VISIBLE_NAV_TABS: Set<String> = setOf("LIBRARY", "HISTORY", "FEED", "EXPLORE", "ENHANCE")
 
 		/**
 		 * Keys that must never leave the device: credentials, app-lock state and per-install ids.

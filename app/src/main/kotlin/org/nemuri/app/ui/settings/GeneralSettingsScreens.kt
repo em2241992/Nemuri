@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
@@ -624,6 +625,65 @@ fun AppearanceSettingsScreen(
 					checked = state.isNavBarCompact,
 					onCheckedChange = viewModel::setNavBarCompact,
 				)
+				SettingsRowDivider()
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.padding(14.dp),
+					verticalArrangement = Arrangement.spacedBy(8.dp),
+				) {
+					Text(
+						text = "Visible Navigation Items",
+						style = MaterialTheme.typography.labelLarge,
+						color = NemuriTheme.colors.textPrimary,
+					)
+					Text(
+						text = "Show or hide tabs on the navigation dock, classic bar, and side rail (Library stays pinned).",
+						style = MaterialTheme.typography.bodySmall,
+						color = NemuriTheme.colors.textMuted,
+					)
+					FlowRow(
+						modifier = Modifier.fillMaxWidth(),
+						horizontalArrangement = Arrangement.spacedBy(8.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						org.nemuri.app.navigation.AppTab.entries.forEach { tab ->
+							val isVisible = tab.name in state.visibleNavTabs
+							val isPinned = tab == org.nemuri.app.navigation.AppTab.LIBRARY
+							Surface(
+								color = if (isVisible) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+								shape = navChipShape,
+								border = BorderStroke(
+									1.dp,
+									if (isVisible) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+								),
+								modifier = Modifier
+									.clip(navChipShape)
+									.clickable { viewModel.toggleVisibleNavTab(tab.name) },
+							) {
+								Row(
+									modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+									verticalAlignment = Alignment.CenterVertically,
+									horizontalArrangement = Arrangement.spacedBy(6.dp),
+								) {
+									if (isVisible) {
+										Icon(
+											imageVector = Icons.Default.Check,
+											contentDescription = null,
+											tint = NemuriTheme.colors.cyan,
+											modifier = Modifier.size(14.dp),
+										)
+									}
+									Text(
+										text = if (isPinned) "${tab.label} (Pinned)" else tab.label,
+										style = MaterialTheme.typography.labelMedium,
+										color = if (isVisible) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+									)
+								}
+							}
+						}
+					}
+				}
 				SettingsRowDivider()
 				Column(
 					modifier = Modifier
@@ -2395,6 +2455,38 @@ fun AboutSettingsScreen(
 						color = NemuriTheme.colors.textMuted,
 					)
 				}
+				SettingsRowDivider()
+				val availUpdate = state.availableAppUpdate
+				SettingsActionRow(
+					icon = Icons.Default.Refresh,
+					title = when {
+						state.isDownloadingAppUpdate -> "Downloading Update…"
+						availUpdate != null -> "Install Update (v${availUpdate.name})"
+						state.isCheckingAppUpdate -> "Checking for Updates…"
+						else -> "Check for App Updates"
+					},
+					subtitle = when {
+						!state.isAppUpdateSupported -> "Updates are managed by F-Droid on this flavor"
+						state.isDownloadingAppUpdate -> {
+							val pct = state.appUpdateDownloadProgress
+								?.takeIf { it.isFinite() }
+								?.let { "${(it * 100f).toInt().coerceIn(0, 100)}%" }
+								?: "Preparing installer…"
+							"Downloading GitHub release APK ($pct)"
+						}
+						availUpdate != null -> "Tap to download and install v${availUpdate.name} from GitHub"
+						!state.appUpdateStatus.isNullOrBlank() -> state.appUpdateStatus.orEmpty()
+						else -> "Check em2241992/Nemuri GitHub releases for newer builds"
+					},
+					tint = if (availUpdate != null) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+					onClick = {
+						if (availUpdate != null) {
+							viewModel.installAvailableAppUpdate()
+						} else {
+							viewModel.checkForAppUpdateNow()
+						}
+					},
+				)
 				SettingsRowDivider()
 				SettingsActionRow(
 					icon = Icons.Default.AutoAwesome,

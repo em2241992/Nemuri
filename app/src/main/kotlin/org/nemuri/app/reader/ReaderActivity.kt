@@ -429,6 +429,7 @@ private fun ReaderRootScreen(
 	var showHud by remember { mutableStateOf(false) }
 	var showChaptersSheet by remember { mutableStateOf(false) }
 	var showSettingsSheet by remember { mutableStateOf(false) }
+	var settingsSheetUpscalingOnly by remember { mutableStateOf(false) }
 	var showAiPreviewSheet by remember { mutableStateOf(false) }
 	var aiPreviewPage by remember { mutableStateOf<ReaderPage?>(null) }
 	var quickActionPage by remember { mutableStateOf<ReaderPage?>(null) }
@@ -691,23 +692,6 @@ private fun ReaderRootScreen(
 									)
 								}
 							}
-						}
-					}
-					if (!uiState.isTextMode) {
-						val isAiVisualActive = uiState.shaderConfig.isActive ||
-							(uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel) ||
-							uiState.colorFilter.isBookBackground
-						IconButton(
-							onClick = {
-								aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
-								showAiPreviewSheet = true
-							},
-						) {
-							Icon(
-								imageVector = Icons.Default.AutoAwesome,
-								contentDescription = "AI upscaling preview",
-								tint = if (isAiVisualActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
-							)
 						}
 					}
 					IconButton(onClick = viewModel::toggleBookmark) {
@@ -1109,7 +1093,7 @@ private fun ReaderRootScreen(
 							.clickable { showChaptersSheet = true },
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
 							verticalAlignment = Alignment.CenterVertically,
 							horizontalArrangement = Arrangement.spacedBy(5.dp),
 						) {
@@ -1135,59 +1119,60 @@ private fun ReaderRootScreen(
 							shape = hudPillShape,
 							border = if (isUpscaleOrWarmActive) BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.65f)) else null,
 							modifier = Modifier
-								.size(34.dp)
 								.clip(hudPillShape)
 								.clickable {
 									aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
 									showAiPreviewSheet = true
 								},
 						) {
-							Box(contentAlignment = Alignment.Center) {
+							Row(
+								modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(5.dp),
+							) {
 								Icon(
 									imageVector = Icons.Default.AutoAwesome,
-									contentDescription = "AI upscaling preview",
+									contentDescription = "Enhance",
 									tint = NemuriTheme.colors.cyan,
-									modifier = Modifier.size(17.dp),
+									modifier = Modifier.size(16.dp),
+								)
+								Text(
+									text = "Enhance",
+									style = MaterialTheme.typography.labelMedium,
+									fontWeight = FontWeight.SemiBold,
+									color = if (isUpscaleOrWarmActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+									maxLines = 1,
 								)
 							}
 						}
 					}
 
 					Surface(
-						color = if (isEnhanceActive) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+						color = NemuriTheme.colors.surfaceElevated,
 						shape = hudPillShape,
-						border = if (isEnhanceActive) BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)) else null,
 						modifier = Modifier
 							.clip(hudPillShape)
-							.clickable { showSettingsSheet = true },
+							.clickable {
+								settingsSheetUpscalingOnly = false
+								showSettingsSheet = true
+							},
 					) {
 						Row(
-							modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+							modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
 							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(6.dp),
+							horizontalArrangement = Arrangement.spacedBy(5.dp),
 						) {
-							Box {
-								Icon(
-									imageVector = Icons.Default.Tune,
-									contentDescription = "Reader & Enhance Tools",
-									tint = NemuriTheme.colors.cyan,
-									modifier = Modifier.size(16.dp),
-								)
-								if (isEnhanceActive) {
-									Box(
-										modifier = Modifier
-											.align(Alignment.TopEnd)
-											.offset(x = 2.dp, y = (-2).dp)
-											.size(6.dp)
-											.background(NemuriTheme.colors.cyan, CircleShape),
-									)
-								}
-							}
+							Icon(
+								imageVector = Icons.Default.Tune,
+								contentDescription = if (uiState.isTextMode) "Style" else "Tools",
+								tint = NemuriTheme.colors.cyan,
+								modifier = Modifier.size(16.dp),
+							)
 							Text(
-								text = if (uiState.isTextMode) "Style" else "Mode & Tools",
+								text = if (uiState.isTextMode) "Style" else "Tools",
 								style = MaterialTheme.typography.labelMedium,
 								fontWeight = FontWeight.SemiBold,
-								color = if (isEnhanceActive) NemuriTheme.colors.cyan else NemuriTheme.colors.textPrimary,
+								color = NemuriTheme.colors.textPrimary,
 								maxLines = 1,
 							)
 						}
@@ -1305,6 +1290,7 @@ private fun ReaderRootScreen(
 			onOpenUpscalingSettings = {
 				showAiPreviewSheet = false
 				aiPreviewPage = null
+				settingsSheetUpscalingOnly = true
 				showSettingsSheet = true
 			},
 			onDismiss = {
@@ -1320,6 +1306,7 @@ private fun ReaderRootScreen(
 			viewModel = viewModel,
 			isLandscape = isLandscape,
 			isOrientationLocked = isOrientationLocked,
+			upscalingOnly = settingsSheetUpscalingOnly,
 			onToggleManualRotate = onToggleManualRotate,
 			onResetAutoRotate = onResetAutoRotate,
 			onAutoScrollStarted = {
@@ -1328,10 +1315,14 @@ private fun ReaderRootScreen(
 			},
 			onOpenAiPreview = {
 				showSettingsSheet = false
+				settingsSheetUpscalingOnly = false
 				aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
 				showAiPreviewSheet = true
 			},
-			onDismiss = { showSettingsSheet = false },
+			onDismiss = {
+				showSettingsSheet = false
+				settingsSheetUpscalingOnly = false
+			},
 		)
 	}
 }
@@ -4027,6 +4018,7 @@ private fun ReaderSettingsModalSheet(
 	viewModel: ReaderViewModel,
 	isLandscape: Boolean,
 	isOrientationLocked: Boolean,
+	upscalingOnly: Boolean = false,
 	onToggleManualRotate: () -> Unit,
 	onResetAutoRotate: () -> Unit,
 	onAutoScrollStarted: () -> Unit,
@@ -4042,11 +4034,15 @@ private fun ReaderSettingsModalSheet(
 	val currentPage = uiState.pages.getOrNull(uiState.currentPageIndex)
 
 	NemuriModalSheet(
-		title = if (uiState.isTextMode) "Typography & Reader" else "Reader & Enhance",
-		subtitle = if (uiState.isTextMode) {
-			uiState.chapterTitle
-		} else {
-			"${uiState.readerMode.name.lowercase().replaceFirstChar { it.uppercase() }} • ${uiState.scrubberEdge.label}"
+		title = when {
+			uiState.isTextMode -> "Typography & Reader"
+			upscalingOnly -> "Upscaling Settings"
+			else -> "Reader & Tools"
+		},
+		subtitle = when {
+			uiState.isTextMode -> uiState.chapterTitle
+			upscalingOnly -> "GPU Shaders, Neural 2x & Compute Delegate"
+			else -> "${uiState.readerMode.name.lowercase().replaceFirstChar { it.uppercase() }} • ${uiState.scrubberEdge.label}"
 		},
 		onDismiss = onDismiss,
 	) {
@@ -4057,7 +4053,7 @@ private fun ReaderSettingsModalSheet(
 			verticalArrangement = Arrangement.spacedBy(14.dp),
 		) {
 			// 1. HIGH-FREQUENCY TOP: Visual Read Mode Selector Cards + Visual <-> Compact Menu Toggle
-			if (!uiState.isTextMode) {
+			if (!uiState.isTextMode && !upscalingOnly) {
 				Row(
 					modifier = Modifier.fillMaxWidth(),
 					verticalAlignment = Alignment.CenterVertically,
@@ -4792,10 +4788,10 @@ private fun ReaderSettingsModalSheet(
 						)
 					}
 				}
+			}
 
-				HorizontalDivider(color = NemuriTheme.colors.border)
-
-				// 4. UPSCALER & NEURAL MODELS (Below everyday controls, with active delegate strip + collapsible model downloader)
+			if (!uiState.isTextMode && upscalingOnly) {
+				// UPSCALER & NEURAL MODELS (Dedicated Upscaling Settings opened from ✨ Enhance)
 				Text(
 					text = "UPSCALER & NEURAL SUPER-RESOLUTION",
 					style = MaterialTheme.typography.labelSmall,

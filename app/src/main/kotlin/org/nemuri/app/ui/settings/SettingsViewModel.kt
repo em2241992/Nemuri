@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.koitharu.kotatsu.core.db.MangaDatabase
+import org.koitharu.kotatsu.core.github.AppUpdateRepository
+import org.koitharu.kotatsu.core.github.AppVersion
 import org.koitharu.kotatsu.core.logs.AppLogger
 import org.koitharu.kotatsu.core.model.ContentWarning
 import org.koitharu.kotatsu.core.network.DoHProvider
@@ -96,6 +98,7 @@ data class SettingsUiState(
 	val showBottomProgressBar: Boolean = true,
 	val isNavBarCompact: Boolean = false,
 	val isLegacyNavigationBar: Boolean = false,
+	val visibleNavTabs: Set<String> = AppSettings.DEFAULT_VISIBLE_NAV_TABS,
 	val selectionMenuStyle: SelectionMenuStyle = SelectionMenuStyle.VISUAL_DIAGRAM,
 	val navLabelVisibility: NavLabelVisibility = NavLabelVisibility.SELECTED_ONLY,
 	val isSwipeActionsEnabled: Boolean = true,
@@ -179,6 +182,13 @@ data class SettingsUiState(
 	val isVerboseLoggingEnabled: Boolean = false,
 	val hasLastCrashLog: Boolean = false,
 	val roomSchemaVersion: Int = 0,
+	// GitHub App Updater
+	val isAppUpdateSupported: Boolean = false,
+	val isCheckingAppUpdate: Boolean = false,
+	val appUpdateStatus: String? = null,
+	val availableAppUpdate: AppVersion? = null,
+	val isDownloadingAppUpdate: Boolean = false,
+	val appUpdateDownloadProgress: Float? = null,
 )
 
 @HiltViewModel
@@ -195,6 +205,7 @@ class SettingsViewModel @Inject constructor(
 	private val syncFeature: SyncFeature,
 	private val upscaleModelManager: NeuralUpscaleModelManager,
 	private val pageUpscaleEngine: PageUpscaleEngine,
+	private val appUpdateRepository: AppUpdateRepository,
 	val toastManager: NemuriToastManager,
 ) : ViewModel() {
 
@@ -202,6 +213,26 @@ class SettingsViewModel @Inject constructor(
 	private val schemaVersionFlow = MutableStateFlow(0)
 	private val neuralCacheVersion = MutableStateFlow(0)
 	private val crashLogVersionFlow = MutableStateFlow(0)
+	private val isCheckingAppUpdateFlow = MutableStateFlow(false)
+	private val appUpdateStatusFlow = MutableStateFlow<String?>(null)
+
+	private data class AppUpdateUiSnapshot(
+		val isChecking: Boolean,
+		val status: String?,
+		val available: AppVersion?,
+		val isDownloading: Boolean,
+		val progress: Float?,
+	)
+
+	private val appUpdateSnapshotFlow = combine(
+		isCheckingAppUpdateFlow,
+		appUpdateStatusFlow,
+		appUpdateRepository.observeAvailableUpdate(),
+		appUpdateRepository.observeIsDownloading(),
+		appUpdateRepository.observeDownloadProgress(),
+	) { checking, status, available, downloading, progress ->
+		AppUpdateUiSnapshot(checking, status, available, downloading, progress)
+	}
 
 	init {
 		refreshStorageStats()
@@ -218,7 +249,7 @@ class SettingsViewModel @Inject constructor(
 		settings.observeChanges().onStart { emit(null) },
 		trackScheduler.observeIsRunning(),
 		storageStatsFlow,
-		schemaVersionFlow,
+		combine(schemaVersionFlow, appUpdateSnapshotFlow) { v, u -> v to u },
 		combine(
 			upscaleModelManager.downloadState,
 			upscaleModelManager.inventoryVersion,
@@ -226,7 +257,8 @@ class SettingsViewModel @Inject constructor(
 			pageUpscaleEngine.activeDelegateLabel,
 			pageUpscaleEngine.cacheBytesFlow,
 		) { dl, _, _, activeLabel, cacheBytes -> Triple(dl, activeLabel, cacheBytes) },
-	) { _, isTrackerRunning, storageStats, schemaVersion, neuralTriple ->
+	) { _, isTrackerRunning, storageStats, schemaAndUpdate, neuralTriple ->
+		val (schemaVersion, updateSnap) = schemaAndUpdate
 		val (neuralDl, activeDelegateLabel, neuralCacheBytes) = neuralTriple
 		val selectedNeuralId = settings.neuralUpscaleModelId
 		val neuralItems = upscaleModelManager.catalog.map { entry ->
@@ -261,6 +293,7 @@ class SettingsViewModel @Inject constructor(
 			showBottomProgressBar = settings.showBottomProgressBar,
 			isNavBarCompact = settings.isNavBarCompact,
 			isLegacyNavigationBar = settings.isLegacyNavigationBar,
+			visibleNavTabs = settings.visibleNavTabs,
 			selectionMenuStyle = settings.selectionMenuStyle,
 			navLabelVisibility = settings.navLabelVisibility,
 			isSwipeActionsEnabled = settings.isSwipeActionsEnabled,
@@ -338,6 +371,12 @@ class SettingsViewModel @Inject constructor(
 			isVerboseLoggingEnabled = settings.isVerboseLoggingEnabled,
 			hasLastCrashLog = org.nemuri.app.crash.CrashLogStore.hasLastCrashLog(appContext),
 			roomSchemaVersion = schemaVersion,
+			isAppUpdateSupported = appUpdateRepository.isUpdateSupported(),
+			isCheckingAppUpdate = updateSnap.isChecking,
+			appUpdateStatus = updateSnap.status,
+			availableAppUpdate = updateSnap.available,
+			isDownloadingAppUpdate = updateSnap.isDownloading,
+			appUpdateDownloadProgress = updateSnap.progress,
 		)
 	}.stateIn(
 		scope = viewModelScope,
@@ -729,5 +768,54 @@ class SettingsViewModel @Inject constructor(
 		org.nemuri.app.crash.CrashLogStore.clearLastCrashLog(appContext)
 		crashLogVersionFlow.value += 1
 		toastManager.show("Crash log cleared")
+	}
+
+	fun toggleVisibleNavTab(tabName: String) {
+		val key = tabName.uppercase()
+		if (key == "LIBRARY") {
+			toastManager.show("Library tab is always pinned")
+			return
+		}
+		val current = settings.visibleNavTabs.toMutableSet()
+		if (key in current) {
+			if (current.size <= 2) {
+				toastManager.show("Keep at least 2 navigation tabs visible")
+				return
+			}
+			current.remove(key)
+		} else {
+			current.add(key)
+		}
+		settings.visibleNavTabs = current
+	}
+
+	fun checkForAppUpdateNow() {
+		if (!appUpdateRepository.isUpdateSupported()) {
+			toastManager.show("App updates are managed by F-Droid on this flavor")
+			return
+		}
+		if (isCheckingAppUpdateFlow.value) return
+		viewModelScope.launch(Dispatchers.IO) {
+			isCheckingAppUpdateFlow.value = true
+			appUpdateStatusFlow.value = "Checking GitHub releases…"
+			val update = appUpdateRepository.fetchUpdate(force = true)
+			isCheckingAppUpdateFlow.value = false
+			if (update != null) {
+				appUpdateStatusFlow.value = "Update available: v${update.name}"
+				toastManager.show("Update available: v${update.name}")
+			} else {
+				appUpdateStatusFlow.value = "You are on the latest release"
+				toastManager.show("Nemuri is up to date")
+			}
+		}
+	}
+
+	fun installAvailableAppUpdate() {
+		val update = appUpdateRepository.observeAvailableUpdate().value ?: return
+		viewModelScope.launch(Dispatchers.IO) {
+			appUpdateRepository.downloadAndInstallUpdate(update).onFailure { err ->
+				toastManager.show(err.localizedMessage ?: "Failed to download update")
+			}
+		}
 	}
 }

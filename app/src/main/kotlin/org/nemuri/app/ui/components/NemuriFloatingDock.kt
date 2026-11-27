@@ -189,7 +189,10 @@ fun NemuriFloatingDockBar(
 						horizontalArrangement = Arrangement.spacedBy(if (isAlwaysStacked) 2.dp else 3.dp),
 						verticalAlignment = Alignment.CenterVertically,
 					) {
-						AppTab.entries.forEach { tab ->
+						val visibleTabs = LocalLayoutStudioPrefs.current.visibleNavTabs
+						val tabsToShow = AppTab.entries.filter { it.name in visibleTabs }
+							.ifEmpty { listOf(AppTab.LIBRARY) }
+						tabsToShow.forEach { tab ->
 							val selected = tab == currentTab
 							DockTabPill(
 								tab = tab,
@@ -302,7 +305,10 @@ fun NemuriClassicBottomBar(
 						.padding(horizontal = 6.dp),
 					verticalAlignment = Alignment.CenterVertically,
 				) {
-					AppTab.entries.forEach { tab ->
+					val visibleTabs = LocalLayoutStudioPrefs.current.visibleNavTabs
+					val tabsToShow = AppTab.entries.filter { it.name in visibleTabs }
+						.ifEmpty { listOf(AppTab.LIBRARY) }
+					tabsToShow.forEach { tab ->
 						val selected = tab == currentTab
 						ClassicBarTabItem(
 							tab = tab,
@@ -788,7 +794,10 @@ fun NemuriNavigationRail(
 				.size(36.dp)
 				.padding(bottom = 12.dp),
 		)
-		AppTab.entries.forEach { tab ->
+		val visibleTabs = LocalLayoutStudioPrefs.current.visibleNavTabs
+		val tabsToShow = AppTab.entries.filter { it.name in visibleTabs }
+			.ifEmpty { listOf(AppTab.LIBRARY) }
+		tabsToShow.forEach { tab ->
 			val selected = tab == currentTab
 			NavigationRailItem(
 				selected = selected,

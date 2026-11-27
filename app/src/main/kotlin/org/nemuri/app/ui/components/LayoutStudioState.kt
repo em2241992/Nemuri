@@ -51,6 +51,7 @@ data class LayoutStudioPrefs(
 	val quickScrollButtonsMode: QuickScrollButtonsMode = QuickScrollButtonsMode.OFF,
 	val isLastPositionPillEnabled: Boolean = true,
 	val detailsUiMode: DetailsUiMode = DetailsUiMode.COMPACT,
+	val visibleNavTabs: Set<String> = AppSettings.DEFAULT_VISIBLE_NAV_TABS,
 ) {
 	fun columnsForOrientation(isLandscape: Boolean): Int {
 		return if (isLandscape) gridColumnsLandscape else gridColumnsPortrait
@@ -110,6 +111,7 @@ fun AppSettings.toLayoutStudioPrefs(): LayoutStudioPrefs {
 		quickScrollButtonsMode = quickScrollButtonsMode,
 		isLastPositionPillEnabled = isLastPositionPillEnabled,
 		detailsUiMode = detailsUiMode,
+		visibleNavTabs = visibleNavTabs,
 	)
 }
 
