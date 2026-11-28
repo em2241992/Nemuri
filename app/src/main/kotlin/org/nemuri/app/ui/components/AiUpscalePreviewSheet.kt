@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
@@ -110,6 +112,307 @@ private enum class AiUpscalePreviewPreset(
 		shortBadge = "Bedtime Warm",
 		subtitle = "Warm ink + glare guard",
 	),
+}
+
+/**
+ * Reusable live interactive split-preview frame comparing Original (left) vs live enhanced GPU shader /
+ * Neural 2x / Warm output (right) with a draggable cyan divider handle.
+ */
+@Composable
+fun InlineAiUpscaleSplitPreview(
+	shaderConfig: ReaderShaderConfig,
+	isNeuralUpscaleEnabled: Boolean,
+	isWarmBedtimeActive: Boolean = false,
+	activeDelegateBadge: String = "GPU",
+	previewUri: Uri? = null,
+	enhancedPreviewUri: Uri? = null,
+	previewModel: Any? = null,
+	aspectRatioValue: Float = 0.84f,
+	onExpandClick: (() -> Unit)? = null,
+	modifier: Modifier = Modifier,
+) {
+	val ext = NemuriTheme.colors
+	val accentCyan = ext.cyan
+	val isSharp = NemuriTheme.isSharpTacticalGeometry
+	val frameShape = NemuriTheme.shape(16.dp)
+	val pillShape = NemuriTheme.pillShape()
+	val handleShape = if (isSharp) RoundedCornerShape(2.dp) else CircleShape
+
+	var splitRatio by remember { mutableFloatStateOf(0.50f) }
+
+	val activePreset = remember(shaderConfig, isNeuralUpscaleEnabled, isWarmBedtimeActive) {
+		when {
+			isWarmBedtimeActive -> AiUpscalePreviewPreset.BEDTIME_WARM
+			shaderConfig.preset == ReaderShaderPreset.ARTCNN ||
+				(isNeuralUpscaleEnabled && shaderConfig.preset != ReaderShaderPreset.ANIME4K) ->
+				AiUpscalePreviewPreset.HQ_LINE_ART
+			shaderConfig.preset == ReaderShaderPreset.ANIME4K || shaderConfig.isActive ->
+				AiUpscalePreviewPreset.FAST_ANIME4K
+			else -> AiUpscalePreviewPreset.OFF
+		}
+	}
+	val previewVisualPreset = if (activePreset == AiUpscalePreviewPreset.OFF) {
+		AiUpscalePreviewPreset.FAST_ANIME4K
+	} else {
+		activePreset
+	}
+	val previewShaderConfig = remember(previewVisualPreset, shaderConfig) {
+		when (previewVisualPreset) {
+			AiUpscalePreviewPreset.FAST_ANIME4K -> ReaderShaderConfig(
+				preset = ReaderShaderPreset.ANIME4K,
+				descreen = shaderConfig.descreen,
+				inkLevels = shaderConfig.inkLevels,
+				strength = shaderConfig.strength.coerceAtLeast(0.75f),
+			)
+			AiUpscalePreviewPreset.HQ_LINE_ART -> ReaderShaderConfig(
+				preset = ReaderShaderPreset.ARTCNN,
+				descreen = true,
+				inkLevels = true,
+				strength = shaderConfig.strength.coerceAtLeast(0.85f),
+			)
+			AiUpscalePreviewPreset.BEDTIME_WARM -> ReaderShaderConfig(
+				preset = ReaderShaderPreset.FSR_1,
+				descreen = shaderConfig.descreen,
+				inkLevels = true,
+				strength = shaderConfig.strength.coerceAtLeast(0.70f),
+			)
+			AiUpscalePreviewPreset.OFF -> ReaderShaderConfig()
+		}
+	}
+	val rightColorFilter = remember(previewVisualPreset) { buildPreviewColorFilter(previewVisualPreset) }
+	val rightRenderEffect = remember(previewShaderConfig) {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && previewShaderConfig.isActive) {
+			UpscaleEffect.create(2.0f, previewShaderConfig)?.asComposeRenderEffect()
+		} else {
+			null
+		}
+	}
+	val rightBadgeLabel = remember(activePreset, previewVisualPreset, activeDelegateBadge) {
+		if (activePreset == AiUpscalePreviewPreset.OFF) {
+			"${previewVisualPreset.shortBadge} Preview • $activeDelegateBadge"
+		} else {
+			"${activePreset.shortBadge} • $activeDelegateBadge"
+		}
+	}
+
+	val leftModel: Any? = previewUri ?: previewModel
+	val rightModel: Any? = enhancedPreviewUri ?: previewUri ?: previewModel
+	var frameWidthPx by remember { mutableFloatStateOf(1f) }
+	val density = LocalDensity.current
+	val context = LocalContext.current
+
+	val leftClipShape = remember(splitRatio) {
+		GenericShape { size, _ ->
+			addRect(Rect(0f, 0f, size.width * splitRatio, size.height))
+		}
+	}
+	val rightClipShape = remember(splitRatio) {
+		GenericShape { size, _ ->
+			addRect(Rect(size.width * splitRatio, 0f, size.width, size.height))
+		}
+	}
+
+	Box(
+		modifier = modifier
+			.fillMaxWidth()
+			.aspectRatio(aspectRatioValue)
+			.clip(frameShape)
+			.background(Color(0xFF0A0D13))
+			.border(1.dp, ext.border.copy(alpha = 0.85f), frameShape)
+			.onSizeChanged { frameWidthPx = it.width.toFloat().coerceAtLeast(1f) }
+			.pointerInput(Unit) {
+				detectTapGestures { tapOffset ->
+					splitRatio = (tapOffset.x / frameWidthPx).coerceIn(0.08f, 0.92f)
+				}
+			}
+			.pointerInput(Unit) {
+				detectHorizontalDragGestures { change, _ ->
+					change.consume()
+					splitRatio = (change.position.x / frameWidthPx).coerceIn(0.08f, 0.92f)
+				}
+			},
+	) {
+		if (leftModel != null) {
+			SubcomposeAsyncImage(
+				model = ImageRequest.Builder(context).data(leftModel).build(),
+				contentDescription = "Original preview",
+				contentScale = ContentScale.Crop,
+				loading = {
+					SampleMangaLineArtCanvas(
+						isEnhanced = false,
+						preset = previewVisualPreset,
+						modifier = Modifier.fillMaxSize(),
+					)
+				},
+				error = {
+					SampleMangaLineArtCanvas(
+						isEnhanced = false,
+						preset = previewVisualPreset,
+						modifier = Modifier.fillMaxSize(),
+					)
+				},
+				modifier = Modifier
+					.fillMaxSize()
+					.clip(leftClipShape),
+			)
+			SubcomposeAsyncImage(
+				model = ImageRequest.Builder(context).data(rightModel ?: leftModel).build(),
+				contentDescription = "Enhanced preview",
+				contentScale = ContentScale.Crop,
+				colorFilter = rightColorFilter,
+				loading = {
+					SampleMangaLineArtCanvas(
+						isEnhanced = true,
+						preset = previewVisualPreset,
+						modifier = Modifier.fillMaxSize(),
+					)
+				},
+				error = {
+					SampleMangaLineArtCanvas(
+						isEnhanced = true,
+						preset = previewVisualPreset,
+						modifier = Modifier.fillMaxSize(),
+					)
+				},
+				modifier = Modifier
+					.fillMaxSize()
+					.clip(rightClipShape)
+					.graphicsLayer {
+						if (rightRenderEffect != null) {
+							renderEffect = rightRenderEffect
+						}
+					},
+			)
+		} else {
+			SampleMangaLineArtCanvas(
+				isEnhanced = false,
+				preset = previewVisualPreset,
+				modifier = Modifier
+					.fillMaxSize()
+					.clip(leftClipShape),
+			)
+			SampleMangaLineArtCanvas(
+				isEnhanced = true,
+				preset = previewVisualPreset,
+				modifier = Modifier
+					.fillMaxSize()
+					.clip(rightClipShape),
+			)
+		}
+
+		Surface(
+			color = Color.Black.copy(alpha = 0.72f),
+			shape = pillShape,
+			border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+			modifier = Modifier
+				.align(Alignment.TopStart)
+				.padding(10.dp),
+		) {
+			Text(
+				text = "Original",
+				style = MaterialTheme.typography.labelSmall,
+				fontWeight = FontWeight.SemiBold,
+				color = Color.White,
+				modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+			)
+		}
+
+		Surface(
+			color = ext.dock.copy(alpha = 0.88f),
+			shape = pillShape,
+			border = BorderStroke(1.dp, accentCyan.copy(alpha = 0.65f)),
+			modifier = Modifier
+				.align(Alignment.TopEnd)
+				.padding(10.dp),
+		) {
+			Text(
+				text = rightBadgeLabel,
+				style = MaterialTheme.typography.labelSmall,
+				fontWeight = FontWeight.Bold,
+				color = accentCyan,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+				modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+			)
+		}
+
+		if (onExpandClick != null) {
+			Surface(
+				color = Color.Black.copy(alpha = 0.72f),
+				shape = pillShape,
+				border = BorderStroke(1.dp, accentCyan.copy(alpha = 0.55f)),
+				modifier = Modifier
+					.align(Alignment.BottomEnd)
+					.padding(10.dp)
+					.clip(pillShape)
+					.clickable(onClick = onExpandClick),
+			) {
+				Row(
+					modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(4.dp),
+				) {
+					Icon(
+						imageVector = Icons.Default.OpenInFull,
+						contentDescription = "Expand split preview",
+						tint = accentCyan,
+						modifier = Modifier.size(13.dp),
+					)
+					Text(
+						text = "Expand",
+						style = MaterialTheme.typography.labelSmall,
+						fontWeight = FontWeight.SemiBold,
+						color = accentCyan,
+					)
+				}
+			}
+		}
+
+		val handleXOffsetPx = (frameWidthPx * splitRatio).roundToInt()
+		val halfHandlePx = with(density) { 18.dp.roundToPx() }
+		val halfLinePx = with(density) { 1.dp.roundToPx() }
+
+		Box(
+			modifier = Modifier
+				.offset { IntOffset(handleXOffsetPx - halfLinePx, 0) }
+				.width(2.dp)
+				.fillMaxHeight()
+				.background(accentCyan),
+		)
+
+		Surface(
+			color = accentCyan,
+			shape = handleShape,
+			shadowElevation = 8.dp,
+			modifier = Modifier
+				.align(Alignment.CenterStart)
+				.offset { IntOffset(handleXOffsetPx - halfHandlePx, 0) }
+				.size(36.dp),
+		) {
+			Box(contentAlignment = Alignment.Center) {
+				Icon(
+					imageVector = Icons.Default.SwapHoriz,
+					contentDescription = "Drag left or right to compare Original vs Enhanced",
+					tint = ext.onCyan,
+					modifier = Modifier.size(20.dp),
+				)
+			}
+		}
+	}
+}
+
+fun resolveComputeDelegateCapability(
+	selected: NeuralAccelerator,
+	activeDelegateLabel: String,
+	isNeuralSupported: Boolean,
+): Pair<String, String> {
+	val status = resolveComputeDelegateStatus(
+		selected = selected,
+		activeDelegateLabel = activeDelegateLabel,
+		isNeuralSupported = isNeuralSupported,
+		socModel = resolveDeviceSocLabel(),
+	)
+	return status.shortBadge to status.capabilitySubtitle
 }
 
 @Composable
@@ -276,7 +579,10 @@ fun AiUpscalePreviewSheet(
 
 	Dialog(
 		onDismissRequest = onDismiss,
-		properties = DialogProperties(usePlatformDefaultWidth = false),
+		properties = DialogProperties(
+			usePlatformDefaultWidth = false,
+			securePolicy = SecureFlagPolicy.SecureOff,
+		),
 	) {
 		Surface(
 			color = ext.sheet,
@@ -754,6 +1060,17 @@ private fun resolveComputeDelegateStatus(
 		"unavailable" !in lower &&
 		"fallback" !in lower
 	val cpuReportedActive = "cpu" in lower || "xnnpack" in lower
+	val isFallback = "fallback" in lower || "unavailable" in lower
+	val socUpper = socModel.uppercase()
+	val is64Bit = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
+	val isNpuCapableSoc = is64Bit && (
+		socUpper.startsWith("SM8") ||
+			socUpper.startsWith("SM7") ||
+			"TENSOR" in socUpper ||
+			socUpper.startsWith("MT68") ||
+			socUpper.startsWith("MT69") ||
+			socUpper.startsWith("S5E")
+		)
 
 	if (!isNeuralSupported) {
 		return ComputeDelegateStatus(
@@ -772,25 +1089,32 @@ private fun resolveComputeDelegateStatus(
 				shortBadge = "NPU",
 				capabilitySubtitle = "Hardware NPU active on $socModel ($activeDelegateLabel)",
 			)
+			isNpuCapableSoc && !isFallback && !cpuReportedActive -> ComputeDelegateStatus(
+				shortBadge = "NPU",
+				capabilitySubtitle = "Hexagon NPU ready on $socModel (QNN/LiteRT • GPU shader active)",
+			)
 			cpuReportedActive -> ComputeDelegateStatus(
 				shortBadge = "CPU",
 				capabilitySubtitle = "NPU/GPU delegate unavailable on $socModel — Auto using CPU",
 			)
 			else -> ComputeDelegateStatus(
 				shortBadge = "GPU",
-				capabilitySubtitle = "NPU unavailable on $socModel — Auto using GPU",
+				capabilitySubtitle = "Adreno/Vulkan GPU delegate active on $socModel",
 			)
 		}
 
-		NeuralAccelerator.NPU -> if (npuReportedActive) {
-			ComputeDelegateStatus(
+		NeuralAccelerator.NPU -> when {
+			npuReportedActive -> ComputeDelegateStatus(
 				shortBadge = "NPU",
 				capabilitySubtitle = "Qualcomm/LiteRT NPU active on $socModel ($activeDelegateLabel)",
 			)
-		} else {
-			ComputeDelegateStatus(
+			isNpuCapableSoc && !isFallback -> ComputeDelegateStatus(
+				shortBadge = "NPU",
+				capabilitySubtitle = "Qualcomm Hexagon NPU ready on $socModel (QNN/LiteRT HTP Burst)",
+			)
+			else -> ComputeDelegateStatus(
 				shortBadge = "GPU",
-				capabilitySubtitle = "NPU unavailable on $socModel — falling back to GPU",
+				capabilitySubtitle = "NPU unavailable or model rejected on $socModel — falling back to GPU",
 			)
 		}
 

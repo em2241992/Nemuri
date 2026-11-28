@@ -41,13 +41,14 @@ enum class AiMode(val key: String, val label: String) {
 }
 
 enum class LocalLlmAccelerator(val key: String, val label: String) {
+	NPU("NPU", "Hexagon NPU (Snapdragon 8 Elite)"),
 	GPU("GPU", "GPU (OpenCL/Vulkan • Recommended)"),
 	CPU("CPU", "CPU (Multi-Core XNNPACK)"),
 	;
 
 	companion object {
 		fun fromKey(key: String?): LocalLlmAccelerator =
-			entries.firstOrNull { it.key == key } ?: GPU
+			entries.firstOrNull { it.key.equals(key, ignoreCase = true) } ?: GPU
 	}
 }
 

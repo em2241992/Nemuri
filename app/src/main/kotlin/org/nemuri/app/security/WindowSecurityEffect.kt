@@ -31,6 +31,7 @@ fun ObserveWindowSecurity(
 	isSessionIncognito: Boolean = false,
 	isNsfwContent: Boolean = false,
 	isAppLocked: Boolean = false,
+	allowScreenshotsOverride: Boolean = false,
 ) {
 	val context = LocalContext.current
 	val activity = context as? Activity ?: return
@@ -65,12 +66,12 @@ fun ObserveWindowSecurity(
 	)
 
 	val effectiveIncognito = isSessionIncognito || config.globalIncognito
-	val shouldBlockScreenshotsAndRecents = isAppLocked || when (config.policy) {
+	val shouldBlockScreenshotsAndRecents = !allowScreenshotsOverride && (isAppLocked || when (config.policy) {
 		ScreenshotsPolicy.ALLOW -> false
 		ScreenshotsPolicy.BLOCK_INCOGNITO -> effectiveIncognito
 		ScreenshotsPolicy.BLOCK_NSFW -> effectiveIncognito || isNsfwContent
 		ScreenshotsPolicy.BLOCK_ALL -> true
-	}
+	})
 	val shouldHideRecentsPreview = shouldBlockScreenshotsAndRecents || config.appProtectionEnabled
 
 	LaunchedEffect(shouldBlockScreenshotsAndRecents, shouldHideRecentsPreview) {

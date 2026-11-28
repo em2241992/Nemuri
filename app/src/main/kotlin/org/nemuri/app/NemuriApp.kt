@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import okhttp3.internal.platform.PlatformRegistry
 import java.util.concurrent.atomic.AtomicBoolean
+import org.koitharu.kotatsu.ai.domain.LocalLlmClient
 import org.koitharu.kotatsu.core.db.MangaDatabase
 import org.koitharu.kotatsu.core.logs.AppLogger
 import org.koitharu.kotatsu.core.nav.AppRouter
@@ -82,6 +83,9 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 	@Inject
 	lateinit var appLockManager: Provider<AppLockManager>
 
+	@Inject
+	lateinit var localLlmClient: Provider<LocalLlmClient>
+
 	private val extensionsInitStarted = AtomicBoolean(false)
 
 	override val workManagerConfiguration: Configuration
@@ -135,6 +139,21 @@ class NemuriApp : Application(), Configuration.Provider, SingletonImageLoader.Fa
 		}
 		processLifecycleScope.launch(Dispatchers.IO) {
 			runCatching { lnPluginManager.get().initialize() }
+		}
+	}
+
+	override fun onTrimMemory(level: Int) {
+		super.onTrimMemory(level)
+		if (!isCrashProcess() && ::localLlmClient.isInitialized) {
+			runCatching { localLlmClient.get().onTrimMemory(level) }
+		}
+	}
+
+	@Suppress("DEPRECATION")
+	override fun onLowMemory() {
+		super.onLowMemory()
+		if (!isCrashProcess() && ::localLlmClient.isInitialized) {
+			runCatching { localLlmClient.get().unloadAsync() }
 		}
 	}
 

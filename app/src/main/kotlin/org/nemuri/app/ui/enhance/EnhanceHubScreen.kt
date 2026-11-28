@@ -662,31 +662,10 @@ private fun LazyListScope.aiTabContent(
 			onSelectRecapDepth = viewModel::setAiRecapDepth,
 			onOpenAiSettings = onOpenAiSettings,
 			showExtendedToggles = true,
+			showOpenStudioButton = true,
 			onToggleShowRecapCard = viewModel::setAiShowRecapCard,
 			onToggleIncludeNovelExcerpt = viewModel::setAiIncludeNovelExcerpt,
 		)
-	}
-
-	item {
-		Button(
-			onClick = onOpenAiSettings,
-			colors = ButtonDefaults.buttonColors(
-				containerColor = NemuriTheme.colors.cyan,
-				contentColor = NemuriTheme.colors.onCyan,
-			),
-			shape = NemuriTheme.shape(14.dp),
-			modifier = Modifier
-				.fillMaxWidth()
-				.height(50.dp),
-		) {
-			Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-			Spacer(Modifier.width(8.dp))
-			Text(
-				text = "Open AI Engine Studio",
-				style = MaterialTheme.typography.titleSmall,
-				fontWeight = FontWeight.Bold,
-			)
-		}
 	}
 
 	item {
@@ -1214,6 +1193,7 @@ private fun AiBrainOverviewCard(
 	onSelectRecapDepth: (RecapDepth) -> Unit,
 	onOpenAiSettings: () -> Unit,
 	showExtendedToggles: Boolean = false,
+	showOpenStudioButton: Boolean = true,
 	onToggleShowRecapCard: (Boolean) -> Unit = {},
 	onToggleIncludeNovelExcerpt: (Boolean) -> Unit = {},
 ) {
@@ -1482,24 +1462,26 @@ private fun AiBrainOverviewCard(
 				}
 			}
 
-			OutlinedButton(
-				onClick = onOpenAiSettings,
-				border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)),
-				shape = NemuriTheme.shape(12.dp),
-				modifier = Modifier.fillMaxWidth(),
-			) {
-				Icon(
-					imageVector = Icons.Default.AutoAwesome,
-					contentDescription = null,
-					tint = NemuriTheme.colors.cyan,
-					modifier = Modifier.size(16.dp),
-				)
-				Spacer(Modifier.width(8.dp))
-				Text(
-					text = "Open AI Engine Studio",
-					color = NemuriTheme.colors.cyan,
-					fontWeight = FontWeight.SemiBold,
-				)
+			if (showOpenStudioButton) {
+				OutlinedButton(
+					onClick = onOpenAiSettings,
+					border = BorderStroke(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.6f)),
+					shape = NemuriTheme.shape(12.dp),
+					modifier = Modifier.fillMaxWidth(),
+				) {
+					Icon(
+						imageVector = Icons.Default.AutoAwesome,
+						contentDescription = null,
+						tint = NemuriTheme.colors.cyan,
+						modifier = Modifier.size(16.dp),
+					)
+					Spacer(Modifier.width(8.dp))
+					Text(
+						text = "Open AI Engine Studio",
+						color = NemuriTheme.colors.cyan,
+						fontWeight = FontWeight.SemiBold,
+					)
+				}
 			}
 		}
 	}

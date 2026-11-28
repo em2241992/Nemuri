@@ -11,6 +11,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Build
 import android.os.Process
+import android.system.Os
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.CompiledModel
 import com.google.ai.edge.litert.TensorBuffer
@@ -57,8 +58,63 @@ class NeuralUpscaleRunner @Inject constructor(
 	val isSupported: Boolean
 		get() = true
 
-	private val _activeDelegateLabel = MutableStateFlow("Idle (Ready)")
+	private val is64BitNpuSoC: Boolean by lazy {
+		val is64 = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() && runCatching { Process.is64Bit() }.getOrDefault(true)
+		val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL.orEmpty().uppercase() else ""
+		is64 && (
+			soc.startsWith("SM8") ||
+				soc.startsWith("SM7") ||
+				soc.contains("TENSOR") ||
+				soc.startsWith("MT68") ||
+				soc.startsWith("MT69") ||
+				soc.startsWith("S5E")
+			)
+	}
+
+	private val initialIdleLabel: String by lazy {
+		if (is64BitNpuSoC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && Build.SOC_MODEL.isNotBlank()) {
+			"Idle • NPU Ready (${Build.SOC_MODEL})"
+		} else {
+			"Idle (Ready)"
+		}
+	}
+
+	private val _activeDelegateLabel = MutableStateFlow(initialIdleLabel)
 	val activeDelegateLabel: StateFlow<String> = _activeDelegateLabel.asStateFlow()
+
+	@Volatile
+	private var qnnEnvInitialized = false
+
+	/**
+	 * Configures Qualcomm Hexagon cDSP search paths (`ADSP_LIBRARY_PATH` / `LD_LIBRARY_PATH`) so
+	 * `libQnnHtpV79Skel.so` / `libQnnHtp.so` extracted into `nativeLibraryDir` can be loaded on
+	 * Snapdragon 8 Elite (`SM8750`) and other Snapdragon QNN devices.
+	 */
+	private fun ensureQnnRuntimeEnvironment() {
+		if (qnnEnvInitialized) return
+		val nativeDir = context.applicationInfo.nativeLibraryDir.orEmpty()
+		if (nativeDir.isNotBlank()) {
+			runCatching {
+				Os.setenv(
+					"ADSP_LIBRARY_PATH",
+					"$nativeDir;/vendor/dsp/cdsp;/vendor/lib/rfsa/adsp;/system/lib/rfsa/adsp;/dsp",
+					true,
+				)
+			}
+			runCatching {
+				val existing = Os.getenv("LD_LIBRARY_PATH").orEmpty()
+				val merged = if (existing.isBlank()) {
+					"$nativeDir:/vendor/lib64:/system/lib64"
+				} else if (nativeDir in existing) {
+					existing
+				} else {
+					"$nativeDir:$existing"
+				}
+				Os.setenv("LD_LIBRARY_PATH", merged, true)
+			}
+		}
+		qnnEnvInitialized = true
+	}
 
 	private val sessionMutex = Mutex()
 	private val idleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -319,28 +375,62 @@ class NeuralUpscaleRunner @Inject constructor(
 		var delegateText = "Active: CPU (XNNPACK)"
 
 		val session = if (allowHw) {
-			val nnapiAttempt = runCatching {
-				val opts = OrtSession.SessionOptions().apply {
-					setIntraOpNumThreads(threads)
-					setInterOpNumThreads(1)
-					setMemoryPatternOptimization(true)
-					// Request FP16 NNAPI acceleration; keep CPU partition fallback active unless CPU-only fails
-					val flags = EnumSet.of(NNAPIFlags.USE_FP16)
-					addNnapi(flags)
-					addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))
+			ensureQnnRuntimeEnvironment()
+			val qnnAttempt = if (accelerator == NeuralAccelerator.NPU || accelerator == NeuralAccelerator.AUTO) {
+				val htpLib = File(context.applicationInfo.nativeLibraryDir.orEmpty(), "libQnnHtp.so")
+				if (htpLib.isFile) {
+					runCatching {
+						val opts = OrtSession.SessionOptions().apply {
+							setIntraOpNumThreads(threads)
+							setInterOpNumThreads(1)
+							setMemoryPatternOptimization(true)
+							val addQnnMethod = javaClass.getMethod("addQnn", Map::class.java)
+							addQnnMethod.invoke(
+								this,
+								mapOf(
+									"backend_path" to htpLib.absolutePath,
+									"htp_performance_mode" to "burst",
+									"htp_graph_finalization_optimization_mode" to "3",
+								),
+							)
+							addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))
+						}
+						usedHw = true
+						val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && Build.SOC_MODEL.isNotBlank()) " ${Build.SOC_MODEL}" else ""
+						delegateText = "Active: NPU (QNN HTP$soc)"
+						opts.use { env.createSession(modelFile.absolutePath, it) }
+					}.getOrNull()
+				} else {
+					null
 				}
-				usedHw = true
-				delegateText = when (accelerator) {
-					NeuralAccelerator.NPU, NeuralAccelerator.AUTO -> "Active: NPU/GPU (NNAPI FP16)"
-					NeuralAccelerator.GPU -> "Active: GPU (NNAPI FP16)"
-					NeuralAccelerator.CPU -> "Active: CPU (XNNPACK)"
-				}
-				opts.use { env.createSession(modelFile.absolutePath, it) }
+			} else {
+				null
 			}
-			nnapiAttempt.getOrElse {
-				usedHw = false
-				delegateText = "Active: CPU (XNNPACK • Fallback)"
-				createOrtCpuSession(env, modelFile, threads)
+
+			qnnAttempt ?: run {
+				val nnapiAttempt = runCatching {
+					val opts = OrtSession.SessionOptions().apply {
+						setIntraOpNumThreads(threads)
+						setInterOpNumThreads(1)
+						setMemoryPatternOptimization(true)
+						// Request FP16 NNAPI acceleration; keep CPU partition fallback active unless CPU-only fails
+						val flags = EnumSet.of(NNAPIFlags.USE_FP16)
+						addNnapi(flags)
+						addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))
+					}
+					usedHw = true
+					delegateText = when (accelerator) {
+						NeuralAccelerator.NPU, NeuralAccelerator.AUTO -> "Active: NPU/GPU (NNAPI FP16)"
+						NeuralAccelerator.GPU -> "Active: GPU (NNAPI FP16)"
+						NeuralAccelerator.CPU -> "Active: CPU (XNNPACK)"
+					}
+					opts.use { env.createSession(modelFile.absolutePath, it) }
+				}
+				nnapiAttempt.getOrElse {
+					usedHw = false
+					delegateText = "Active: CPU (XNNPACK • Fallback)"
+					createOrtCpuSession(env, modelFile, threads)
+				}
 			}
 		} else {
 			createOrtCpuSession(env, modelFile, threads)
@@ -559,6 +649,7 @@ class NeuralUpscaleRunner @Inject constructor(
 
 		val spec = inspectTfliteSpec(modelFile)
 		val is64Bit = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() && Process.is64Bit()
+		ensureQnnRuntimeEnvironment()
 
 		val candidates = when (accelerator) {
 			NeuralAccelerator.AUTO -> listOfNotNull(
@@ -579,23 +670,8 @@ class NeuralUpscaleRunner @Inject constructor(
 		var activeLabel = "Active: CPU (XNNPACK)"
 		var lastError: Throwable? = null
 
-		for ((idx, candidate) in candidates.withIndex()) {
-			val attempt = runCatching {
-				val opts = when (candidate) {
-					Accelerator.NPU -> CompiledModel.Options(Accelerator.NPU).apply {
-						qualcommOptions = CompiledModel.QualcommOptions(
-							htpPerformanceMode = CompiledModel.QualcommOptions.HtpPerformanceMode.BURST,
-							useConvHmx = true,
-							useFoldRelu = true,
-						)
-					}
-					Accelerator.GPU -> CompiledModel.Options(Accelerator.GPU).apply {
-						gpuOptions = CompiledModel.GpuOptions(
-							precision = CompiledModel.GpuOptions.Precision.FP16,
-						)
-					}
-					else -> CompiledModel.Options(Accelerator.CPU)
-				}
+		fun tryCreateLitert(opts: CompiledModel.Options): Result<Triple<CompiledModel, List<TensorBuffer>, List<TensorBuffer>>> =
+			runCatching {
 				val model = CompiledModel.create(modelFile.absolutePath, opts)
 				if (spec.hasDynamicShape) {
 					val targetShape = if (spec.isNchw) {
@@ -608,6 +684,35 @@ class NeuralUpscaleRunner @Inject constructor(
 				val inBufs = model.createInputBuffers()
 				val outBufs = model.createOutputBuffers()
 				Triple(model, inBufs, outBufs)
+			}
+
+		for ((idx, candidate) in candidates.withIndex()) {
+			val attempt = when (candidate) {
+				Accelerator.NPU -> {
+					val burstOpts = CompiledModel.Options(Accelerator.NPU).apply {
+						qualcommOptions = CompiledModel.QualcommOptions(
+							htpPerformanceMode = CompiledModel.QualcommOptions.HtpPerformanceMode.BURST,
+							useConvHmx = true,
+							useFoldRelu = true,
+						)
+					}
+					val burstResult = tryCreateLitert(burstOpts)
+					if (burstResult.isSuccess) {
+						burstResult
+					} else {
+						// Retry with default NPU options in case a specific model op rejects HMX/BURST
+						tryCreateLitert(CompiledModel.Options(Accelerator.NPU))
+					}
+				}
+				Accelerator.GPU -> {
+					val gpuOpts = CompiledModel.Options(Accelerator.GPU).apply {
+						gpuOptions = CompiledModel.GpuOptions(
+							precision = CompiledModel.GpuOptions.Precision.FP16,
+						)
+					}
+					tryCreateLitert(gpuOpts)
+				}
+				else -> tryCreateLitert(CompiledModel.Options(Accelerator.CPU))
 			}
 			if (attempt.isSuccess) {
 				val (m, inB, outB) = attempt.getOrThrow()

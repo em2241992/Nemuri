@@ -38,6 +38,7 @@ data class NemuriExtendedColors(
 	val mergePurple: Color,
 	val secondary: Color = mergePurple,
 	val secondaryContainer: Color = tealContainer,
+	val outlineVariant: Color = border.copy(alpha = 0.65f),
 )
 
 @Immutable
@@ -683,6 +684,7 @@ private val VeriLysIcyBlueDarkExtended = NemuriExtendedColors(
 	mergePurple = Color(0xFFB9A3FF),
 	secondary = Color(0xFFB9A3FF),
 	secondaryContainer = Color(0xFF312654),
+	outlineVariant = Color(0xFF2D4466),
 )
 
 private val VeriLysIcyBlueLightExtended = NemuriExtendedColors(
@@ -709,6 +711,7 @@ private val VeriLysIcyBlueLightExtended = NemuriExtendedColors(
 	mergePurple = Color(0xFF8E72EB),
 	secondary = Color(0xFF8E72EB),
 	secondaryContainer = Color(0xFFE6DEFA),
+	outlineVariant = Color(0xFFB8D2F2),
 )
 
 // 15. VERI_LYS_WISTERIA_MIST — Locked Cornflower Blue Primary + Wisteria Mist Surfaces & Purple Secondary
@@ -736,6 +739,7 @@ private val VeriLysWisteriaMistDarkExtended = NemuriExtendedColors(
 	mergePurple = Color(0xFFBFA8FF),
 	secondary = Color(0xFFBFA8FF),
 	secondaryContainer = Color(0xFF332757),
+	outlineVariant = Color(0xFF3A3361),
 )
 
 private val VeriLysWisteriaMistLightExtended = NemuriExtendedColors(
@@ -762,6 +766,7 @@ private val VeriLysWisteriaMistLightExtended = NemuriExtendedColors(
 	mergePurple = Color(0xFF8A6CE8),
 	secondary = Color(0xFF8A6CE8),
 	secondaryContainer = Color(0xFFE3DAFA),
+	outlineVariant = Color(0xFFC7BBE8),
 )
 
 val LocalNemuriColors = staticCompositionLocalOf { ObsidianExtendedColors }
@@ -906,8 +911,8 @@ private fun ColorScheme.accentSpec(): AccentSpec = when (this) {
 		darkContainer = VeriLysIcyBlueDarkExtended.tealContainer,
 		lightContainer = VeriLysIcyBlueLightExtended.tealContainer,
 		onDarkPrimary = VeriLysIcyBlueDarkExtended.onCyan,
-		darkTertiary = VeriLysIcyBlueDarkExtended.secondary,
-		lightTertiary = VeriLysIcyBlueLightExtended.secondary,
+		darkTertiary = VeriLysIcyBlueDarkExtended.healthy,
+		lightTertiary = VeriLysIcyBlueLightExtended.healthy,
 	)
 
 	ColorScheme.VERI_LYS_WISTERIA_MIST -> AccentSpec(
@@ -916,8 +921,8 @@ private fun ColorScheme.accentSpec(): AccentSpec = when (this) {
 		darkContainer = VeriLysWisteriaMistDarkExtended.tealContainer,
 		lightContainer = VeriLysWisteriaMistLightExtended.tealContainer,
 		onDarkPrimary = VeriLysWisteriaMistDarkExtended.onCyan,
-		darkTertiary = VeriLysWisteriaMistDarkExtended.secondary,
-		lightTertiary = VeriLysWisteriaMistLightExtended.secondary,
+		darkTertiary = VeriLysWisteriaMistDarkExtended.healthy,
+		lightTertiary = VeriLysWisteriaMistLightExtended.healthy,
 	)
 
 	// 16 Classic Accents — each with unique primary, container, and tertiary swatch tokens
@@ -1095,6 +1100,7 @@ private fun NemuriExtendedColors.toSmartAmoled(): NemuriExtendedColors = copy(
 	dock = lerp(Color.Black, dock, 0.62f),
 	sheet = lerp(Color.Black, sheet, 0.56f),
 	border = lerp(Color.Black, border, 0.76f),
+	outlineVariant = lerp(Color.Black, outlineVariant, 0.76f),
 )
 
 private fun resolveStaticExtendedColors(
@@ -1329,7 +1335,7 @@ fun buildMaterialColorScheme(
 			surfaceContainerHigh = ext.surfaceElevated,
 			surfaceContainerHighest = ext.dock,
 			outline = ext.border,
-			outlineVariant = ext.border.copy(alpha = 0.65f),
+			outlineVariant = ext.outlineVariant,
 			scrim = Color.Black.copy(alpha = 0.68f),
 			error = ext.danger,
 			onError = Color.White,
@@ -1366,7 +1372,7 @@ fun buildMaterialColorScheme(
 			surfaceContainerHigh = ext.surfaceElevated,
 			surfaceContainerHighest = ext.dock,
 			outline = ext.border,
-			outlineVariant = ext.border.copy(alpha = 0.65f),
+			outlineVariant = ext.outlineVariant,
 			scrim = Color.Black.copy(alpha = 0.45f),
 			error = ext.danger,
 			onError = Color.White,

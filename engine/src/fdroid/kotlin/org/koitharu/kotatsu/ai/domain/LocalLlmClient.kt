@@ -25,9 +25,14 @@ class LocalLlmClient @Inject constructor() {
 		systemPrompt: String,
 		userPrompt: String,
 		maxTokens: Int = 320,
+		preferGpuOverride: Boolean = false,
 	): Result<Pair<String, String>> = Result.failure(
 		UnsupportedOperationException("On-device LiteRT-LM runtime is only included in the GitHub build"),
 	)
 
 	suspend fun unloadNow() = Unit
+
+	fun unloadAsync() = Unit
+
+	fun onTrimMemory(level: Int) = Unit
 }

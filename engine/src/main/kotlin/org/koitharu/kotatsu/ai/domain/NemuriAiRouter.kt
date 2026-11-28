@@ -1,5 +1,6 @@
 package org.koitharu.kotatsu.ai.domain
 
+import kotlinx.coroutines.CancellationException
 import org.koitharu.kotatsu.ai.data.AiSecretStore
 import org.koitharu.kotatsu.core.prefs.AppSettings
 import javax.inject.Inject
@@ -36,7 +37,7 @@ class NemuriAiRouter @Inject constructor(
 	suspend fun resolveActiveEngineDisplayLabel(): String = when (currentMode()) {
 		AiMode.OFF -> "Off"
 		AiMode.GEMINI_NANO -> {
-			val diag = geminiNanoClient.checkDiagnostics()
+			val diag = safeCheckNanoDiagnostics()
 			if (diag.availability == NanoAvailability.AVAILABLE) {
 				if (diag.supportsOpenPrompt) "Gemini Nano (On-Device)" else "Gemini Nano Summarizer"
 			} else {
@@ -47,7 +48,7 @@ class NemuriAiRouter @Inject constructor(
 		AiMode.REMOTE_OPENAI -> remoteEngineLabel()
 		AiMode.GEMINI_API -> "Gemini (${settings.aiGeminiModel})"
 		AiMode.AUTO -> {
-			val diag = geminiNanoClient.checkDiagnostics()
+			val diag = safeCheckNanoDiagnostics()
 			when {
 				diag.availability == NanoAvailability.AVAILABLE && diag.supportsOpenPrompt ->
 					"Gemini Nano (On-Device)"
@@ -64,12 +65,12 @@ class NemuriAiRouter @Inject constructor(
 		}
 	}
 
-	suspend fun checkNanoAvailability(): NanoAvailability = geminiNanoClient.checkAvailability()
+	suspend fun checkNanoAvailability(): NanoAvailability = safeCheckNanoAvailability()
 
-	suspend fun checkNanoDiagnostics(): NanoDiagnostics = geminiNanoClient.checkDiagnostics()
+	suspend fun checkNanoDiagnostics(): NanoDiagnostics = safeCheckNanoDiagnostics()
 
 	suspend fun downloadNanoModel(onProgress: (Long) -> Unit = {}): Result<Unit> =
-		geminiNanoClient.triggerDownload(onProgress)
+		safeDownloadNanoModel(onProgress)
 
 	suspend fun generate(
 		systemPrompt: String,
@@ -78,7 +79,7 @@ class NemuriAiRouter @Inject constructor(
 	): Result<AiGenerationResult> = when (currentMode()) {
 		AiMode.OFF -> Result.failure(IllegalStateException("AI features are turned off"))
 
-		AiMode.GEMINI_NANO -> geminiNanoClient.generate("$systemPrompt\n\n$userPrompt").map { text ->
+		AiMode.GEMINI_NANO -> safeNanoGenerate("$systemPrompt\n\n$userPrompt").map { text ->
 			AiGenerationResult(text = text, engineUsed = "Gemini Nano (On-Device)", isAiGenerated = true)
 		}
 
@@ -110,7 +111,7 @@ class NemuriAiRouter @Inject constructor(
 	): Result<AiGenerationResult> = when (currentMode()) {
 		AiMode.OFF -> Result.failure(IllegalStateException("AI features are turned off"))
 
-		AiMode.GEMINI_NANO -> geminiNanoClient.summarize(
+		AiMode.GEMINI_NANO -> safeNanoSummarize(
 			articleText = articleText,
 			fallbackPrompt = "$systemPrompt\n\n$userPrompt",
 			recapDepth = recapDepth,
@@ -141,9 +142,9 @@ class NemuriAiRouter @Inject constructor(
 		var lastError: Throwable? = null
 
 		// 1. Open-ended Gemini Nano via AICore when provisioned
-		val diag = geminiNanoClient.checkDiagnostics()
+		val diag = safeCheckNanoDiagnostics()
 		if (diag.availability == NanoAvailability.AVAILABLE && diag.supportsOpenPrompt) {
-			val nanoRes = geminiNanoClient.generate("$systemPrompt\n\n$userPrompt")
+			val nanoRes = safeNanoGenerate("$systemPrompt\n\n$userPrompt")
 			if (nanoRes.isSuccess) {
 				return Result.success(
 					AiGenerationResult(
@@ -167,11 +168,37 @@ class NemuriAiRouter @Inject constructor(
 		recapDepth: RecapDepth,
 	): Result<AiGenerationResult> {
 		var lastError: Throwable? = null
+		var attemptedLocal = false
 
-		// 1. On-device Gemini Nano (Prompt -> Summarizer fallback for S25 / SM8750)
-		val diag = geminiNanoClient.checkDiagnostics()
+		// Hybrid routing in Auto mode:
+		// - Detailed recaps prefer loaded local GPU model (e.g. Gemma 4 E2B .litertlm) when available,
+		//   falling back to onboard Gemini Nano (AICore).
+		// - Brief recaps prefer instant zero-RAM Gemini Nano (AICore) first.
+		if (recapDepth == RecapDepth.DETAILED && localLlmClient.hasReadyModel()) {
+			attemptedLocal = true
+			val localRes = localLlmClient.generate(
+				systemPrompt = systemPrompt,
+				userPrompt = userPrompt,
+				maxTokens = maxTokens,
+				preferGpuOverride = true,
+			)
+			if (localRes.isSuccess) {
+				val (text, label) = localRes.getOrThrow()
+				return Result.success(
+					AiGenerationResult(
+						text = text,
+						engineUsed = label,
+						isAiGenerated = true,
+					),
+				)
+			}
+			lastError = localRes.exceptionOrNull()
+		}
+
+		// On-device Gemini Nano (Prompt -> Summarizer fallback for S25 / SM8750)
+		val diag = safeCheckNanoDiagnostics()
 		if (diag.availability == NanoAvailability.AVAILABLE && (diag.supportsOpenPrompt || diag.supportsSummarization)) {
-			val nanoRes = geminiNanoClient.summarize(
+			val nanoRes = safeNanoSummarize(
 				articleText = articleText,
 				fallbackPrompt = "$systemPrompt\n\n$userPrompt",
 				recapDepth = recapDepth,
@@ -189,7 +216,13 @@ class NemuriAiRouter @Inject constructor(
 			lastError = nanoRes.exceptionOrNull()
 		}
 
-		return fallbackAfterNano(systemPrompt, userPrompt, maxTokens, lastError)
+		return fallbackAfterNano(
+			systemPrompt = systemPrompt,
+			userPrompt = userPrompt,
+			maxTokens = maxTokens,
+			initialError = lastError,
+			skipLocal = attemptedLocal,
+		)
 	}
 
 	private suspend fun fallbackAfterNano(
@@ -197,6 +230,7 @@ class NemuriAiRouter @Inject constructor(
 		userPrompt: String,
 		maxTokens: Int,
 		initialError: Throwable?,
+		skipLocal: Boolean = false,
 	): Result<AiGenerationResult> {
 		var lastError: Throwable? = initialError
 
@@ -230,9 +264,14 @@ class NemuriAiRouter @Inject constructor(
 			lastError = remoteRes.exceptionOrNull()
 		}
 
-		// 4. Downloaded On-Device Local LLM fallback (LiteRT-LM CPU/GPU)
-		if (localLlmClient.hasReadyModel()) {
-			val localRes = localLlmClient.generate(systemPrompt, userPrompt, maxTokens)
+		// 4. Downloaded On-Device Local LLM fallback (LiteRT-LM GPU -> CPU)
+		if (!skipLocal && localLlmClient.hasReadyModel()) {
+			val localRes = localLlmClient.generate(
+				systemPrompt = systemPrompt,
+				userPrompt = userPrompt,
+				maxTokens = maxTokens,
+				preferGpuOverride = true,
+			)
 			if (localRes.isSuccess) {
 				val (text, label) = localRes.getOrThrow()
 				return Result.success(
@@ -272,6 +311,7 @@ class NemuriAiRouter @Inject constructor(
 				userPrompt = "Health check",
 				articleText = HEALTH_CHECK_ARTICLE,
 				maxTokens = 24,
+				recapDepth = RecapDepth.BRIEF,
 			)
 		} else {
 			generate(
@@ -314,6 +354,54 @@ class NemuriAiRouter @Inject constructor(
 				)
 			},
 		)
+	}
+
+	private suspend fun safeCheckNanoDiagnostics(): NanoDiagnostics = runCatching {
+		geminiNanoClient.checkDiagnostics()
+	}.getOrElse { err ->
+		if (err is CancellationException) throw err
+		NanoDiagnostics(
+			availability = NanoAvailability.UNAVAILABLE,
+			detailMessage = err.message?.trim().orEmpty().ifBlank { "AICore unavailable on this device" },
+			supportsOpenPrompt = false,
+			supportsSummarization = false,
+		)
+	}
+
+	private suspend fun safeCheckNanoAvailability(): NanoAvailability = runCatching {
+		geminiNanoClient.checkAvailability()
+	}.getOrElse { err ->
+		if (err is CancellationException) throw err
+		NanoAvailability.UNAVAILABLE
+	}
+
+	private suspend fun safeDownloadNanoModel(onProgress: (Long) -> Unit): Result<Unit> = runCatching {
+		geminiNanoClient.triggerDownload(onProgress)
+	}.getOrElse { err ->
+		if (err is CancellationException) throw err
+		Result.failure(err)
+	}
+
+	private suspend fun safeNanoGenerate(prompt: String): Result<String> = runCatching {
+		geminiNanoClient.generate(prompt)
+	}.getOrElse { err ->
+		if (err is CancellationException) throw err
+		Result.failure(err)
+	}
+
+	private suspend fun safeNanoSummarize(
+		articleText: String,
+		fallbackPrompt: String,
+		recapDepth: RecapDepth,
+	): Result<Pair<String, String>> = runCatching {
+		geminiNanoClient.summarize(
+			articleText = articleText,
+			fallbackPrompt = fallbackPrompt,
+			recapDepth = recapDepth,
+		)
+	}.getOrElse { err ->
+		if (err is CancellationException) throw err
+		Result.failure(err)
 	}
 
 	private fun hasRemoteConfigured(): Boolean {

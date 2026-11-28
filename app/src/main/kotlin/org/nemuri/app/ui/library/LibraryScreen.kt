@@ -393,7 +393,7 @@ fun LibraryScreen(
 								LibraryQuickFilter.DOWNLOADED -> NemuriTheme.colors.healthy
 								LibraryQuickFilter.NEW_CHAPTERS -> NemuriTheme.colors.amber
 								LibraryQuickFilter.ONGOING -> Color(0xFF60A5FA)
-								LibraryQuickFilter.COMPLETED -> NemuriTheme.colors.mergePurple
+								LibraryQuickFilter.COMPLETED -> NemuriTheme.colors.secondary
 							}
 							LibraryStatusChip(
 								label = filter.label,

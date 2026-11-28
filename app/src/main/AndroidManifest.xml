@@ -6,6 +6,7 @@
 	<application
 		android:name=".NemuriApp"
 		android:allowBackup="true"
+		android:extractNativeLibs="true"
 		android:restoreAnyVersion="true"
 		android:icon="@mipmap/ic_launcher"
 		android:roundIcon="@mipmap/ic_launcher_round"
@@ -18,6 +19,20 @@
 		android:enableOnBackInvokedCallback="true"
 		android:theme="@style/Theme.Nemuri"
 		tools:ignore="UnusedAttribute,RemoveWorkManagerInitializer">
+
+		<!-- Required on Android 12+ so Qualcomm QNN Hexagon NPU (SM8750/SM8x) and OpenCL GPU delegates can load vendor DSP/GPU libraries -->
+		<uses-native-library
+			android:name="libcdsprpc.so"
+			android:required="false" />
+		<uses-native-library
+			android:name="libOpenCL.so"
+			android:required="false" />
+		<uses-native-library
+			android:name="libOpenCL-pixel.so"
+			android:required="false" />
+		<uses-native-library
+			android:name="libGLES_mali.so"
+			android:required="false" />
 
 		<activity
 			android:name=".MainActivity"

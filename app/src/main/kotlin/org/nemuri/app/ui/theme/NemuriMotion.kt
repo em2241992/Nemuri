@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.Dp
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -42,6 +43,7 @@ fun <T> nemuriEffectsSpring() = spring<T>(
 
 @Composable
 fun rememberShouldReduceMotion(): Boolean {
+	if (LocalInspectionMode.current) return false
 	val context = LocalContext.current
 	return remember(context) {
 		val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager

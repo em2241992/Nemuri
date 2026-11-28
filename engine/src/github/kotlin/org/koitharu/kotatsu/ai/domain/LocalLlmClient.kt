@@ -1,9 +1,11 @@
 package org.koitharu.kotatsu.ai.domain
 
 import android.app.ActivityManager
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.os.Build
 import android.os.Process
+import android.system.Os
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -13,11 +15,14 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +88,7 @@ class LocalLlmClient @Inject constructor(
 		systemPrompt: String,
 		userPrompt: String,
 		maxTokens: Int = 320,
+		preferGpuOverride: Boolean = false,
 	): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
 		if (!isRuntimeSupported) {
 			return@withContext Result.failure(
@@ -96,9 +102,18 @@ class LocalLlmClient @Inject constructor(
 		val (entry, modelFile) = resolved
 
 		engineMutex.withLock {
+			currentCoroutineContext().ensureActive()
 			idleUnloadJob?.cancel()
+			if (!modelFile.isFile) {
+				closeLoadedEngineLocked()
+				modelManager.resolveActiveReadyModel()
+				return@withContext Result.failure(
+					IllegalStateException("Selected local .litertlm file is missing — switched back to Auto (Gemini Nano)"),
+				)
+			}
 			try {
-				val engine = getOrLoadEngineLocked(entry, modelFile)
+				val engine = getOrLoadEngineLocked(entry, modelFile, preferGpuOverride)
+				currentCoroutineContext().ensureActive()
 				val convConfig = ConversationConfig(
 					Contents.of(systemPrompt),
 					emptyList(),
@@ -113,6 +128,7 @@ class LocalLlmClient @Inject constructor(
 					ThinkingConfig(false),
 				)
 				val replyText = engine.createConversation(convConfig).use { conversation ->
+					currentCoroutineContext().ensureActive()
 					val msg = conversation.sendMessage(userPrompt)
 					val raw = msg.contents.contents
 						.filterIsInstance<Content.Text>()
@@ -120,14 +136,17 @@ class LocalLlmClient @Inject constructor(
 						.trim()
 					THINK_BLOCK_REGEX.replace(raw, "").trim()
 				}
+				currentCoroutineContext().ensureActive()
 				if (replyText.isEmpty()) {
 					Result.failure(IllegalStateException("Local model returned an empty response"))
 				} else {
 					Result.success(replyText to "Local ${entry.title} ($loadedBackendLabel)")
 				}
+			} catch (ce: CancellationException) {
+				throw ce
 			} catch (t: Throwable) {
 				closeLoadedEngineLocked()
-				Result.failure(t)
+				Result.failure(mapFriendlyLiteRtError(t))
 			} finally {
 				if (loadedEngine != null) {
 					scheduleIdleUnloadLocked()
@@ -145,15 +164,38 @@ class LocalLlmClient @Inject constructor(
 		}
 	}
 
+	fun unloadAsync() {
+		if (!_isModelLoadedInRam.value && !engineMutex.isLocked) return
+		idleScope.launch {
+			unloadNow()
+		}
+	}
+
+	@Suppress("DEPRECATION")
+	fun onTrimMemory(level: Int) {
+		if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+			unloadAsync()
+		}
+	}
+
 	private fun getOrLoadEngineLocked(
 		entry: LocalLlmCatalogEntry,
 		modelFile: File,
+		preferGpuOverride: Boolean = false,
 	): Engine {
-		val requestedAccel = LocalLlmAccelerator.fromKey(settings.aiLocalAccelerator)
+		if (!modelFile.isFile) {
+			throw IllegalStateException("Local .litertlm file not found on disk")
+		}
+		val configuredAccel = LocalLlmAccelerator.fromKey(settings.aiLocalAccelerator)
+		val effectiveAccel = if (preferGpuOverride && entry.requiredSocModel.isNullOrBlank()) {
+			LocalLlmAccelerator.GPU
+		} else {
+			configuredAccel
+		}
 		val existing = loadedEngine
 		if (existing != null &&
 			loadedModelPath == modelFile.absolutePath &&
-			loadedRequestedAccel == requestedAccel
+			loadedRequestedAccel == effectiveAccel
 		) {
 			return existing
 		}
@@ -162,36 +204,22 @@ class LocalLlmClient @Inject constructor(
 		checkAvailableRamOrThrow(entry.minRamMb)
 
 		val cacheDir = File(context.cacheDir, "litertlm_cache").apply { mkdirs() }
+		val nativeLibDir = context.applicationInfo.nativeLibraryDir.orEmpty()
+		if (nativeLibDir.isNotBlank()) {
+			runCatching {
+				Os.setenv(
+					"ADSP_LIBRARY_PATH",
+					"$nativeLibDir;/vendor/dsp/cdsp;/vendor/lib/rfsa/adsp;/system/lib/rfsa/adsp;/dsp",
+					true,
+				)
+			}
+		}
 		val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+		val preferNpu = !preferGpuOverride &&
+			(effectiveAccel == LocalLlmAccelerator.NPU || !entry.requiredSocModel.isNullOrBlank())
+		var firstBackendFailure: Throwable? = null
 
-		val (engine, actualBackend) = if (requestedAccel == LocalLlmAccelerator.GPU) {
-			val gpuAttempt = runCatching {
-				val cfg = EngineConfig(
-					modelFile.absolutePath,
-					Backend.GPU(),
-					null,
-					null,
-					MAX_CONTEXT_TOKENS,
-					null,
-					cacheDir.absolutePath,
-				)
-				Engine(cfg).apply { initialize() }
-			}
-			if (gpuAttempt.isSuccess) {
-				gpuAttempt.getOrThrow() to "GPU"
-			} else {
-				val cpuCfg = EngineConfig(
-					modelFile.absolutePath,
-					Backend.CPU(threads, null),
-					null,
-					null,
-					MAX_CONTEXT_TOKENS,
-					null,
-					cacheDir.absolutePath,
-				)
-				Engine(cpuCfg).apply { initialize() } to "CPU"
-			}
-		} else {
+		fun buildCpuEngine(): Pair<Engine, String> {
 			val cpuCfg = EngineConfig(
 				modelFile.absolutePath,
 				Backend.CPU(threads, null),
@@ -201,15 +229,77 @@ class LocalLlmClient @Inject constructor(
 				null,
 				cacheDir.absolutePath,
 			)
-			Engine(cpuCfg).apply { initialize() } to "CPU"
+			return try {
+				Engine(cpuCfg).apply { initialize() } to "CPU"
+			} catch (t: Throwable) {
+				throw mapFriendlyLiteRtError(firstBackendFailure ?: t)
+			}
+		}
+
+		fun tryGpuEngine(): Pair<Engine, String>? = runCatching {
+			val cfg = EngineConfig(
+				modelFile.absolutePath,
+				Backend.GPU(),
+				null,
+				null,
+				MAX_CONTEXT_TOKENS,
+				null,
+				cacheDir.absolutePath,
+			)
+			Engine(cfg).apply { initialize() } to "GPU"
+		}.onFailure { err ->
+			if (firstBackendFailure == null) firstBackendFailure = err
+		}.getOrNull()
+
+		fun tryNpuEngine(): Pair<Engine, String>? {
+			if (nativeLibDir.isBlank()) return null
+			return runCatching {
+				val cfg = EngineConfig(
+					modelFile.absolutePath,
+					Backend.NPU(nativeLibraryDir = nativeLibDir),
+					null,
+					null,
+					MAX_CONTEXT_TOKENS,
+					null,
+					cacheDir.absolutePath,
+				)
+				Engine(cfg).apply { initialize() } to "Hexagon NPU"
+			}.onFailure { err ->
+				if (firstBackendFailure == null) firstBackendFailure = err
+			}.getOrNull()
+		}
+
+		val (engine, actualBackend) = when {
+			preferNpu -> tryNpuEngine() ?: tryGpuEngine() ?: buildCpuEngine()
+			effectiveAccel == LocalLlmAccelerator.GPU -> tryGpuEngine() ?: buildCpuEngine()
+			else -> buildCpuEngine()
 		}
 
 		loadedEngine = engine
 		loadedModelPath = modelFile.absolutePath
 		loadedBackendLabel = actualBackend
-		loadedRequestedAccel = requestedAccel
+		loadedRequestedAccel = effectiveAccel
 		_isModelLoadedInRam.value = true
 		return engine
+	}
+
+	private fun mapFriendlyLiteRtError(t: Throwable): Throwable {
+		var cur: Throwable? = t
+		var depth = 0
+		while (cur != null && depth < 6) {
+			val msg = cur.message.orEmpty()
+			if (msg.contains("Input tensor not found", ignoreCase = true) ||
+				msg.contains("NOT_FOUND", ignoreCase = true)
+			) {
+				return IllegalStateException(
+					"Incompatible .litertlm tensor format — use Gemma 4 E2B .litertlm on GPU or Auto (Gemini Nano)",
+					t,
+				)
+			}
+			cur = cur.cause
+			depth++
+		}
+		return t
 	}
 
 	private fun checkAvailableRamOrThrow(minRequiredMb: Int) {

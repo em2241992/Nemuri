@@ -741,6 +741,7 @@ fun BoxScope.NemuriListNavigationOverlay(
 	visibleOverride: Boolean = true,
 	enableSmartPill: Boolean = true,
 	extraQuickButtonsBottomOffset: Dp = 0.dp,
+	extraCenterBottomOffset: Dp = 0.dp,
 	topTrackPadding: Dp = 8.dp,
 	labelForIndex: ((Int) -> String?)? = null,
 	bottomCenterAccessory: (@Composable () -> Unit)? = null,
@@ -801,7 +802,7 @@ fun BoxScope.NemuriListNavigationOverlay(
 				.padding(
 					start = 56.dp,
 					end = 56.dp,
-					bottom = centerClearance,
+					bottom = centerClearance + extraCenterBottomOffset,
 				),
 		) {
 			if (enableSmartPill) {

@@ -314,7 +314,7 @@ fun AiSettingsScreen(
 			}
 
 			item {
-				SettingsGroupCard("On-Device Local LLM (LiteRT-LM CPU/GPU)") {
+				SettingsGroupCard("On-Device Local LLM (LiteRT-LM NPU/GPU/CPU)") {
 					Column(
 						modifier = Modifier.padding(14.dp),
 						verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -327,7 +327,7 @@ fun AiSettingsScreen(
 							Column(modifier = Modifier.weight(1f)) {
 								Text(
 									text = if (state.isLocalRuntimeSupported) {
-										"Offline CPU/GPU Fallback Ready"
+										"Offline NPU/GPU/CPU Runtime Ready"
 									} else {
 										"Requires 64-bit GitHub build"
 									},

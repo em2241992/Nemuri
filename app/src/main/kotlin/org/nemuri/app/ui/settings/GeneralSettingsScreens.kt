@@ -105,16 +105,19 @@ import org.koitharu.kotatsu.core.prefs.TrackerDownloadStrategy
 import org.koitharu.kotatsu.core.prefs.TriStateOption
 import org.koitharu.kotatsu.local.data.CacheDir
 import org.koitharu.kotatsu.reader.domain.NeuralAccelerator
+import org.koitharu.kotatsu.reader.domain.ReaderShaderConfig
 import org.koitharu.kotatsu.reader.domain.ReaderShaderPreset
 import org.koitharu.kotatsu.reader.domain.UpscaleEffect
 import org.nemuri.app.BuildConfig
 import org.nemuri.app.navigation.SettingsSection
+import org.nemuri.app.ui.components.AiUpscalePreviewSheet
 import org.nemuri.app.ui.components.CornerSafeCoverProgressBar
 import org.nemuri.app.ui.components.HardwareTelemetryStrip
 import org.nemuri.app.ui.components.NonWrappingBadgeText
 import org.nemuri.app.ui.components.cornerSafeBadgeInset
 import org.nemuri.app.ui.components.cornerSafeBottomPadding
 import org.nemuri.app.ui.components.cornerSafeHorizontalPadding
+import org.nemuri.app.ui.components.resolveComputeDelegateCapability
 import org.nemuri.app.ui.theme.NemuriTheme
 import org.nemuri.app.ui.theme.nemuriSpatialSpring
 import org.nemuri.app.ui.theme.paletteDisplayName
@@ -1310,6 +1313,7 @@ fun ReadingSettingsScreen(
 	var showScrubberEdgeDialog by remember { mutableStateOf(false) }
 	var showShaderDialog by remember { mutableStateOf(false) }
 	var showAccelDialog by remember { mutableStateOf(false) }
+	var showUpscalePreviewSheet by remember { mutableStateOf(false) }
 	val importOnnxLauncher = rememberLauncherForActivityResult(
 		contract = ActivityResultContracts.OpenDocument(),
 	) { uri ->
@@ -1455,11 +1459,36 @@ fun ReadingSettingsScreen(
 					steps = 6,
 					onValueChange = viewModel::setReaderShaderStrength,
 				)
+				if (UpscaleEffect.isSupported || state.isNeuralUpscaleSupported) {
+					SettingsRowDivider()
+					val previewCtaShape = NemuriTheme.shape(10.dp)
+					Button(
+						onClick = { showUpscalePreviewSheet = true },
+						colors = ButtonDefaults.buttonColors(
+							containerColor = NemuriTheme.colors.tealContainer,
+							contentColor = NemuriTheme.colors.cyan,
+						),
+						shape = previewCtaShape,
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 14.dp, vertical = 10.dp)
+							.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f), previewCtaShape),
+					) {
+						Icon(
+							imageVector = Icons.Default.AutoAwesome,
+							contentDescription = null,
+							tint = NemuriTheme.colors.cyan,
+							modifier = Modifier.size(16.dp),
+						)
+						Spacer(Modifier.width(6.dp))
+						Text("Interactive AI Upscaling Preview")
+					}
+				}
 			}
 		}
 
 		item {
-			SettingsGroupCard("Neural 2x Page Upscaler (ONNX)") {
+			SettingsGroupCard("Neural 2x Page Upscaler (NPU / GPU / ONNX)") {
 				HardwareTelemetryStrip(
 					activeDelegateOverride = state.activeNeuralDelegateLabel,
 					modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -1468,9 +1497,9 @@ fun ReadingSettingsScreen(
 				SettingsToggleRow(
 					title = "Enable Neural 2x Upscaling",
 					subtitle = if (state.isNeuralUpscaleSupported) {
-						"Tiled 256px super-resolution; skips ultra-tall webtoon strips & Battery Saver"
+						"Tiled 256/512px super-resolution; skips ultra-tall webtoon strips & Battery Saver"
 					} else {
-						"Available in GitHub builds with ONNX Runtime"
+						"Available in GitHub builds with NPU/GPU/ONNX Runtime"
 					},
 					checked = state.isNeuralUpscaleEnabled,
 					enabled = state.isNeuralUpscaleSupported,
@@ -1478,12 +1507,81 @@ fun ReadingSettingsScreen(
 				)
 				if (state.isNeuralUpscaleSupported) {
 					SettingsRowDivider()
-					SettingsChoiceRow(
-						title = "Hardware Accelerator",
-						subtitle = "${state.neuralAccelerator.subtitle} • Active: ${state.activeNeuralDelegateLabel}",
-						currentLabel = state.neuralAccelerator.label,
-						onClick = { showAccelDialog = true },
-					)
+					Column(
+						modifier = Modifier
+							.fillMaxWidth()
+							.padding(horizontal = 16.dp, vertical = 12.dp),
+						verticalArrangement = Arrangement.spacedBy(8.dp),
+					) {
+						val (_, accelSubtitle) = remember(
+							state.neuralAccelerator,
+							state.activeNeuralDelegateLabel,
+							state.isNeuralUpscaleSupported,
+						) {
+							resolveComputeDelegateCapability(
+								selected = state.neuralAccelerator,
+								activeDelegateLabel = state.activeNeuralDelegateLabel,
+								isNeuralSupported = state.isNeuralUpscaleSupported,
+							)
+						}
+						val pillShape = NemuriTheme.shape(10.dp)
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.SpaceBetween,
+							verticalAlignment = Alignment.CenterVertically,
+						) {
+							Text(
+								text = "Compute Delegate",
+								style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+								color = NemuriTheme.colors.textPrimary,
+							)
+							Text(
+								text = state.activeNeuralDelegateLabel,
+								style = MaterialTheme.typography.labelSmall,
+								color = NemuriTheme.colors.cyan,
+							)
+						}
+						Row(
+							modifier = Modifier.fillMaxWidth(),
+							horizontalArrangement = Arrangement.spacedBy(8.dp),
+						) {
+							NeuralAccelerator.entries.forEach { accel ->
+								val selected = state.neuralAccelerator == accel
+								val label = when (accel) {
+									NeuralAccelerator.AUTO -> "Auto"
+									NeuralAccelerator.NPU -> "NPU"
+									NeuralAccelerator.GPU -> "GPU"
+									NeuralAccelerator.CPU -> "CPU"
+								}
+								Surface(
+									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
+									shape = pillShape,
+									border = BorderStroke(
+										1.dp,
+										if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
+									),
+									modifier = Modifier
+										.weight(1f)
+										.clip(pillShape)
+										.clickable { viewModel.setNeuralAccelerator(accel) },
+								) {
+									Text(
+										text = label,
+										style = MaterialTheme.typography.labelMedium,
+										fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+										color = if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.textSecondary,
+										textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+										modifier = Modifier.padding(vertical = 8.dp),
+									)
+								}
+							}
+						}
+						Text(
+							text = accelSubtitle,
+							style = MaterialTheme.typography.bodySmall,
+							color = NemuriTheme.colors.textMuted,
+						)
+					}
 					SettingsRowDivider()
 					SettingsToggleRow(
 						title = "Pre-Upscale Ahead",
@@ -1789,6 +1887,29 @@ fun ReadingSettingsScreen(
 			selected = state.neuralAccelerator,
 			onSelect = viewModel::setNeuralAccelerator,
 			onDismiss = { showAccelDialog = false },
+		)
+	}
+
+	if (showUpscalePreviewSheet) {
+		AiUpscalePreviewSheet(
+			shaderConfig = ReaderShaderConfig(
+				preset = state.readerShaderPreset,
+				descreen = state.isReaderDescreenEnabled,
+				inkLevels = state.isReaderInkLevelsEnabled,
+				strength = state.readerShaderStrength,
+			),
+			isNeuralUpscaleEnabled = state.isNeuralUpscaleEnabled,
+			isNeuralUpscaleSupported = state.isNeuralUpscaleSupported,
+			neuralAccelerator = state.neuralAccelerator,
+			activeDelegateLabel = state.activeNeuralDelegateLabel,
+			hasReadyNeuralModel = state.neuralCatalog.any { it.isSelected && it.isDownloaded },
+			onSelectShaderPreset = viewModel::setReaderShaderPreset,
+			onSetInkLevels = viewModel::setReaderInkLevels,
+			onSetDescreen = viewModel::setReaderDescreen,
+			onSetNeuralUpscaleEnabled = viewModel::setNeuralUpscaleEnabled,
+			onSelectNeuralAccelerator = viewModel::setNeuralAccelerator,
+			onOpenUpscalingSettings = { showUpscalePreviewSheet = false },
+			onDismiss = { showUpscalePreviewSheet = false },
 		)
 	}
 }

@@ -175,6 +175,7 @@ data class ReaderUiState(
 	val hasReadyNeuralModel: Boolean = false,
 	val activeNeuralModelLabel: String = "",
 	val activeNeuralDelegate: String = "Idle (Ready)",
+	val isNeuralPreloadEnabled: Boolean = true,
 	val neuralCatalog: List<NeuralModelUiItem> = emptyList(),
 	val neuralDownloadState: NeuralModelDownloadState = NeuralModelDownloadState(),
 	val neuralCacheBytes: Long = 0L,
@@ -258,6 +259,7 @@ class ReaderViewModel @Inject constructor(
 				),
 				isNeuralUpscaleSupported = pageUpscaleEngine.isSupported,
 				isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
+				isNeuralPreloadEnabled = settings.isNeuralPreloadEnabled,
 				neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
 				selectedNeuralModelId = settings.neuralUpscaleModelId,
 				isSeamlessStitchEnabled = settings.isReaderSeamlessStitchEnabled,
@@ -866,6 +868,11 @@ class ReaderViewModel @Inject constructor(
 		refreshNeuralUiState(bumpRevision = false)
 	}
 
+	fun setNeuralPreloadEnabled(enabled: Boolean) {
+		settings.isNeuralPreloadEnabled = enabled
+		_uiState.update { it.copy(isNeuralPreloadEnabled = enabled) }
+	}
+
 	fun selectNeuralModel(modelId: String) {
 		settings.neuralUpscaleModelId = modelId
 		refreshNeuralUiState(bumpRevision = settings.isNeuralUpscaleEnabled)
@@ -936,6 +943,7 @@ class ReaderViewModel @Inject constructor(
 		_uiState.update { state ->
 			state.copy(
 				isNeuralUpscaleEnabled = settings.isNeuralUpscaleEnabled,
+				isNeuralPreloadEnabled = settings.isNeuralPreloadEnabled,
 				neuralAccelerator = NeuralAccelerator.fromKey(settings.neuralUpscaleAccelerator),
 				selectedNeuralModelId = selectedId,
 				hasReadyNeuralModel = ready != null,

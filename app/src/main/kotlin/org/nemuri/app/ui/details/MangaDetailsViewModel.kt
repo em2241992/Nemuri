@@ -320,6 +320,9 @@ class MangaDetailsViewModel @Inject constructor(
 	}
 
 	fun setDetailsUiMode(mode: DetailsUiMode) {
+		if (_uiState.value.detailsUiMode != mode) {
+			_uiState.value = _uiState.value.copy(detailsUiMode = mode)
+		}
 		settings.detailsUiMode = mode
 	}
 

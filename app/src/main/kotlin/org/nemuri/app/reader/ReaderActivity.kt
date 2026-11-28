@@ -184,6 +184,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
@@ -229,11 +230,13 @@ import org.nemuri.app.browser.toWebViewChallengeAction
 import org.nemuri.app.navigation.EXTRA_OPEN_MIGRATE_MANGA_ID
 import org.nemuri.app.ui.components.AiUpscalePreviewSheet
 import org.nemuri.app.ui.components.HardwareTelemetryStrip
+import org.nemuri.app.ui.components.InlineAiUpscaleSplitPreview
 import org.nemuri.app.ui.components.NemuriCapsuleToastHost
 import org.nemuri.app.ui.components.NemuriErrorState
 import org.nemuri.app.ui.components.NemuriLoadingState
 import org.nemuri.app.ui.components.NemuriModalSheet
 import org.nemuri.app.ui.components.NemuriToastManager
+import org.nemuri.app.ui.components.resolveComputeDelegateCapability
 import org.nemuri.app.security.AppLockManager
 import org.nemuri.app.security.AppLockShieldOverlay
 import org.nemuri.app.security.ObserveWindowSecurity
@@ -282,6 +285,7 @@ class ReaderActivity : FragmentActivity() {
 				}
 			}
 		}
+		window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
 		applySystemBarsVisibility(false)
 
 		setContent {
@@ -294,11 +298,13 @@ class ReaderActivity : FragmentActivity() {
 					m != null && (m.contentRating == org.koitharu.kotatsu.parsers.model.ContentRating.ADULT ||
 						m.tags.any { it.title.lowercase() in setOf("18+", "adult", "erotica", "pornographic", "smut", "hentai") })
 				}
+				var isUpscalePreviewOpen by remember { mutableStateOf(false) }
 
 				ObserveWindowSecurity(
 					isSessionIncognito = uiState.isIncognito,
 					isNsfwContent = isMangaNsfw,
 					isAppLocked = isAppLocked,
+					allowScreenshotsOverride = isUpscalePreviewOpen,
 				)
 
 				var manualOrientation by rememberSaveable {
@@ -340,6 +346,7 @@ class ReaderActivity : FragmentActivity() {
 							manualOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 						},
 						onSystemBarsVisibilityChange = { readerWantsSystemBars = it },
+						onPreviewSheetVisibilityChange = { isUpscalePreviewOpen = it },
 						onRegisterVolumeHandler = { volumeKeyCallback = it },
 						onBack = { finish() },
 					)
@@ -421,6 +428,7 @@ private fun ReaderRootScreen(
 	onToggleManualRotate: () -> Unit,
 	onResetAutoRotate: () -> Unit,
 	onSystemBarsVisibilityChange: (Boolean) -> Unit,
+	onPreviewSheetVisibilityChange: (Boolean) -> Unit,
 	onRegisterVolumeHandler: (((Boolean) -> Unit)?) -> Unit,
 	onBack: () -> Unit,
 ) {
@@ -441,6 +449,10 @@ private fun ReaderRootScreen(
 		onSystemBarsVisibilityChange(
 			showHud || showChaptersSheet || showSettingsSheet || showAiPreviewSheet || quickActionPage != null,
 		)
+	}
+
+	LaunchedEffect(showAiPreviewSheet, compareSplitPage) {
+		onPreviewSheetVisibilityChange(showAiPreviewSheet || compareSplitPage != null)
 	}
 
 	val cfLauncher = rememberLauncherForActivityResult(CloudFlareActivity.Contract()) { solved ->
@@ -1121,8 +1133,8 @@ private fun ReaderRootScreen(
 							modifier = Modifier
 								.clip(hudPillShape)
 								.clickable {
-									aiPreviewPage = uiState.pages.getOrNull(uiState.currentPageIndex)
-									showAiPreviewSheet = true
+									settingsSheetUpscalingOnly = true
+									showSettingsSheet = true
 								},
 						) {
 							Row(
@@ -4036,12 +4048,12 @@ private fun ReaderSettingsModalSheet(
 	NemuriModalSheet(
 		title = when {
 			uiState.isTextMode -> "Typography & Reader"
-			upscalingOnly -> "Upscaling Settings"
+			upscalingOnly -> "Enhance & AI Upscaling"
 			else -> "Reader & Tools"
 		},
 		subtitle = when {
 			uiState.isTextMode -> uiState.chapterTitle
-			upscalingOnly -> "GPU Shaders, Neural 2x & Compute Delegate"
+			upscalingOnly -> "Live Preview • GPU Shaders • Neural 2x NPU/GPU"
 			else -> "${uiState.readerMode.name.lowercase().replaceFirstChar { it.uppercase() }} • ${uiState.scrubberEdge.label}"
 		},
 		onDismiss = onDismiss,
@@ -4791,15 +4803,49 @@ private fun ReaderSettingsModalSheet(
 			}
 
 			if (!uiState.isTextMode && upscalingOnly) {
-				// UPSCALER & NEURAL MODELS (Dedicated Upscaling Settings opened from ✨ Enhance)
-				Text(
-					text = "UPSCALER & NEURAL SUPER-RESOLUTION",
-					style = MaterialTheme.typography.labelSmall,
-					fontWeight = FontWeight.Bold,
-					color = NemuriTheme.colors.cyan,
-				)
+				// ENHANCE & AI UPSCALING (Hardware telemetry, live interactive split preview, full shaders, delegate, preload, models & cache)
 				HardwareTelemetryStrip(
 					activeDelegateOverride = uiState.activeNeuralDelegate,
+				)
+
+				var inlineRawUri by remember(currentPage?.id) { mutableStateOf<Uri?>(null) }
+				var inlineEnhancedUri by remember(currentPage?.id, uiState.neuralRevision) { mutableStateOf<Uri?>(null) }
+				LaunchedEffect(currentPage?.id, uiState.neuralRevision, uiState.isNeuralUpscaleEnabled, uiState.hasReadyNeuralModel) {
+					if (currentPage != null) {
+						inlineRawUri = viewModel.loadRawPageImage(currentPage).getOrNull()?.first
+						inlineEnhancedUri = if (uiState.isNeuralUpscaleEnabled && uiState.hasReadyNeuralModel) {
+							viewModel.loadPageImage(currentPage, false).getOrNull()?.first
+						} else {
+							null
+						}
+					} else {
+						inlineRawUri = null
+						inlineEnhancedUri = null
+					}
+				}
+				val (inlineDelegateBadge, inlineDelegateSubtitle) = remember(
+					uiState.neuralAccelerator,
+					uiState.activeNeuralDelegate,
+					uiState.isNeuralUpscaleSupported,
+				) {
+					resolveComputeDelegateCapability(
+						selected = uiState.neuralAccelerator,
+						activeDelegateLabel = uiState.activeNeuralDelegate,
+						isNeuralSupported = uiState.isNeuralUpscaleSupported,
+					)
+				}
+				val isWarmActive = uiState.colorFilter.isBookBackground || uiState.colorWarmth > 0.05f
+
+				InlineAiUpscaleSplitPreview(
+					shaderConfig = uiState.shaderConfig,
+					isNeuralUpscaleEnabled = uiState.isNeuralUpscaleEnabled,
+					isWarmBedtimeActive = isWarmActive,
+					activeDelegateBadge = inlineDelegateBadge,
+					previewUri = inlineRawUri,
+					enhancedPreviewUri = inlineEnhancedUri,
+					previewModel = currentPage?.toMangaPage(),
+					aspectRatioValue = 1.05f,
+					onExpandClick = onOpenAiPreview,
 				)
 
 				Text(
@@ -4807,6 +4853,7 @@ private fun ReaderSettingsModalSheet(
 					style = MaterialTheme.typography.labelLarge,
 					color = NemuriTheme.colors.cyan,
 				)
+				val chipShape = NemuriTheme.shape(10.dp)
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 					ReaderShaderPreset.entries.chunked(2).forEach { rowPresets ->
 						Row(
@@ -4817,15 +4864,15 @@ private fun ReaderSettingsModalSheet(
 								val selected = uiState.shaderConfig.preset == preset
 								Surface(
 									color = if (selected) NemuriTheme.colors.tealContainer else NemuriTheme.colors.surfaceElevated,
-									shape = RoundedCornerShape(10.dp),
+									shape = chipShape,
 									modifier = Modifier
 										.weight(1f)
 										.border(
 											1.dp,
 											if (selected) NemuriTheme.colors.cyan else NemuriTheme.colors.border,
-											RoundedCornerShape(10.dp),
+											chipShape,
 										)
-										.clip(RoundedCornerShape(10.dp))
+										.clip(chipShape)
 										.clickable(enabled = UpscaleEffect.isSupported) {
 											viewModel.setShaderPreset(preset)
 										},
@@ -4858,6 +4905,12 @@ private fun ReaderSettingsModalSheet(
 					enabled = UpscaleEffect.isSupported,
 					onCheckedChange = viewModel::setShaderInkLevels,
 				)
+				ReaderInlineSwitchRow(
+					title = "Bedtime Warm Contrast",
+					subtitle = "Applies soft warm paper tint + glare-free contrast boost",
+					checked = isWarmActive,
+					onCheckedChange = viewModel::applyBedtimeWarmPreset,
+				)
 				Text(
 					text = "Enhancement Intensity (${(uiState.shaderConfig.strength * 100f).roundToInt()}%)",
 					style = MaterialTheme.typography.labelLarge,
@@ -4870,30 +4923,6 @@ private fun ReaderSettingsModalSheet(
 					enabled = UpscaleEffect.isSupported && uiState.shaderConfig.isActive,
 					colors = SliderDefaults.colors(thumbColor = NemuriTheme.colors.cyan, activeTrackColor = NemuriTheme.colors.cyan),
 				)
-
-				if ((UpscaleEffect.isSupported || uiState.isNeuralUpscaleSupported) && currentPage != null) {
-					val previewCtaShape = NemuriTheme.shape(10.dp)
-					Button(
-						onClick = onOpenAiPreview,
-						colors = ButtonDefaults.buttonColors(
-							containerColor = NemuriTheme.colors.tealContainer,
-							contentColor = NemuriTheme.colors.cyan,
-						),
-						shape = previewCtaShape,
-						modifier = Modifier
-							.fillMaxWidth()
-							.border(1.dp, NemuriTheme.colors.cyan.copy(alpha = 0.55f), previewCtaShape),
-					) {
-						Icon(
-							imageVector = Icons.Default.AutoAwesome,
-							contentDescription = null,
-							tint = NemuriTheme.colors.cyan,
-							modifier = Modifier.size(16.dp),
-						)
-						Spacer(Modifier.width(6.dp))
-						Text("Interactive AI Upscaling Preview")
-					}
-				}
 
 				HorizontalDivider(color = NemuriTheme.colors.border, modifier = Modifier.padding(vertical = 2.dp))
 
@@ -4937,15 +4966,15 @@ private fun ReaderSettingsModalSheet(
 							val selected = uiState.neuralAccelerator == accel
 							Surface(
 								color = if (selected) NemuriTheme.colors.mergePurple.copy(alpha = 0.18f) else NemuriTheme.colors.surfaceElevated,
-								shape = RoundedCornerShape(10.dp),
+								shape = chipShape,
 								modifier = Modifier
 									.weight(1f)
 									.border(
 										1.dp,
 										if (selected) NemuriTheme.colors.mergePurple else NemuriTheme.colors.border,
-										RoundedCornerShape(10.dp),
+										chipShape,
 									)
-									.clip(RoundedCornerShape(10.dp))
+									.clip(chipShape)
 									.clickable { viewModel.setNeuralAccelerator(accel) },
 							) {
 								Text(
@@ -4964,6 +4993,20 @@ private fun ReaderSettingsModalSheet(
 							}
 						}
 					}
+					Text(
+						text = inlineDelegateSubtitle,
+						style = MaterialTheme.typography.bodySmall,
+						fontSize = 11.sp,
+						color = NemuriTheme.colors.textMuted,
+					)
+
+					ReaderInlineSwitchRow(
+						title = "Pre-Upscale Ahead",
+						subtitle = "Background-upscale 1–2 upcoming paged pages into WebP cache",
+						checked = uiState.isNeuralPreloadEnabled,
+						enabled = uiState.isNeuralUpscaleEnabled,
+						onCheckedChange = viewModel::setNeuralPreloadEnabled,
+					)
 
 					val dl = uiState.neuralDownloadState
 					val catalogModels = uiState.neuralCatalog.filter { it.isDownloadable || it.isDownloaded }
@@ -5618,7 +5661,10 @@ private fun ShaderSplitPreviewDialog(
 
 	Dialog(
 		onDismissRequest = onDismiss,
-		properties = DialogProperties(usePlatformDefaultWidth = false),
+		properties = DialogProperties(
+			usePlatformDefaultWidth = false,
+			securePolicy = SecureFlagPolicy.SecureOff,
+		),
 	) {
 		Surface(
 			color = NemuriTheme.colors.sheet,
